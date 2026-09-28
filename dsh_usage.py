@@ -1,8 +1,12 @@
 """Parse DeepSeek Harness (DSH) session logs for token usage accounting.
 
-DSH persists one session log per session under ``~/.dsh/sessions`` as
-Zstandard-compressed JSONL (``session.jsonl.zstd``) or plain JSONL
-(``session.jsonl``). Provider-reported usage rides on two event types, both
+DSH persists one session log per session under ``~/.dsh/sessions`` as JSONL,
+optionally Zstandard-compressed (``.zstd`` suffix). When the harness log
+format migrates, DSH writes a new *generation* file alongside the older
+ones: ``session.jsonl`` is generation 0 and ``session.vN.jsonl`` generation
+N (no leading zeros). Each generation file is a complete replay of the
+session in that format, so only the newest generation per session
+directory is read. Provider-reported usage rides on two event types, both
 keyed by ``(turn, step)``:
 
 - ``assistant/chunk`` with ``chunk.type == "usage"`` — an early sample that
@@ -21,6 +25,7 @@ reported for volume only and price to $0 through the pricing table.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections import defaultdict
 from datetime import date, datetime
@@ -59,10 +64,45 @@ def is_dsh_glm_model(model: str) -> bool:
     return provider == DSH_GLM_PROVIDER and remainder.startswith(DSH_GLM_MODEL_PREFIXES)
 
 
+_SESSION_LOG_RE = re.compile(r'^session(?:\.v([1-9]\d{0,9}))?\.jsonl(?:\.zstd)?$')
+
+
+def _session_log_generation(filename: str) -> int | None:
+    """DSH log generation from a filename, or None for non-log files.
+
+    Mirrors the harness filename contract: ``session.jsonl`` is generation
+    0; ``session.vN.jsonl`` (N >= 1, no leading zeros) is generation N; an
+    optional ``.zstd`` suffix marks the compressed encoding.
+    """
+    match = _SESSION_LOG_RE.match(filename)
+    if match is None:
+        return None
+    return int(match.group(1)) if match.group(1) else 0
+
+
 def _iter_session_files(sessions_dir: Path) -> list[Path]:
+    """One log file per session directory: the newest generation.
+
+    DSH rewrites a session to a new generation file when the log format
+    migrates and keeps the older files in place. Each generation replays
+    the whole session, so reading only the newest one per directory
+    reproduces the harness's own view of the session and never double
+    counts it.
+    """
     if not sessions_dir.is_dir():
         return []
-    return sorted(sessions_dir.glob('*/*/session.jsonl*'))
+    newest: dict[Path, tuple[int, Path]] = {}
+    for session_dir in sorted(sessions_dir.glob('*/*')):
+        if not session_dir.is_dir():
+            continue
+        for file_path in sorted(session_dir.iterdir()):
+            generation = _session_log_generation(file_path.name)
+            if generation is None:
+                continue
+            current = newest.get(session_dir)
+            if current is None or generation > current[0]:
+                newest[session_dir] = (generation, file_path)
+    return [path for _, path in sorted(newest.values(), key=lambda item: str(item[1]))]
 
 
 def _read_session_text(file_path: Path) -> str:
@@ -193,8 +233,8 @@ def iter_dsh_usage_records(
             session_id, samples = _parse_session_log(_read_session_text(file_path))
         except (OSError, RuntimeError):
             continue  # one unreadable session never blocks the rest
-        # A session directory can hold both encodings during a config change;
-        # count each session once.
+        # Safety net: one log per session directory is selected above, so a
+        # session id can only repeat across unusual layouts; count once.
         dedup_id = session_id or str(file_path)
         if dedup_id in seen_session_ids:
             continue

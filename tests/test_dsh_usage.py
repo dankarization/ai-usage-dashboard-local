@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dsh_usage import (  # noqa: E402
+    _session_log_generation,
     calc_dsh_cost,
     is_dsh_glm_model,
     iter_dsh_usage_records,
@@ -91,6 +92,59 @@ def test_header_config_attributes_chunk_only_steps(tmp_path: Path) -> None:
     assert chunk_only[0]['model'] == 'zai/glm-5.3'
 
 
+def test_session_log_generation_parsing() -> None:
+    assert _session_log_generation('session.jsonl') == 0
+    assert _session_log_generation('session.jsonl.zstd') == 0
+    assert _session_log_generation('session.v1.jsonl') == 1
+    assert _session_log_generation('session.v4.jsonl.zstd') == 4
+    assert _session_log_generation('session.v27.jsonl') == 27
+    # Invalid names must not be mistaken for logs.
+    assert _session_log_generation('session.v0.jsonl') is None  # v0 is not a generation file
+    assert _session_log_generation('session.v01.jsonl') is None  # no leading zeros
+    assert _session_log_generation('session.jsonl.tmp') is None
+    assert _session_log_generation('session.jsonl.zstd.tmp') is None
+    assert _session_log_generation('session.lock') is None
+    assert _session_log_generation('session.jsonl.bak') is None
+
+
+def _migrated_log(session_id: str = 'session-mig') -> list[str]:
+    """A generation-4 replay: same session, turn 1 finalized, turn 2 new."""
+    return [
+        _event('session', {}, _ms(2026, 9, 1), 9, id=session_id, cwd='/tmp/project', createdAt=_ms(2026, 9, 1, 9)),
+        _event('request/header', {'header': {'config': {'provider': 'zai', 'model': 'glm-5.3'}}}, _ms(2026, 9, 1, 9, minute=1)),
+        _assistant_message(1, 1, {'inputTokens': 200, 'outputTokens': 20}, 'zai', 'glm-5.3', _ms(2026, 9, 1, 10)),
+        _assistant_message(2, 1, {'inputTokens': 70, 'outputTokens': 7}, 'zai', 'glm-5.3', _ms(2026, 9, 2, 10)),
+    ]
+
+
+def test_newest_generation_wins(tmp_path: Path) -> None:
+    """When a session directory holds several generations, only the newest is counted.
+
+    The older generation is a replay of the same session; counting both
+    would double count every shared turn/step.
+    """
+    # Older generation (0): turn 1 with a chunk-only provisional sample.
+    old = [
+        _event('session', {}, _ms(2026, 9, 1, 9), id='session-mig', cwd='/tmp/project', createdAt=_ms(2026, 9, 1, 9)),
+        _event('request/header', {'header': {'config': {'provider': 'zai', 'model': 'glm-5.3'}}}, _ms(2026, 9, 1, 9, minute=1)),
+        _chunk_usage(1, 1, {'inputTokens': 100, 'outputTokens': 5}, _ms(2026, 9, 1, 10)),
+    ]
+    _write_session(tmp_path, 'ws', 'session-mig', old, filename='session.jsonl')
+    _write_session(tmp_path, 'ws', 'session-mig', _migrated_log(), filename='session.v4.jsonl')
+    daily = load_dsh(sessions_dir=tmp_path)
+    # Only the v4 replay counts: 200+20 + 70+7 = 297 across two days.
+    assert daily == {date(2026, 9, 1): 220, date(2026, 9, 2): 77}
+
+
+def test_newest_generation_selected_among_many(tmp_path: Path) -> None:
+    _write_session(tmp_path, 'ws', 'session-mig', _migrated_log(), filename='session.jsonl')
+    _write_session(tmp_path, 'ws', 'session-mig', _migrated_log(), filename='session.v2.jsonl')
+    _write_session(tmp_path, 'ws', 'session-mig', _migrated_log(), filename='session.v4.jsonl')
+    daily = load_dsh(sessions_dir=tmp_path)
+    # Exactly one generation is counted, whatever the generation number.
+    assert daily == {date(2026, 9, 1): 220, date(2026, 9, 2): 77}
+
+
 def test_daily_totals_and_cache_tokens(tmp_path: Path) -> None:
     _write_session(tmp_path, 'ws', 'session-abc', _sample_log())
     daily = load_dsh(sessions_dir=tmp_path)
@@ -112,9 +166,8 @@ def test_date_filtering(tmp_path: Path) -> None:
 
 def test_dual_encoding_counts_session_once(tmp_path: Path) -> None:
     _write_session(tmp_path, 'ws', 'session-abc', _sample_log(), filename='session.jsonl')
-    # A stale compressed twin holds the same session id; it either fails to
-    # decompress (plain bytes, no zstd binary) or dedups by session id — the
-    # total must come from the plain encoding alone either way.
+    # A stale same-generation twin (here plain bytes under a .zstd name)
+    # must not double count; one log per session directory is selected.
     _write_session(tmp_path, 'ws', 'session-abc', _sample_log(), filename='session.jsonl.zstd')
     daily = load_dsh(sessions_dir=tmp_path)
     assert daily == {date(2026, 8, 14): 315}

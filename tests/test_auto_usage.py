@@ -200,6 +200,24 @@ def test_classify_dsh_bucket_unknown_stays_other():
     assert classify_dsh_bucket('unknown') == 'opencode_other'
 
 
+def test_classify_dsh_bucket_real_world_models():
+    # Models actually observed in local DSH session logs. Pin the bucket each
+    # one lands in so a rename or rule change cannot silently move usage.
+    assert classify_dsh_bucket('zai/glm-5.3-flash') == 'glm_opencode'
+    assert classify_dsh_bucket('deepseek-official/deepseek-flash') == 'deepseek'
+    assert classify_dsh_bucket('deepseek-official/deepseek-v4.1-flash-expires-on-0910') == 'deepseek'
+    assert classify_dsh_bucket('ollama-cloud/deepseek-v4.1-flash') == 'deepseek'
+    assert classify_dsh_bucket('xai/grok-4.5') == 'grok'
+    assert classify_dsh_bucket('ollama/qwen3.8:27b') == 'qwen'
+    assert classify_dsh_bucket('lmstudio/qwen3.8-27b-mlx@4bit') == 'qwen'
+    assert classify_dsh_bucket('llamacpp/qwen3.8-flash-next') == 'qwen'
+    # Non-Z.ai GLM stays in Other: the GLM column tracks Z.ai plan usage.
+    assert classify_dsh_bucket('ollama-cloud/glm-5.3-flash') == 'opencode_other'
+    # Local MTPLX pack: name carries no model keyword, so it lands in Other
+    # (free local compute, $0).
+    assert classify_dsh_bucket('mtplx/flash-next-mplx-pack') == 'opencode_other'
+
+
 def test_merge_intervals_collapses_overlap():
     intervals = [
         (datetime(2026, 3, 12, 10, 0), datetime(2026, 3, 12, 11, 0)),
