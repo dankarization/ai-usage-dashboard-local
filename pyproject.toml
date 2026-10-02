@@ -30,6 +30,7 @@ markers = [
 py-modules = [
     "antigravity_usage",
     "auto_usage",
+    "nordrouter_usage",
     "codex_usage",
     "dashboard_models",
     "display_contract",

@@ -4,6 +4,7 @@ Export and aggregate token usage from Codex, Cursor, GLM, and OpenCode.
 Supports API-equivalent USD cost estimation. See docs/rfc.md.
 """
 import json
+import hashlib
 import csv
 import importlib
 import re
@@ -26,6 +27,7 @@ import requests
 import antigravity_usage as _antigravity_usage
 import dsh_usage as _dsh_usage
 import grok_usage as _grok_usage
+import nordrouter_usage as _nordrouter_usage
 from pricing_config import get_pricing, calc_cost
 
 plt.rcParams['axes.unicode_minus'] = False
@@ -320,6 +322,7 @@ def build_eink_dashboard_payload(
     daily_active_seconds: DailyActiveSeconds | None = None,
     glm_quota: list[GlmQuotaSnapshot] | None = None,
     quotas: list[QuotaSnapshot] | None = None,
+    nordrouter: dict | None = None,
 ) -> dict[str, object]:
     all_dates = list_dates_in_range(start_date, end_date)
     has_costs = daily_costs is not None
@@ -336,6 +339,9 @@ def build_eink_dashboard_payload(
         'qwen': 0,
         'other': 0,
     }
+    if nordrouter:
+        summary_totals['nordrouter'] = 0
+    nr_daily = {r['date']: int(r['tokens']) for r in (nordrouter or {}).get('daily', [])}
     total_tokens = 0
     total_ai_hours = 0.0
     total_cost_usd = 0.0
@@ -352,6 +358,8 @@ def build_eink_dashboard_payload(
             'qwen': qwen.get(current_date, 0),
             'other': other.get(current_date, 0),
         }
+        if nordrouter:
+            categories['nordrouter'] = nr_daily.get(current_date.isoformat(), 0)
         day_total = sum(categories.values())
         ai_hours = round((daily_active_seconds or {}).get(current_date, 0.0) / 3600, 2)
         total_ai_hours += ai_hours
@@ -415,6 +423,7 @@ def write_eink_dashboard_payload(
     output_path: str | None = None,
     glm_quota: list[GlmQuotaSnapshot] | None = None,
     quotas: list[QuotaSnapshot] | None = None,
+    nordrouter: dict | None = None,
 ) -> dict[str, object]:
     # E-ink drops Antigravity Claude/GPT quota bars; full list stays in API via same quotas field
     # when callers pass unfiltered quotas to generate_dashboard stdout and filtered ones here.
@@ -434,6 +443,7 @@ def write_eink_dashboard_payload(
         daily_active_seconds=daily_active_seconds,
         glm_quota=glm_quota,
         quotas=quotas,
+        nordrouter=nordrouter,
     )
     target = output_path or os.path.join(SCRIPT_DIR, OUTPUT_EINK_JSON)
     with open(target, 'w') as f:
@@ -448,12 +458,13 @@ def parse_args():
     parser.add_argument('--skip-desktop-chart', action='store_true', help='Skip the desktop PNG chart; output text and JSON only')
     return parser.parse_args()
 
-def export_codex(start_date):
+def _export_codex_profile(start_date, home):
     result = subprocess.run(
         ['npx', '-y', 'ccusage', 'codex', 'daily', '--json', '-s', start_date.replace('-', '')],
         capture_output=True,
         text=True,
         cwd=SCRIPT_DIR,
+        env={**os.environ, "CODEX_HOME": str(home)},
         timeout=180,
     )
     if result.returncode != 0:
@@ -474,9 +485,39 @@ def export_codex(start_date):
         print(f"cc-usage returned non-JSON output: {e}", file=sys.stderr)
         print(f"First 500 stdout characters: {raw[:500]!r}", file=sys.stderr)
         return None
-    with open(os.path.join(SCRIPT_DIR, 'usage.json'), 'w') as f:
-        json.dump(data, f, indent=2)
     return data
+
+
+def codex_profiles():
+    primary = Path((os.environ.get('CODEX_HOME') or str(Path.home() / '.codex'))).expanduser().resolve()
+    secondary = os.environ.get('CODEX_HOME_2')
+    second_path = Path(secondary).expanduser().resolve() if secondary else None
+    return [
+        ('codex_1', (os.environ.get('CODEX_LABEL_1') or 'Codex Primary'), primary),
+        ('codex_2', (os.environ.get('CODEX_LABEL_2') or 'Codex Secondary'), second_path),
+    ]
+
+
+def export_codex(start_date):
+    combined = {'daily': []}
+    seen = set()
+    for account, label, home in codex_profiles():
+        if home is None or home in seen or not home.exists():
+            continue
+        seen.add(home)
+        cache = Path(SCRIPT_DIR) / 'data' / 'codex' / (hashlib.sha256(str(home).encode()).hexdigest()[:16] + '.json')
+        try:
+            data = _export_codex_profile(start_date, home)
+        except (OSError, subprocess.TimeoutExpired):
+            data = None
+        if data is not None:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps(data))
+        elif cache.exists():
+            data = json.loads(cache.read_text())
+        combined['daily'].extend((data or {}).get('daily', []))
+    Path(SCRIPT_DIR, 'usage.json').write_text(json.dumps(combined))
+    return combined
 
 
 def parse_ccusage_daily_date(value: str) -> date:
@@ -638,7 +679,7 @@ def load_codex(path=None):
     daily = {}
     for entry in data.get('daily', []):
         dt = parse_ccusage_daily_date(entry['date'])
-        daily[dt] = entry['totalTokens']
+        daily[dt] = daily.get(dt, 0) + entry['totalTokens']
     return daily
 
 def load_cursor(path=None):
@@ -908,7 +949,7 @@ def _epoch_s_to_iso(s: int | float | None) -> str | None:
     return datetime.fromtimestamp(int(s)).isoformat(timespec='seconds')
 
 
-def export_codex_quota() -> list[QuotaSnapshot]:
+def export_codex_quota(home: Path | None = None) -> list[QuotaSnapshot]:
     """Fetch Codex plan quota from the ChatGPT wham/usage API.
 
     Reads the OAuth access_token from ~/.codex/auth.json and calls
@@ -917,7 +958,7 @@ def export_codex_quota() -> list[QuotaSnapshot]:
     or via OpenCode (as long as OpenCode uses the ChatGPT OAuth path, not a
     platform API key). Returns [] when auth.json is missing or the API fails.
     """
-    auth_path = Path.home() / '.codex' / 'auth.json'
+    auth_path = (home or codex_profiles()[0][2]) / 'auth.json'
     if not auth_path.exists():
         return []
     with auth_path.open() as f:
@@ -929,7 +970,8 @@ def export_codex_quota() -> list[QuotaSnapshot]:
         'Authorization': f'Bearer {token}',
         'User-Agent': 'Mozilla/5.0',
         'Accept': 'application/json',
-    })
+        **({'ChatGPT-Account-Id': auth['tokens']['account_id']} if auth.get('tokens', {}).get('account_id') else {}),
+    }, timeout=20)
     resp.raise_for_status()
     body = resp.json()
     rate_limit = body.get('rate_limit', {})
@@ -980,7 +1022,7 @@ def normalize_codex_rate_limits(rate_limits: dict[str, object]) -> list[QuotaSna
     return snapshots
 
 
-def load_codex_quota(start_date: str | None = None, end_date: str | None = None) -> list[QuotaSnapshot]:
+def load_codex_quota(start_date: str | None = None, end_date: str | None = None, *, home: Path | None = None) -> list[QuotaSnapshot]:
     """Fetch Codex plan quota, preferring the wham/usage API over local JSONL.
 
     The wham/usage API reflects the ChatGPT plan Codex quota in real time,
@@ -990,15 +1032,16 @@ def load_codex_quota(start_date: str | None = None, end_date: str | None = None)
     error, or expired token). Returns [] when neither source yields data.
     """
     try:
-        api_snapshots = export_codex_quota()
+        api_snapshots = export_codex_quota(home) if home is not None else export_codex_quota()
         if api_snapshots:
             return api_snapshots
     except Exception as e:
         print(f"Failed to fetch Codex quota from wham/usage API: {e}")
 
     # Fallback: parse local session JSONL.
-    sessions_root = Path.home() / '.codex' / 'sessions'
-    archived_root = Path.home() / '.codex' / 'archived_sessions'
+    profile_home = home or codex_profiles()[0][2]
+    sessions_root = profile_home / 'sessions'
+    archived_root = profile_home / 'archived_sessions'
     roots = [sessions_root, archived_root]
     files: list[Path] = []
     for root in roots:
@@ -1040,6 +1083,21 @@ def load_codex_quota(start_date: str | None = None, end_date: str | None = None)
     return normalize_codex_rate_limits(latest_rate_limits)
 
 
+def load_all_codex_quotas():
+    result = []
+    seen = set()
+    for account, label, home in codex_profiles():
+        snapshots = load_codex_quota(home=home) if home is not None and home not in seen else []
+        if home is not None:
+            seen.add(home)
+        if not snapshots:
+            result.append({'provider': 'codex', 'account': account, 'label': label,
+                           'status': 'unavailable' if home else 'not_configured'})
+        for snapshot in snapshots:
+            result.append({**snapshot, 'account': account, 'label': f"{label} {snapshot['label']}", 'status': 'ok'})
+    return result
+
+
 def _provider_display_name(provider: str) -> str:
     """Normalize provider names for display: GLM all-caps, others title-cased."""
     if provider == 'glm':
@@ -1058,6 +1116,9 @@ def format_quotas_block(snapshots: list[QuotaSnapshot]) -> str:
     lines = ['\nAI Usage Quotas:']
     for s in snapshots:
         provider = _provider_display_name(s.get('provider', ''))
+        if 'percentage' not in s:
+            lines.append(f"  {provider} {s.get('label', '')}: {s.get('status', 'unavailable')}")
+            continue
         pct = s.get('percentage', 0)
         reset_iso = s.get('next_reset_iso')
         reset_part = f'  reset @ {reset_iso}' if reset_iso else ''
@@ -1962,7 +2023,7 @@ def calc_codex_cost(usage_path=None) -> DailyCosts:
                     output_tokens=m.get('outputTokens', 0) + m.get('reasoningOutputTokens', 0),
                     cached_tokens=m.get('cachedInputTokens', 0),
                 )
-        result[dt] = total_cost
+        result[dt] = result.get(dt, 0.0) + total_cost
     return result
 
 
@@ -2035,17 +2096,18 @@ def compute_daily_costs(start_date: str, end_date: str, start_ts: int, end_ts: i
     return dict(daily_costs)
 
 
-def generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs=None, daily_active_seconds: DailyActiveSeconds | None = None):
+def generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs=None, daily_active_seconds: DailyActiveSeconds | None = None, nordrouter: dict | None = None):
+    nr_tokens = {date.fromisoformat(r['date']): int(r['tokens']) for r in (nordrouter or {}).get('daily', [])}
     start = datetime.strptime(start_date, '%Y-%m-%d').date()
     end = datetime.strptime(end_date, '%Y-%m-%d').date()
     
     all_dates = sorted(
-        set(cursor) | set(glm) | set(gemini) | set(claude) | set(gpt_opencode) | set(deepseek) | set(grok) | set(qwen) | set(other) | set(daily_active_seconds or {})
+        set(nr_tokens) | set(cursor) | set(glm) | set(gemini) | set(claude) | set(gpt_opencode) | set(deepseek) | set(grok) | set(qwen) | set(other) | set(daily_active_seconds or {})
     )
     all_dates = [d for d in all_dates if start <= d <= end]
     
     has_costs = daily_costs is not None
-    grand_total = sum(cursor.get(d, 0) + glm.get(d, 0) + gemini.get(d, 0) + claude.get(d, 0) + gpt_opencode.get(d, 0) + deepseek.get(d, 0) + grok.get(d, 0) + qwen.get(d, 0) + other.get(d, 0) for d in all_dates)
+    grand_total = sum(cursor.get(d, 0) + glm.get(d, 0) + gemini.get(d, 0) + claude.get(d, 0) + gpt_opencode.get(d, 0) + deepseek.get(d, 0) + grok.get(d, 0) + qwen.get(d, 0) + other.get(d, 0) + nr_tokens.get(d, 0) for d in all_dates)
     cost_total = sum((daily_costs or {}).get(d, 0.0) for d in all_dates) if has_costs else 0.0
     active_hours_total = sum((daily_active_seconds or {}).get(d, 0.0) for d in all_dates) / 3600
 
@@ -2063,6 +2125,7 @@ def generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepse
         'Grok': '#14b8a6',
         'Qwen': '#e11d48',
         'Other': '#64748b',
+        'NordRouter': '#ec4899',
     }
     
     fig, (ax, ax_active) = plt.subplots(2, 1, figsize=(14, 10), sharex=True, height_ratios=[2, 1])
@@ -2078,6 +2141,7 @@ def generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepse
         'Grok': [grok.get(d.date(), 0) / 1e8 for d in dates],
         'Qwen': [qwen.get(d.date(), 0) / 1e8 for d in dates],
         'Other': [other.get(d.date(), 0) / 1e8 for d in dates],
+        'NordRouter': [nr_tokens.get(d.date(), 0) / 1e8 for d in dates],
     }
     
     bottom = [0.0] * len(dates)
@@ -2114,17 +2178,18 @@ def generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepse
     print(f"Desktop chart saved to {output_path}")
     plt.close(fig)
 
-def generate_dashboard(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs=None, daily_active_seconds: DailyActiveSeconds | None = None, *, skip_desktop_chart: bool = False, glm_quota: list[GlmQuotaSnapshot] | None = None, quotas: list[QuotaSnapshot] | None = None):
+def generate_dashboard(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs=None, daily_active_seconds: DailyActiveSeconds | None = None, *, skip_desktop_chart: bool = False, glm_quota: list[GlmQuotaSnapshot] | None = None, quotas: list[QuotaSnapshot] | None = None, nordrouter: dict | None = None):
+    nr_tokens = {date.fromisoformat(r['date']): int(r['tokens']) for r in (nordrouter or {}).get('daily', [])}
     start = datetime.strptime(start_date, '%Y-%m-%d').date()
     end = datetime.strptime(end_date, '%Y-%m-%d').date()
     
     all_dates = sorted(
-        set(cursor) | set(glm) | set(gemini) | set(claude) | set(gpt_opencode) | set(deepseek) | set(grok) | set(qwen) | set(other) | set(daily_active_seconds or {})
+        set(nr_tokens) | set(cursor) | set(glm) | set(gemini) | set(claude) | set(gpt_opencode) | set(deepseek) | set(grok) | set(qwen) | set(other) | set(daily_active_seconds or {})
     )
     all_dates = [d for d in all_dates if start <= d <= end]
     
     has_costs = daily_costs is not None
-    cols = ('Date', 'Cursor', 'GLM', 'Gemini', 'Claude', 'GPT', 'DeepSeek', 'Grok', 'Qwen', 'Other', 'Total', 'AI Hours')
+    cols = ('Date', 'Cursor', 'GLM', 'Gemini', 'Claude', 'GPT', 'DeepSeek', 'Grok', 'Qwen', 'Other', 'NordRouter', 'Total', 'AI Hours')
     if has_costs:
         cols = cols + ('Est. $',)
     col_width = 12
@@ -2144,13 +2209,14 @@ def generate_dashboard(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok
         gk = grok.get(d, 0)
         qw = qwen.get(d, 0)
         o = other.get(d, 0)
-        total = u + g + ge + cl + go + ds + gk + qw + o
+        nr = nr_tokens.get(d, 0)
+        total = u + g + ge + cl + go + ds + gk + qw + o + nr
         grand_total += total
         active_hours = (daily_active_seconds or {}).get(d, 0.0) / 3600
         active_hours_total += active_hours
         cost = daily_costs.get(d, 0.0) if has_costs else 0.0
         cost_total += cost
-        row = f"{d!s:>{col_width}} {u:>{col_width},} {g:>{col_width},} {ge:>{col_width},} {cl:>{col_width},} {go:>{col_width},} {ds:>{col_width},} {gk:>{col_width},} {qw:>{col_width},} {o:>{col_width},} {total:>{col_width},} {active_hours:>{col_width}.2f}"
+        row = f"{d!s:>{col_width}} {u:>{col_width},} {g:>{col_width},} {ge:>{col_width},} {cl:>{col_width},} {go:>{col_width},} {ds:>{col_width},} {gk:>{col_width},} {qw:>{col_width},} {o:>{col_width},} {nr:>{col_width},} {total:>{col_width},} {active_hours:>{col_width}.2f}"
         if has_costs:
             row += f" ${cost:>{col_width - 2}.2f}"
         print(row)
@@ -2167,13 +2233,23 @@ def generate_dashboard(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok
         sum(qwen.get(d, 0) for d in all_dates),
         sum(other.get(d, 0) for d in all_dates),
     )
-    total_row = f"{'TOTAL':>{col_width}} {totals[0]:>{col_width},} {totals[1]:>{col_width},} {totals[2]:>{col_width},} {totals[3]:>{col_width},} {totals[4]:>{col_width},} {totals[5]:>{col_width},} {totals[6]:>{col_width},} {totals[7]:>{col_width},} {totals[8]:>{col_width},} {grand_total:>{col_width},} {active_hours_total:>{col_width}.2f}"
+    total_row = f"{'TOTAL':>{col_width}} {totals[0]:>{col_width},} {totals[1]:>{col_width},} {totals[2]:>{col_width},} {totals[3]:>{col_width},} {totals[4]:>{col_width},} {totals[5]:>{col_width},} {totals[6]:>{col_width},} {totals[7]:>{col_width},} {totals[8]:>{col_width},} {sum(nr_tokens.get(d, 0) for d in all_dates):>{col_width},} {grand_total:>{col_width},} {active_hours_total:>{col_width}.2f}"
     if has_costs:
         total_row += f" ${cost_total:>{col_width - 2}.2f}"
     print(total_row)
     print(f"\nAI Active Time (cumulative est.): {active_hours_total:.2f} hours")
     if has_costs:
         print(f"\nEst. Total (API equiv.): ${cost_total:.2f}")
+
+    if nordrouter:
+        print("\nNordRouter: balance $" + str(nordrouter.get('balance_usd'))
+              + "; today $" + str(nordrouter.get('spend_today_usd'))
+              + "; 7d $" + str(nordrouter.get('spend_7d_usd'))
+              + "; 30d $" + str(nordrouter.get('spend_30d_usd')))
+        window_cost = sum(float(r['amount_usd']) for r in nordrouter.get('daily', []) if start_date <= r['date'] <= end_date)
+        print(f"NordRouter window: {sum(nr_tokens.get(d, 0) for d in all_dates):,} tokens / ${window_cost:.6f}; {nordrouter['status']}; today basis: {nordrouter['today_basis']}")
+        for label, key in (('today', 'top_models_today'), ('7d', 'top_models_7d')):
+            print(f"NordRouter top-5 {label}: " + ', '.join(f"{r['id']} ${r['amount_usd']:.6f}" for r in nordrouter.get(key, [])))
 
     if glm_quota:
         print(format_glm_quota_block(glm_quota))
@@ -2182,10 +2258,10 @@ def generate_dashboard(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok
         print(format_quotas_block(quotas))
 
     if not skip_desktop_chart:
-        generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs, daily_active_seconds)
+        generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs, daily_active_seconds, nordrouter=nordrouter)
     # Full quotas stay in the JSON/API (including Antigravity Claude/GPT).
     # E-ink firmware filters Antigravity to Gemini-only when rendering.
-    return write_eink_dashboard_payload(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs, daily_active_seconds, glm_quota=glm_quota, quotas=quotas)
+    return write_eink_dashboard_payload(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs, daily_active_seconds, glm_quota=glm_quota, quotas=quotas, nordrouter=nordrouter)
 
 
 def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, skip_desktop_chart: bool = True) -> dict[str, object]:
@@ -2236,7 +2312,7 @@ def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, ski
     ollama_quota = load_ollama_quota()
 
     print("Loading Codex quota from wham/usage API...")
-    codex_quota = load_codex_quota()
+    codex_quota = load_all_codex_quotas()
 
     print("Loading Claude Code quota from OAuth usage endpoint...")
     try:
@@ -2270,7 +2346,10 @@ def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, ski
         except Exception as e:
             print(f"Failed to fetch Cursor quota: {e}")
         cursor_quota = load_cursor_quota()
+    nordrouter = _nordrouter_usage.collect(days)
     quotas = glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + cursor_quota
+    if nordrouter:
+        quotas.append(_nordrouter_usage.quota(nordrouter))
 
     print("Loading Claude Code data...")
     start_d = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -2357,11 +2436,16 @@ def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, ski
         opencode_qwen[d] = opencode_qwen.get(d, 0) + v
     for d, v in dsh_buckets['opencode_other'].items():
         opencode_other[d] = opencode_other.get(d, 0) + v
+    if daily_costs is not None:
+        for row in nordrouter.get('daily', []):
+            d = date.fromisoformat(row['date'])
+            daily_costs[d] = daily_costs.get(d, 0.0) + float(row['amount_usd'])
+
     gpt_combined = merge_daily_tokens(gpt_opencode, codex)
     # DSH zai/glm-* joins the GLM bucket: the Z.ai monitor API does not see
     # DSH-routed calls, so this adds usage the API bucket cannot double count.
     glm_combined = merge_daily_tokens(glm, glm_opencode, dsh_buckets['glm_opencode'])
-    return generate_dashboard(cursor, glm_combined, gemini, dict(claude_combined), gpt_combined, opencode_deepseek, opencode_grok, opencode_qwen, opencode_other, start_date, end_date, daily_costs, daily_active_seconds=daily_active_seconds, skip_desktop_chart=skip_desktop_chart, glm_quota=glm_quota, quotas=quotas)
+    return generate_dashboard(cursor, glm_combined, gemini, dict(claude_combined), gpt_combined, opencode_deepseek, opencode_grok, opencode_qwen, opencode_other, start_date, end_date, daily_costs, daily_active_seconds=daily_active_seconds, skip_desktop_chart=skip_desktop_chart, glm_quota=glm_quota, quotas=quotas, nordrouter=nordrouter)
 
 def _load_cursor_detailed(path=None) -> dict[date, dict[str, dict[str, int]]]:
     """Load per-model per-day token breakdown from Cursor CSV export."""
@@ -2544,6 +2628,18 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
                 grand_cache_read += m_cache_read
                 grand_cache_write += m_cache_write
             grand_total += m_total
+
+    # NordRouter analytics exposes per-model window totals, not per-model days.
+    # Do not fabricate daily model splits from account-wide daily buckets.
+    nr_key = os.environ.get('NORDROUTER_API_KEY', '')
+    if nr_key:
+        nr, _ = _nordrouter_usage.Client(nr_key).get('analytics', days=max(1, min(days, 90)))
+        for model in (nr or {}).get('top_models', []):
+            tokens = int(model['tokens'])
+            model_entries.append({'source': 'nordrouter', 'model': model['id'],
+                                  'totals': {'total': tokens}, 'daily': [],
+                                  'cost_usd': float(model['amount_usd'])})
+            grand_total += tokens
 
     # Sort by total descending
     model_entries.sort(key=lambda e: e['totals']['total'], reverse=True)

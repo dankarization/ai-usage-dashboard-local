@@ -31,6 +31,7 @@ class DashboardMeta(BaseModel):
 class CategoryTotals(BaseModel):
     """Per-provider token totals summed across the whole date window."""
 
+    nordrouter: int = Field(default=0, description='NordRouter account tokens from server daily analytics buckets.')
     cursor: int = Field(default=0, description='Total Cursor tokens for the window.')
     glm: int = Field(default=0, description='Total GLM / Z.ai tokens for the window (Z.ai usage API plus OpenCode-routed GLM).')
     gemini: int = Field(default=0, description='Total Google Gemini tokens for the window.')
@@ -83,25 +84,38 @@ class GlmQuotaSnapshot(BaseModel):
     usage_details: Optional[list[GlmQuotaUsageDetail]] = Field(default=None, description='Per-model usage breakdown. Present only for the monthly tool quota (TIME_LIMIT).')
 
 
-class QuotaSnapshot(BaseModel):
+class AccountMetrics(BaseModel):
+    account: Optional[str] = Field(default=None, description='Stable Codex profile identity: codex_1 or codex_2.')
+    status: Optional[str] = Field(default=None, description='ok, stale, unavailable, or not_configured.')
+    balance_usd: Optional[float] = Field(default=None, description='NordRouter prepaid balance in USD.')
+    spend_today_usd: Optional[float] = Field(default=None, description='Today spend; see today_basis and today_complete.')
+    spend_7d_usd: Optional[float] = Field(default=None, description='NordRouter server 7-day analytics spend.')
+    spend_30d_usd: Optional[float] = Field(default=None, description='NordRouter server 30-day analytics spend.')
+    top_models_today: Optional[list[dict]] = Field(default=None, description='Top five local-day models by spend; partial if today_complete=false.')
+    top_models_7d: Optional[list[dict]] = Field(default=None, description='Top five models by 7-day spend.')
+    today_complete: Optional[bool] = Field(default=None, description='Whether all timestamped usage rows for the local day were collected.')
+    today_basis: Optional[str] = Field(default=None, description='Time basis of today spend; fallback uses the server daily bucket.')
+
+
+class QuotaSnapshot(AccountMetrics):
     """One rolling quota window for any provider (unified across GLM, Codex, Claude Code)."""
 
     provider: str = Field(description='Provider name, e.g. glm, codex, claude.')
     label: str = Field(description='Human-readable window label, e.g. "5 Hours", "Weekly", "5 Hours Quota".')
-    percentage: int = Field(default=0, description='Percentage of the window already used (0-100).')
+    percentage: Optional[int] = Field(default=None, description='Percentage of the window already used (0-100).')
     next_reset_time_ms: Optional[int] = Field(default=None, description='Epoch-millisecond timestamp at which the window resets. May be absent.')
     next_reset_iso: Optional[str] = Field(default=None, description='Local ISO timestamp (seconds precision) at which the window resets. Derived from next_reset_time_ms.')
     usage: Optional[int] = Field(default=None, description='Absolute count already used. Present only for the GLM monthly tool quota.')
     remaining: Optional[int] = Field(default=None, description='Remaining count before the window resets. Present only for the GLM monthly tool quota.')
 
 
-class AutomationQuotaSnapshot(BaseModel):
+class AutomationQuotaSnapshot(AccountMetrics):
     """Automation-oriented view of one provider quota window."""
 
     provider: str = Field(description='Provider name, e.g. glm, codex, ollama, claude, or antigravity.')
     label: str = Field(description='Human-readable quota window label, e.g. "5h", "7d", or "Gemini 5h".')
-    used_percentage: int = Field(description='Percentage of the quota window already used (0-100).')
-    remaining_percentage: int = Field(description='Percentage of the quota window remaining (0-100), calculated as 100 minus used_percentage.')
+    used_percentage: Optional[int] = Field(default=None, description='Percentage of the quota window already used (0-100).')
+    remaining_percentage: Optional[int] = Field(default=None, description='Percentage of the quota window remaining (0-100), calculated as 100 minus used_percentage.')
     next_reset_time_ms: Optional[int] = Field(default=None, description='Epoch-millisecond timestamp at which the quota window resets. May be absent.')
     next_reset_iso: Optional[str] = Field(default=None, description='Local ISO timestamp at which the quota window resets. May be absent.')
     usage: Optional[int] = Field(default=None, description='Absolute count already used when the upstream provider exposes it.')
@@ -165,7 +179,9 @@ class ModelDailyEntry(BaseModel):
 class ModelBreakdownEntry(BaseModel):
     """Per-model token usage from one data source."""
 
-    source: str = Field(description='Data source label: opencode, claude_code, antigravity, cursor, glm, or codex.')
+    cost_usd: Optional[float] = Field(default=None, description="Reported provider spend for this model and window.")
+
+    source: str = Field(description='Data source label: opencode, claude_code, antigravity, cursor, glm, codex, or nordrouter.')
     model: str = Field(description='Model identifier as reported by the source, e.g. gpt-5.6-sol, claude-opus-5, composer-2.5-fast.')
     totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window.')
     daily: list[ModelDailyEntry] = Field(default_factory=list, description='Per-day token entries for this model, ordered by date. Empty when ?daily=false is passed.')

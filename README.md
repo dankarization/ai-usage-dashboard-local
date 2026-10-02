@@ -31,6 +31,58 @@ A minimal `.env` can be empty. The tool will still use local sources it can disc
 
 The current version uses each tool's default local data directory. If you need custom paths, prefer the source tool's own configuration or explicit variables such as `AI_USAGE_OPENCODE_SKILL_PATH`. Do not put personal absolute paths in public documentation.
 
+## NordRouter and two Codex profiles
+
+Set `NORDROUTER_API_KEY` in the private `.env`. The terminal table and desktop
+chart include a separate NordRouter token category; the terminal summary and
+`/api/v1/quotas` expose balance, today/7d/30d spend and top-five model rankings.
+Actual reported NordRouter spend is added to the estimated total cost.
+If the same requests are also logged in a local source, those sources overlap;
+provider usage is additive, not cross-provider request-deduplicated.
+
+Analytics/balance attempts are cached for 12 minutes, usage pages for 5 minutes,
+including failed attempts. Cross-process locks and per-endpoint budgets limit
+bursts. API errors preserve stale data with `status=stale`. Private caches live in
+`data/nordrouter/`, scoped by a hash of the key; keys, IPs and client metadata are
+not stored. Model-breakdown requests use the same analytics cache and budget.
+
+Analytics totals do not necessarily equal their calendar daily buckets. Today
+uses timestamped usage rows converted to **Asia/Tbilisi**, scanning newest-first
+pages until local midnight (up to eight pages per refresh). If this bound is
+exceeded or pages are unavailable, `today_complete=false` marks partial top-model
+rankings; spend falls back to the server daily bucket matching the Tbilisi date.
+`today_basis` distinguishes this fallback. Daily table/chart tokens and costs
+retain the server's daily buckets; 7d/30d spend and 7d ranking use the server
+analytics windows. Consequently window summary spend may differ from the daily
+column sum. Analytics retention is at most 90 days. Model breakdown returns the
+upstream model totals and spend, with empty daily arrays (the API does not expose
+per-model daily buckets).
+
+The primary Codex profile defaults to `~/.codex` (or `CODEX_HOME`). Set
+`CODEX_HOME_2=~/.codex-secondary` to enable a second existing profile, optionally
+with `CODEX_LABEL_1` and `CODEX_LABEL_2`. Authenticate that profile separately
+with Codex before use; this dashboard does not perform login. Each profile uses
+its own `auth.json` and optional ChatGPT account ID for quota requests, with its
+own session-log fallback. Missing profiles still appear as placeholders with
+unknown (null) percentages, never 0% used / 100% remaining.
+
+`npx ccusage codex daily` runs separately with each profile's `CODEX_HOME`;
+local daily tokens and estimated costs are summed into the GPT category. An
+identical resolved home is counted once. Per-profile exports are cached in
+`data/codex/` and successful exports rebuild the aggregate `usage.json`. Node/npm
+are required; the first run may install ccusage. The deprecated standalone
+`@ccusage/codex` package is not used.
+
+Generate the cache before using the cache-only quotas endpoint:
+
+```bash
+.venv/bin/python auto_usage.py -d 7 --skip-desktop-chart
+.venv/bin/python -m uvicorn local_display_service:app --host 127.0.0.1 --port 7995
+# In another terminal:
+curl http://127.0.0.1:7995/api/v1/quotas
+curl 'http://127.0.0.1:7995/api/v1/model-breakdown?days=7'
+```
+
 ## Usage
 
 ```bash

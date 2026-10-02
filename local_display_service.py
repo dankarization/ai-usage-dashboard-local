@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries
+from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_env
 from dashboard_models import (
     AntigravityIngestRequest,
     AntigravityIngestResponse,
@@ -82,6 +82,7 @@ def token_usage_json() -> dict[str, Any]:
 @app.get(
     "/api/v1/quotas",
     response_model=QuotasResponse,
+    response_model_exclude_unset=True,
     summary="Return current provider quota windows",
     description="Returns a compact automation-oriented view of cached provider quotas, including used and remaining percentages plus reset timestamps. This endpoint reuses the dashboard cache and does not force provider refreshes.",
 )
@@ -96,12 +97,13 @@ def quotas() -> dict[str, Any]:
         payload = {"meta": {}, "quotas": []}
     quota_items = []
     for item in payload.get("quotas") or []:
-        used_percentage = max(0, min(100, int(item.get("percentage", 0) or 0)))
+        used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
         quota_items.append({
+            **{k: item[k] for k in ("account", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis") if k in item},
             "provider": item.get("provider", "unknown"),
             "label": item.get("label", "unknown"),
             "used_percentage": used_percentage,
-            "remaining_percentage": 100 - used_percentage,
+            "remaining_percentage": 100 - used_percentage if used_percentage is not None else None,
             "next_reset_time_ms": item.get("next_reset_time_ms"),
             "next_reset_iso": item.get("next_reset_iso"),
             "usage": item.get("usage"),
@@ -122,6 +124,7 @@ def quotas() -> dict[str, Any]:
 def model_breakdown(days: int = 30, daily: bool = True) -> dict[str, Any]:
     days = max(1, min(days, 90))
     with _refresh_lock:
+        load_env()
         return build_model_breakdown(days=days, include_daily=daily)
 
 
