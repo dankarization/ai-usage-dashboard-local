@@ -447,3 +447,25 @@ def test_model_breakdown_null_fields_for_total_only_sources(monkeypatch):
     assert model["totals"]["input"] is None
     assert model["totals"]["output"] is None
     assert model["totals"]["total"] == 500
+
+
+def test_html_dashboard_routes_are_self_contained_and_do_not_collect(monkeypatch):
+    def unexpected_collection(*args, **kwargs):
+        raise AssertionError("HTML route must not collect provider data")
+
+    monkeypatch.setattr(local_display_service, "generate_latest_payload", unexpected_collection)
+    monkeypatch.setattr(local_display_service, "build_model_breakdown", unexpected_collection)
+    client = TestClient(local_display_service.app)
+    for route in ("/", "/dashboard"):
+        response = client.get(route)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        for text in ("NordRouter", "Codex", "Top-5 models", "Model costs", "Refresh",
+                     "spend_today_usd", "spend_7d_usd", "spend_30d_usd",
+                     "used_percentage", "next_reset_time_ms", "/api/v1/quotas",
+                     "/api/v1/model-breakdown?days=7&daily=false",
+                     "/api/v1/display/update", "60000"):
+            assert text in response.text
+        assert '<script src=' not in response.text
+        assert '<link ' not in response.text
+        assert 'innerHTML' not in response.text

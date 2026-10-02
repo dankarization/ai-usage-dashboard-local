@@ -33,6 +33,7 @@ py-modules = [
     "nordrouter_usage",
     "codex_usage",
     "dashboard_models",
+    "dashboard_page",
     "display_contract",
     "eink_simulator",
     "firmware_logic",

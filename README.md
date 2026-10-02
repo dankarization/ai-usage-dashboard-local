@@ -193,6 +193,23 @@ Before publishing, also run a privacy scan for fixed private IPs, personal absol
 
 See `docs/test.md` for the fuller test strategy.
 
+## Local web dashboard
+
+Start the existing service with
+`python -m uvicorn local_display_service:app --host 127.0.0.1 --port 7995`
+and open `http://127.0.0.1:7995/dashboard` (or `/`). The self-contained dark
+page uses no CDN or additional dependencies. It displays NordRouter balance,
+spend and top models, each Codex profile's quotas, and reported model costs
+for seven days. Unknown costs and quotas appear as `—`, never as zero.
+
+The page fetches the existing quota and model-breakdown JSON endpoints every
+60 seconds. **Refresh** calls `POST /api/v1/display/update` before reloading
+them. Quotas retain the existing cache-only semantics: automatic page polling
+does not force a provider refresh. Snapshot timestamps, provider stale status,
+and incomplete NordRouter today data are shown; network failures preserve the
+last displayed values. Reset timestamps use the browser's local timezone.
+
+
 ## Privacy
 
 This repository is designed to be publishable with only fake examples. Real cookies, bearer tokens, Wi-Fi credentials, local usage exports, generated charts, generated JSON payloads, and logs must remain in private ignored files.

@@ -6,6 +6,9 @@ import threading
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+
+from dashboard_page import DASHBOARD_HTML
 
 from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_env
 from dashboard_models import (
@@ -27,6 +30,12 @@ app = FastAPI(
 _cached_payload: dict[str, Any] | None = None
 _payload_path = Path(__file__).resolve().parent / "token_usage_eink.json"
 _refresh_lock = threading.Lock()
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/dashboard", response_class=HTMLResponse, summary="Local HTML dashboard")
+def dashboard() -> str:
+    return DASHBOARD_HTML
 
 
 def _read_payload_from_disk() -> dict[str, Any] | None:
