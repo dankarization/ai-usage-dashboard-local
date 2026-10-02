@@ -449,6 +449,63 @@ def test_model_breakdown_null_fields_for_total_only_sources(monkeypatch):
     assert model["totals"]["total"] == 500
 
 
+def test_html_dashboard_renders_generic_quota_section_for_all_providers():
+    html = local_display_service.DASHBOARD_HTML
+    # A generic section must exist that renders non-nordrouter, non-codex providers.
+    assert 'id="quotas"' in html
+    assert "provider !== 'nordrouter' && row.provider !== 'codex'" in html
+    # The generic renderer must emit a label, a used percentage and a reset line.
+    assert 'used_percentage' in html
+    assert 'next_reset_time_ms' in html
+    assert 'Reset: ' in html
+
+
+def test_quotas_endpoint_normalizes_grok_provider(monkeypatch):
+    payload = {
+        "meta": {"generated_at": "2026-10-02T21:44:00"},
+        "summary": {},
+        "daily": [],
+        "quotas": [
+            {
+                "provider": "grok",
+                "label": "weekly",
+                "percentage": 42,
+                "next_reset_time_ms": 1790000000000,
+                "next_reset_iso": "2026-10-09T00:00:00",
+            },
+            {
+                "provider": "nordrouter",
+                "label": "balance",
+            },
+            {
+                "provider": "codex",
+                "account": "primary",
+                "label": "5h",
+                "percentage": 29,
+            },
+        ],
+    }
+    monkeypatch.setattr(local_display_service, "_cached_payload", payload)
+
+    response = TestClient(local_display_service.app).get("/api/v1/quotas")
+
+    assert response.status_code == 200
+    quotas = response.json()["quotas"]
+    grok = next(item for item in quotas if item["provider"] == "grok")
+    assert grok["label"] == "weekly"
+    assert grok["used_percentage"] == 42
+    assert grok["remaining_percentage"] == 58
+    assert grok["next_reset_time_ms"] == 1790000000000
+
+
+def test_html_dashboard_quota_script_handles_provider_without_percentage():
+    # Providers such as nordrouter/balance rows carry no percentage; the generic
+    # renderer must not crash and should fall back to a placeholder.
+    html = local_display_service.DASHBOARD_HTML
+    assert "number(window.used_percentage)" in html
+    assert "'Used: —'" in html
+
+
 def test_html_dashboard_routes_are_self_contained_and_do_not_collect(monkeypatch):
     def unexpected_collection(*args, **kwargs):
         raise AssertionError("HTML route must not collect provider data")
@@ -461,6 +518,7 @@ def test_html_dashboard_routes_are_self_contained_and_do_not_collect(monkeypatch
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/html")
         for text in ("NordRouter", "Codex", "Top-5 models", "Model costs", "Refresh",
+                     "Quotas", 'id="quotas"',
                      "spend_today_usd", "spend_7d_usd", "spend_30d_usd",
                      "used_percentage", "next_reset_time_ms", "/api/v1/quotas",
                      "/api/v1/model-breakdown?days=7&daily=false",

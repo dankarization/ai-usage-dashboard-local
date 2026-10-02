@@ -10,6 +10,7 @@ DASHBOARD_HTML = r'''<!doctype html>
 <p id="stamp" class="muted">Loading snapshot…</p><p id="error" role="status" aria-live="polite"></p>
 <section><h2>NordRouter</h2><p id="nr-status" class="muted"></p><div id="metrics" class="grid"></div><div class="grid"><div><h3>Top-5 models today</h3><div id="today"></div></div><div><h3>Top-5 models · 7d</h3><div id="week"></div></div></div></section>
 <section><h2>Codex quotas · 5h / weekly</h2><div id="codex" class="grid"></div></section>
+<section><h2>Quotas</h2><p class="muted">All other providers from /api/v1/quotas.</p><div id="quotas" class="grid"></div></section>
 <section><h2>Model costs · 7d</h2><p class="muted">Reported costs only; — means unavailable, not zero.</p><p id="model-stamp" class="muted"></p><div class="scroll"><table><thead><tr><th>Source</th><th>Model</th><th>Cost USD</th></tr></thead><tbody id="models"></tbody></table></div></section>
 <script>
 'use strict';
@@ -67,6 +68,32 @@ function renderQuotas(data) {
     bar.setAttribute('aria-label', window.label ?? 'Quota used');
    }
    node('p', 'Reset: ' + time(window.next_reset_time_ms ?? window.next_reset_iso), card);
+   if (window.status) node('small', window.status, card);
+  });
+ });
+ $('quotas').replaceChildren();
+ const others = rows.filter(row => row.provider !== 'nordrouter' && row.provider !== 'codex');
+ if (!others.length) { node('p', 'No other quota snapshots available', $('quotas')); return; }
+ const byProvider = new Map();
+ others.forEach(row => {
+  const key = row.provider ?? 'unknown';
+  if (!byProvider.has(key)) byProvider.set(key, []);
+  byProvider.get(key).push(row);
+ });
+ byProvider.forEach((windows, provider) => {
+  const card = node('div', undefined, $('quotas')); card.className = 'card';
+  node('h3', provider, card);
+  windows.forEach(window => {
+   node('p', window.label ?? 'Quota', card);
+   node('p', number(window.used_percentage) ? `${window.used_percentage}% used` : 'Used: —', card);
+   if (number(window.used_percentage)) {
+    const bar = node('progress', undefined, card); bar.max = 100;
+    bar.value = Math.max(0, Math.min(100, window.used_percentage));
+    bar.setAttribute('aria-label', `${provider} ${window.label ?? 'Quota'} used`);
+   }
+   node('p', 'Reset: ' + time(window.next_reset_time_ms ?? window.next_reset_iso), card);
+   if (window.remaining !== null && window.remaining !== undefined) node('small', 'Remaining: ' + window.remaining, card);
+   else if (number(window.remaining_percentage)) node('small', window.remaining_percentage + '% remaining', card);
    if (window.status) node('small', window.status, card);
   });
  });

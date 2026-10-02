@@ -199,8 +199,12 @@ Start the existing service with
 `python -m uvicorn local_display_service:app --host 127.0.0.1 --port 7995`
 and open `http://127.0.0.1:7995/dashboard` (or `/`). The self-contained dark
 page uses no CDN or additional dependencies. It displays NordRouter balance,
-spend and top models, each Codex profile's quotas, and reported model costs
-for seven days. Unknown costs and quotas appear as `—`, never as zero.
+spend and top models, each Codex profile's quotas, a generic **Quotas** section
+covering every other provider returned by `/api/v1/quotas` (for example GLM,
+Cursor, Ollama, Claude, Antigravity and Grok), and reported model costs
+for seven days. Each quota card shows its window label, used percentage,
+a progress bar and the reset time. Unknown costs and quotas appear as `—`,
+never as zero.
 
 The page fetches the existing quota and model-breakdown JSON endpoints every
 60 seconds. **Refresh** calls `POST /api/v1/display/update` before reloading
