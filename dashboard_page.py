@@ -101,9 +101,6 @@ h3{font-size:.95rem;margin:0;font-weight:600}
 .chip.danger{color:var(--danger);border-color:#5c2a2a;background:#241313}
 .chip.unknown,.chip.not_configured,.chip.unavailable{color:var(--neutral);border-color:#33415580;background:#1a2130}
 .brandtile{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);font-weight:800;font-size:.82rem;flex:none;letter-spacing:-.02em}
-.legend-key{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 12px;font-size:.74rem;color:var(--faint)}
-.legend-key span{display:inline-flex;align-items:center;gap:6px}
-.key-dot{width:9px;height:9px;border-radius:3px;display:inline-block}
 
 /* ---------- stat tiles ---------- */
 .stat{padding:15px 16px}
@@ -198,7 +195,6 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums}
 
   <section aria-labelledby="h-codex">
     <div class="sec-head"><h2 id="h-codex">Codex accounts</h2><p class="note">ChatGPT plan · 5-hour and weekly windows shown separately</p></div>
-    <div class="legend-key"><span><i class="key-dot" style="background:#34d399"></i>plenty left</span><span><i class="key-dot" style="background:#fbbf24"></i>filling up</span><span><i class="key-dot" style="background:#f87171"></i>near limit</span><span><i class="key-dot" style="background:#334155"></i>unavailable</span></div>
     <div id="codex" class="grid"></div>
   </section>
 
