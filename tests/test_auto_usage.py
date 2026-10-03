@@ -318,7 +318,10 @@ def test_compute_daily_ai_active_seconds_sums_sources_and_splits_days():
     }
 
 
-def test_generate_dashboard_keeps_est_cost_column_when_daily_costs_is_empty_dict(capsys):
+def test_generate_dashboard_keeps_est_cost_column_when_daily_costs_is_empty_dict(monkeypatch, tmp_path, capsys):
+    # generate_dashboard writes token_usage_eink.json next to SCRIPT_DIR; redirect
+    # it so running the suite never overwrites the live dashboard payload.
+    monkeypatch.setattr('auto_usage.SCRIPT_DIR', str(tmp_path))
     generate_dashboard(
         cursor={},
         glm={},
@@ -1065,7 +1068,10 @@ def test_build_eink_dashboard_payload_omits_glm_quota_when_empty():
     assert 'glm_quota' not in payload
 
 
-def test_generate_dashboard_prints_quota_block(capsys):
+def test_generate_dashboard_prints_quota_block(monkeypatch, tmp_path, capsys):
+    # generate_dashboard writes token_usage_eink.json next to SCRIPT_DIR; redirect
+    # it so running the suite never overwrites the live dashboard payload.
+    monkeypatch.setattr('auto_usage.SCRIPT_DIR', str(tmp_path))
     snapshots = normalize_glm_quota(_GLM_QUOTA_SAMPLE)
 
     generate_dashboard(

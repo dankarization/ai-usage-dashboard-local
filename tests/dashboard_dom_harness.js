@@ -50,9 +50,12 @@ class Element {
     this.style = {};
     this._text = '';
     this._classes = [];
+    this._id = null;
     this.classList = new ClassList(this);
     this.listeners = {};
   }
+  set id(value) { this._id = value; if (value) registry.set(value, this); }
+  get id() { return this._id; }
   set className(value) { this._classes = String(value || '').split(/\s+/).filter(Boolean); }
   get className() { return this._classes.join(' '); }
   set textContent(value) { this._text = value === undefined || value === null ? '' : String(value); this.children = []; }
@@ -66,7 +69,8 @@ class Element {
 
 const registry = new Map();
 ['hero', 'quotas', 'history', 'codex', 'metrics', 'today', 'week',
- 'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status'].forEach((id) => {
+ 'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
+ 'est-value', 'est-sub'].forEach((id) => {
   registry.set(id, new Element('div'));
 });
 
@@ -83,7 +87,7 @@ global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({})
 const code = fs.readFileSync(jsPath, 'utf8');
 vm.runInThisContext(code, { filename: jsPath });
 
-['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus']
+['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'subscriptionEstimate', 'renderEstimate']
   .forEach((name) => assert(typeof global[name] === 'function' || typeof eval(name) === 'function',
     'dashboard script did not expose ' + name));
 
@@ -151,6 +155,9 @@ assertEqual(statusClass('not_configured'), 'not_configured', 'statusClass(not_co
 assertEqual(statusClass('stale'), 'stale', 'statusClass(stale)');
 assertEqual(providerName('codex'), 'Codex', 'providerName(codex)');
 assertEqual(providerName('grok'), 'Grok', 'providerName(grok)');
+assertEqual(brandMark('codex'), 'OI', 'brandMark(codex) is the Codex login mark');
+assertEqual(brandMark('grok'), 'xAI', 'brandMark(grok) is the xAI mark');
+assertEqual(brandMark('nordrouter'), 'NR', 'brandMark(nordrouter)');
 assertEqual(tokens(1029393251), '1.03B', 'tokens(1.03B)');
 assertEqual(tokens(61934392), '61.9M', 'tokens(61.9M)');
 assertEqual(usd(null), '—', 'usd(null) is unknown, not $0');
@@ -170,6 +177,12 @@ const quotaRoot = registry.get('quotas');
 
 const codexCards = all(codexRoot).filter((e) => e.classList.contains('card'));
 assert(codexCards.length === 2, 'expected two Codex profile cards, got ' + codexCards.length);
+// Account order must follow the quota payload: codex_1 before codex_2.
+assert(codexCards[0].textContent.includes('codex_1'), 'codex_1 must render before codex_2');
+assert(codexCards[1].textContent.includes('codex_2'), 'codex_2 must be the second Codex card');
+// Each card carries a brand mark.
+assertEqual(all(codexCards[0]).filter((e) => e.classList.contains('brandtile'))[0].textContent, 'OI',
+  'Codex cards must carry the OI brand mark');
 
 const configured = cardFor(codexRoot, 'codex_1')[0];
 assert(configured, 'codex_1 card missing');
@@ -212,6 +225,12 @@ assertEqual(effectiveStatus({ status: 'not_configured', windows: [{ used_percent
   'an explicit status wins over the percentage fallback');
 
 assert(!quotaRoot.textContent.includes('NordRouter'), 'NordRouter must not appear in the quota grid');
+assertEqual(all(quotaRoot).filter((e) => e.classList.contains('card')).length, 1,
+  'the quota grid must hold exactly the Grok card when only Grok is present');
+assertEqual(orderGroups([{ provider: 'glm', account: '' }, { provider: 'grok', account: '' }, { provider: 'codex', account: 'codex_2' }, { provider: 'codex', account: 'codex_1' }])
+  .map((g) => g.provider + (g.account || '')).join(','),
+  'codexcodex_1,codexcodex_2,grok,glm',
+  'quota order must be Codex accounts, then Grok, then the rest');
 assert(registry.get('nr-status').textContent.includes('incomplete'),
   'NordRouter partial-today note must be surfaced');
 assert(registry.get('metrics').textContent.includes('$17.08'),
@@ -265,6 +284,34 @@ assert(registry.get('model-stamp').textContent.includes('2026-09-27'), 'model st
 renderModels({ models: [] });
 assert(registry.get('models').textContent.includes('No model data available'),
   'an empty model list must render an explicit empty state');
+
+/* ---------------- subscription list-price estimate ---------------- */
+// NordRouter cost is actual billed spend and must never be counted as an
+// estimate; only subscription sources with measured tokens count.
+var est = subscriptionEstimate([
+  { source: 'nordrouter', cost_usd: 100.0 },
+  { source: 'codex', cost_usd: 12.5 },
+  { source: 'glm', cost_usd: null },
+]);
+assertEqual(est.count, 1, 'only priced subscription sources count toward the estimate');
+assertEqual(est.total, 12.5, 'the estimate sums subscription list prices only');
+assertEqual(subscriptionEstimate([{ source: 'nordrouter', cost_usd: 5 }]).count, 0,
+  'a NordRouter-only dataset yields no subscription estimate');
+
+lastModels = [{ source: 'nordrouter', cost_usd: 46.5 }];
+renderEstimate();
+assertEqual(registry.get('est-value').textContent, '—',
+  'without measured subscription tokens the estimate must read unavailable');
+assert(registry.get('est-sub').textContent.includes('unavailable'),
+  'the estimate must explain why it is unavailable');
+assert(!registry.get('est-value').textContent.includes('0'),
+  'a missing estimate must never be rendered as 0');
+
+lastModels = [{ source: 'codex', cost_usd: 12.5 }, { source: 'grok', cost_usd: 7.5 }];
+renderEstimate();
+assertEqual(registry.get('est-value').textContent, '$20.00', 'a real estimate must render its sum');
+assert(registry.get('est-sub').textContent.includes('estimate'),
+  'the estimate must be labelled as an estimate');
 
 /* ---------------- no unsafe DOM APIs ---------------- */
 assert(!code.includes('innerHTML'), 'dashboard script must not use innerHTML');

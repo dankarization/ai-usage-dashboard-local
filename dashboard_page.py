@@ -100,6 +100,10 @@ h3{font-size:.95rem;margin:0;font-weight:600}
 .chip.warn,.chip.stale{color:var(--warn);border-color:#5c4a17;background:#241f10}
 .chip.danger{color:var(--danger);border-color:#5c2a2a;background:#241313}
 .chip.unknown,.chip.not_configured,.chip.unavailable{color:var(--neutral);border-color:#33415580;background:#1a2130}
+.brandtile{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);font-weight:800;font-size:.82rem;flex:none;letter-spacing:-.02em}
+.legend-key{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 12px;font-size:.74rem;color:var(--faint)}
+.legend-key span{display:inline-flex;align-items:center;gap:6px}
+.key-dot{width:9px;height:9px;border-radius:3px;display:inline-block}
 
 /* ---------- stat tiles ---------- */
 .stat{padding:15px 16px}
@@ -192,14 +196,15 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums}
     <div id="hero" class="grid"></div>
   </section>
 
-  <section aria-labelledby="h-quota">
-    <div class="sec-head"><h2 id="h-quota">Quotas</h2><p class="note">Color shows how much of each window is used · unavailable is not the same as 0%</p></div>
-    <div id="quotas" class="grid"></div>
+  <section aria-labelledby="h-codex">
+    <div class="sec-head"><h2 id="h-codex">Codex accounts</h2><p class="note">ChatGPT plan · 5-hour and weekly windows shown separately</p></div>
+    <div class="legend-key"><span><i class="key-dot" style="background:#34d399"></i>plenty left</span><span><i class="key-dot" style="background:#fbbf24"></i>filling up</span><span><i class="key-dot" style="background:#f87171"></i>near limit</span><span><i class="key-dot" style="background:#334155"></i>unavailable</span></div>
+    <div id="codex" class="grid"></div>
   </section>
 
-  <section aria-labelledby="h-history">
-    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note">Daily tokens from local buckets · drawn only where real data exists</p></div>
-    <div id="history" class="card chart-card"></div>
+  <section aria-labelledby="h-grok">
+    <div class="sec-head"><h2 id="h-grok">Grok</h2><p class="note">SuperGrok / X Premium weekly pool</p></div>
+    <div id="quotas" class="grid"></div>
   </section>
 
   <section aria-labelledby="h-nord">
@@ -211,9 +216,9 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums}
     </div>
   </section>
 
-  <section aria-labelledby="h-codex">
-    <div class="sec-head"><h2 id="h-codex">Codex</h2><p class="note">ChatGPT plan windows per profile</p></div>
-    <div id="codex" class="grid"></div>
+  <section aria-labelledby="h-history">
+    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note">Daily tokens from local buckets · drawn only where real data exists</p></div>
+    <div id="history" class="card chart-card"></div>
   </section>
 
   <section aria-labelledby="h-models">
@@ -279,6 +284,15 @@ function providerName(provider) {
   if (known[key]) return known[key];
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
+/* Compact brand mark. Inline text so the page stays asset-free. */
+function brandMark(provider) {
+  var key = String(provider || '').toLowerCase();
+  var marks = { codex: 'OI', grok: 'xAI', nordrouter: 'NR', glm: 'Z', ollama: 'OL',
+                claude: 'CC', antigravity: 'AG', cursor: 'CU' };
+  return marks[key] || key.slice(0, 2).toUpperCase();
+}
+/* Bar colour follows remaining capacity: green when comfortable, amber as the
+   window fills, red as it approaches exhaustion. */
 function severity(used) { return used >= 80 ? 'danger' : (used >= 50 ? 'warn' : 'ok'); }
 function statusClass(status) {
   var key = String(status || 'unknown').toLowerCase();
@@ -346,6 +360,7 @@ function windowRow(card, window) {
 function quotaCard(group, root) {
   var card = node('div', undefined, root); card.className = 'card';
   var head = node('div', undefined, card); head.className = 'card-head';
+  node('span', brandMark(group.provider), head).className = 'brandtile';
   node('span', providerName(group.provider), head).className = 'badge p-' + String(group.provider || 'unknown').toLowerCase();
   if (group.account) node('span', group.account, head).className = 'badge account';
   var status = effectiveStatus(group);
@@ -380,6 +395,21 @@ function groupQuotas(rows) {
   return Array.from(groups.values());
 }
 
+/* Quota section order the user asked for: Codex accounts first (account 1,
+   then account 2, each showing configured or unconfigured state), then Grok,
+   then any remaining providers. NordRouter renders in its own section. */
+var QUOTA_ORDER = ['codex', 'grok'];
+function orderGroups(groups) {
+  return groups.slice().sort(function (a, b) {
+    var ia = QUOTA_ORDER.indexOf(a.provider);
+    var ib = QUOTA_ORDER.indexOf(b.provider);
+    if (ia === -1) ia = QUOTA_ORDER.length;
+    if (ib === -1) ib = QUOTA_ORDER.length;
+    if (ia !== ib) return ia - ib;
+    return String(a.account || '').localeCompare(String(b.account || ''));
+  });
+}
+
 function renderQuotas(data) {
   var rows = data.quotas || [];
   var root = $('quotas');
@@ -389,16 +419,16 @@ function renderQuotas(data) {
   var codexRoot = $('codex');
   codexRoot.replaceChildren();
   if (codex.length) {
-    groupQuotas(codex).forEach(function (group) { quotaCard(group, codexRoot); });
+    orderGroups(groupQuotas(codex)).forEach(function (group) { quotaCard(group, codexRoot); });
   } else {
     node('p', 'No Codex snapshot available.', codexRoot).className = 'empty';
   }
 
   var others = rows.filter(function (row) { return row.provider !== 'nordrouter' && row.provider !== 'codex'; });
   if (!others.length) {
-    node('p', 'No other quota snapshots available.', root).className = 'empty';
+    node('p', 'No Grok or other quota snapshots available.', root).className = 'empty';
   } else {
-    groupQuotas(others).forEach(function (group) { quotaCard(group, root); });
+    orderGroups(groupQuotas(others)).forEach(function (group) { quotaCard(group, root); });
   }
 
   var nr = rows.find(function (row) { return row.provider === 'nordrouter'; }) || {};
@@ -445,7 +475,7 @@ function renderHero(payload) {
     ['Total tokens · 30d', number(summary.total_tokens) ? tokens(summary.total_tokens) : '—',
       active.length + ' active day' + (active.length === 1 ? '' : 's')],
     ['Total cost · 30d', usd(summary.total_cost_usd),
-      'reported + estimated'],
+      'reported spend + estimates'],
     ['Latest active day', latest ? latest.date : '—',
       latest ? tokens(latest.total_tokens) + ' tokens · ' + usd(latest.cost_usd) : 'no usage recorded'],
     ['AI active time · 30d', number(summary.total_ai_hours) ? summary.total_ai_hours.toFixed(2) + ' h' : '—',
@@ -458,6 +488,15 @@ function renderHero(payload) {
     node('div', tile[2], box).className = 's';
   });
 
+  // Subscription list-price equivalent. Filled by renderEstimate once the model
+  // breakdown arrives; stays explicitly unavailable without measured tokens.
+  var est = node('div', undefined, root); est.className = 'card stat'; est.id = 'est-tile';
+  node('div', 'Subscription list-price equiv · 7d', est).className = 'k';
+  var estValue = node('div', '—', est); estValue.className = 'v unknown'; estValue.id = 'est-value';
+  node('div', 'waiting for model data…', est).className = 's';
+  var estSub = node('div', undefined, est); estSub.id = 'est-sub';
+  renderEstimate();
+
   var cats = summary.categories || {};
   var pills = Object.keys(cats).filter(function (key) { return number(cats[key]) && cats[key] > 0; });
   if (pills.length) {
@@ -468,6 +507,39 @@ function renderHero(payload) {
       node('span', key + ' ' + tokens(cats[key]), holder).className = 'pill';
     });
   }
+}
+
+/* ---------- subscription list-price equivalent ---------- */
+/* Only subscription sources are counted: NordRouter cost_usd is actual billed
+   spend, not an estimate, so it is excluded. Every other source reports an
+   API list-price equivalent derived from measured tokens and published rates.
+   Without measured subscription tokens the figure is unavailable, never 0. */
+var lastModels = null;
+function subscriptionEstimate(models) {
+  var rows = models || [];
+  var priced = rows.filter(function (row) {
+    return row.source !== 'nordrouter' && number(row.cost_usd);
+  });
+  return {
+    count: priced.length,
+    total: priced.reduce(function (sum, row) { return sum + row.cost_usd; }, 0),
+  };
+}
+function renderEstimate() {
+  var value = $('est-value');
+  var sub = $('est-sub');
+  if (!value || !sub) return;
+  if (!lastModels) { sub.textContent = 'waiting for model data…'; return; }
+  var estimate = subscriptionEstimate(lastModels);
+  if (!estimate.count) {
+    value.textContent = '—';
+    value.className = 'v unknown';
+    sub.textContent = 'unavailable · no measured subscription token data';
+    return;
+  }
+  value.textContent = usd(estimate.total);
+  value.className = 'v';
+  sub.textContent = 'estimate from published list prices · ' + estimate.count + ' model' + (estimate.count === 1 ? '' : 's');
 }
 
 var SVG_NS = 'http://www.w3.org/2000/svg';
@@ -532,6 +604,8 @@ function renderModels(data) {
     return (b.cost_usd === null || b.cost_usd === undefined ? -1 : b.cost_usd) -
            (a.cost_usd === null || a.cost_usd === undefined ? -1 : a.cost_usd);
   });
+  lastModels = models;
+  renderEstimate();
   if (!models.length) {
     var emptyRow = node('tr', undefined, body);
     var emptyCell = node('td', 'No model data available.', emptyRow);
