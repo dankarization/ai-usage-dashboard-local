@@ -1,0 +1,274 @@
+'use strict';
+/*
+ * Minimal DOM shim that runs the real dashboard script in Node and asserts the
+ * rendering contract that matters for correctness:
+ *
+ *   - a window with no reported percentage is rendered as unavailable, never 0%
+ *   - a configured window renders a colour-coded bar with the real percentage
+ *   - high utilisation is colour-coded danger, mid is warn, low is ok
+ *   - NordRouter is excluded from the quota grid but keeps its own metrics
+ *   - empty history renders an explicit empty state instead of a fake chart
+ *
+ * Usage: node tests/dashboard_dom_harness.js <path-to-extracted-dashboard.js>
+ */
+const fs = require('fs');
+const vm = require('vm');
+
+const jsPath = process.argv[2];
+if (!jsPath) {
+  console.error('usage: node dashboard_dom_harness.js <dashboard.js>');
+  process.exit(2);
+}
+
+function fail(message) {
+  console.error('ASSERTION FAILED: ' + message);
+  process.exit(1);
+}
+function assert(condition, message) {
+  if (!condition) fail(message);
+}
+function assertEqual(actual, expected, message) {
+  if (actual !== expected) {
+    fail(message + ' (expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual) + ')');
+  }
+}
+
+/* ---------------- DOM shim ---------------- */
+class ClassList {
+  constructor(element) { this.element = element; }
+  add(...names) { names.forEach((n) => { if (!this.element._classes.includes(n)) this.element._classes.push(n); }); }
+  remove(...names) { this.element._classes = this.element._classes.filter((c) => !names.includes(c)); }
+  contains(name) { return this.element._classes.includes(name); }
+}
+
+class Element {
+  constructor(tag, ns) {
+    this.tagName = String(tag).toUpperCase();
+    this.ns = ns || null;
+    this.children = [];
+    this.attrs = {};
+    this.style = {};
+    this._text = '';
+    this._classes = [];
+    this.classList = new ClassList(this);
+    this.listeners = {};
+  }
+  set className(value) { this._classes = String(value || '').split(/\s+/).filter(Boolean); }
+  get className() { return this._classes.join(' '); }
+  set textContent(value) { this._text = value === undefined || value === null ? '' : String(value); this.children = []; }
+  get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); }
+  setAttribute(key, value) { this.attrs[key] = String(value); }
+  getAttribute(key) { return this.attrs[key]; }
+  append(child) { this.children.push(child); return child; }
+  replaceChildren(...kids) { this.children = kids.slice(); this._text = ''; }
+  addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+}
+
+const registry = new Map();
+['hero', 'quotas', 'history', 'codex', 'metrics', 'today', 'week',
+ 'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status'].forEach((id) => {
+  registry.set(id, new Element('div'));
+});
+
+global.document = {
+  getElementById: (id) => registry.get(id) || null,
+  createElement: (tag) => new Element(tag),
+  createElementNS: (ns, tag) => new Element(tag, ns),
+};
+global.window = { addEventListener: () => {} };
+global.setInterval = () => 0;
+global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+
+/* ---------------- run the real dashboard script ---------------- */
+const code = fs.readFileSync(jsPath, 'utf8');
+vm.runInThisContext(code, { filename: jsPath });
+
+['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus']
+  .forEach((name) => assert(typeof global[name] === 'function' || typeof eval(name) === 'function',
+    'dashboard script did not expose ' + name));
+
+/* ---------------- fixtures (shapes copied from the live API) ---------------- */
+const QUOTAS = {
+  generated_at: '2026-10-03T03:37:51',
+  quotas: [
+    { account: 'codex_1', status: 'ok', provider: 'codex', label: 'Codex Primary 7d',
+      used_percentage: 10, remaining_percentage: 90, next_reset_time_ms: 1791580259000,
+      next_reset_iso: '2026-10-10T01:10:59', usage: null, remaining: null },
+    { account: 'codex_2', status: 'not_configured', provider: 'codex', label: 'Codex Secondary',
+      used_percentage: null, remaining_percentage: null, next_reset_time_ms: null,
+      next_reset_iso: null, usage: null, remaining: null },
+    { provider: 'grok', label: 'Weekly', used_percentage: 100, remaining_percentage: 0,
+      next_reset_time_ms: 1791064244000, next_reset_iso: '2026-10-04T01:50:44', usage: null, remaining: null },
+    { status: 'ok', balance_usd: 17.075988, spend_today_usd: 0.0, spend_7d_usd: 15.006731,
+      spend_30d_usd: 46.459125, provider: 'nordrouter', label: 'NordRouter USD',
+      used_percentage: null, remaining_percentage: null,
+      top_models_today: [{ id: 'z-ai/glm-5.3', tokens: 11735928, amount_usd: 0.9477 }],
+      top_models_7d: [{ id: 'z-ai/glm-5.3', tokens: 61934392, amount_usd: 7.8224 }],
+      today_complete: false, today_basis: 'server daily date' },
+  ],
+};
+
+const PAYLOAD = {
+  meta: { generated_at: '2026-10-03T03:37:51', start_date: '2026-09-04', end_date: '2026-10-03', days: 30 },
+  summary: { total_tokens: 1029393251, total_ai_hours: 0.01, total_cost_usd: 46.46,
+             categories: { nordrouter: 1029393251, cursor: 0, glm: 0 } },
+  daily: [
+    { date: '2026-09-04', total_tokens: 1498658, cost_usd: 0.59 },
+    { date: '2026-09-05', total_tokens: 0, cost_usd: 0.0 },
+    { date: '2026-09-06', total_tokens: 250000000, cost_usd: 8.8 },
+  ],
+};
+
+const MODELS = {
+  meta: { generated_at: '2026-10-03T03:49:55', start_date: '2026-09-27', end_date: '2026-10-03', days: 7 },
+  totals: { total: 535720909 },
+  models: [
+    { source: 'nordrouter', model: 'z-ai/glm-5.3', cost_usd: 7.822423, totals: { total: 61934392 }, daily: [] },
+    { source: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash:fjord', cost_usd: 1.865491, totals: { total: 336041919 }, daily: [] },
+    { source: 'glm', model: 'glm-coding-plan', cost_usd: null, totals: { total: 500 }, daily: [] },
+  ],
+};
+
+/* ---------------- helpers ---------------- */
+function walk(element, out) {
+  out = out || [];
+  out.push(element);
+  element.children.forEach((child) => walk(child, out));
+  return out;
+}
+function all(root) { return walk(root, []); }
+function withRole(root, role) { return all(root).filter((e) => e.getAttribute('role') === role); }
+function findByText(root, needle) { return all(root).filter((e) => e.textContent.includes(needle)); }
+function cardFor(root, needle) {
+  return all(root).filter((e) => e.classList.contains('card') && e.textContent.includes(needle));
+}
+
+/* ---------------- pure helpers ---------------- */
+assertEqual(severity(10), 'ok', 'severity(10)');
+assertEqual(severity(50), 'warn', 'severity(50)');
+assertEqual(severity(100), 'danger', 'severity(100)');
+assertEqual(statusClass('not_configured'), 'not_configured', 'statusClass(not_configured)');
+assertEqual(statusClass('stale'), 'stale', 'statusClass(stale)');
+assertEqual(providerName('codex'), 'Codex', 'providerName(codex)');
+assertEqual(providerName('grok'), 'Grok', 'providerName(grok)');
+assertEqual(tokens(1029393251), '1.03B', 'tokens(1.03B)');
+assertEqual(tokens(61934392), '61.9M', 'tokens(61.9M)');
+assertEqual(usd(null), '—', 'usd(null) is unknown, not $0');
+assertEqual(usd(0), '$0.0000', 'usd(0) is a real zero');
+assertEqual(countdown(null), null, 'countdown(null) has no countdown');
+assert(/^in (6h 0m|5h 59m)$/.test(countdown(Date.now() + 6 * 3600000)),
+  'countdown formats an hours-scale delta, got ' + countdown(Date.now() + 6 * 3600000));
+assert(/^in (2d 3h|2d 2h)$/.test(countdown(Date.now() + 2 * 86400000 + 3 * 3600000)),
+  'countdown formats a day-scale delta, got ' + countdown(Date.now() + 2 * 86400000 + 3 * 3600000));
+assertEqual(countdown(Date.now() - 1000), 'resetting…', 'a past reset reads as resetting');
+
+/* ---------------- quota rendering ---------------- */
+renderQuotas(QUOTAS);
+
+const codexRoot = registry.get('codex');
+const quotaRoot = registry.get('quotas');
+
+const codexCards = all(codexRoot).filter((e) => e.classList.contains('card'));
+assert(codexCards.length === 2, 'expected two Codex profile cards, got ' + codexCards.length);
+
+const configured = cardFor(codexRoot, 'codex_1')[0];
+assert(configured, 'codex_1 card missing');
+const configuredBars = withRole(configured, 'progressbar');
+assert(configuredBars.length === 1, 'configured codex window must render exactly one bar');
+assertEqual(configuredBars[0].getAttribute('aria-valuenow'), '10', 'codex_1 aria-valuenow');
+const configuredFill = all(configuredBars[0]).find((e) => e.classList.contains('fill'));
+assert(configuredFill.classList.contains('ok'), 'codex_1 at 10% must be colour-coded ok');
+assertEqual(configuredFill.style.width, '10%', 'codex_1 fill width');
+assert(configured.textContent.includes('10% used'), 'codex_1 must show its real percentage');
+assert(configured.textContent.includes('90% remaining'), 'codex_1 must show remaining');
+
+const unconfigured = cardFor(codexRoot, 'codex_2')[0];
+assert(unconfigured, 'codex_2 card missing');
+assert(withRole(unconfigured, 'progressbar').length === 0,
+  'an unconfigured window must not render a percentage bar');
+assert(unconfigured.textContent.includes('Not configured'), 'codex_2 must be labelled Not configured');
+assert(unconfigured.textContent.includes('Used: —'), 'codex_2 must show Used: — not 0%');
+assert(!unconfigured.textContent.includes('0% used'), 'an unconfigured window must never claim 0% used');
+assert(unconfigured.textContent.includes('No percentage reported'), 'codex_2 must explain the missing value');
+
+const grokCard = cardFor(quotaRoot, 'Grok')[0];
+assert(grokCard, 'Grok card missing from the quota grid');
+const grokBars = withRole(grokCard, 'progressbar');
+assertEqual(grokBars.length, 1, 'Grok must render one bar');
+const grokFill = all(grokBars[0]).find((e) => e.classList.contains('fill'));
+assert(grokFill.classList.contains('danger'), 'Grok at 100% must be colour-coded danger');
+assertEqual(grokFill.style.width, '100%', 'Grok fill width');
+assert(grokCard.textContent.includes('100% used'), 'Grok must show 100% used');
+assert(grokCard.textContent.includes('0% remaining'), 'Grok must show 0% remaining');
+// The live Grok row carries a real percentage but no explicit status field;
+// it must read as Active, not as Unknown.
+assert(grokCard.textContent.includes('Active'), 'a window with a real percentage must read as Active');
+assert(!grokCard.textContent.includes('Unknown'), 'a live window must not be labelled Unknown');
+assertEqual(effectiveStatus({ windows: [{ used_percentage: 42 }] }), 'ok',
+  'effectiveStatus falls back to ok when a percentage exists');
+assertEqual(effectiveStatus({ windows: [{ used_percentage: null }] }), 'unknown',
+  'effectiveStatus stays unknown without a percentage or status');
+assertEqual(effectiveStatus({ status: 'not_configured', windows: [{ used_percentage: 42 }] }), 'not_configured',
+  'an explicit status wins over the percentage fallback');
+
+assert(!quotaRoot.textContent.includes('NordRouter'), 'NordRouter must not appear in the quota grid');
+assert(registry.get('nr-status').textContent.includes('incomplete'),
+  'NordRouter partial-today note must be surfaced');
+assert(registry.get('metrics').textContent.includes('$17.08'),
+  'NordRouter balance must render as USD, got: ' + registry.get('metrics').textContent);
+assert(registry.get('today').textContent.includes('z-ai/glm-5.3'), 'top models today must render');
+
+/* ---------------- overview + history ---------------- */
+renderHero(PAYLOAD);
+const heroText = registry.get('hero').textContent;
+assert(heroText.includes('1.03B'), 'hero must show the 30d token total');
+assert(heroText.includes('$46.46'), 'hero must show the 30d cost');
+assert(heroText.includes('2 active days'), 'hero must count only days with real usage');
+assert(heroText.includes('2026-09-06'), 'hero must point at the latest active day');
+
+renderHistory(PAYLOAD);
+const history = registry.get('history');
+const rects = all(history).filter((e) => e.tagName === 'RECT');
+assertEqual(rects.length, 3, 'chart must draw one bar per day in the window, preserving the time axis');
+const zeroBar = rects.find((r) => {
+  const title = all(r).find((c) => c.tagName === 'TITLE');
+  return title && title.textContent.includes('2026-09-05');
+});
+assert(zeroBar, 'a zero-usage day must still occupy its slot');
+assertEqual(zeroBar.getAttribute('height'), '0', 'a zero-usage day must render at height 0, not a fake bar');
+const realBar = rects.find((r) => {
+  const title = all(r).find((c) => c.tagName === 'TITLE');
+  return title && title.textContent.includes('2026-09-06');
+});
+assert(parseFloat(realBar.getAttribute('height')) > 0, 'a day with usage must render a visible bar');
+assert(history.textContent.includes('peak 250.0M'), 'chart legend must report the real peak');
+const titled = rects.map((r) => all(r).find((c) => c.tagName === 'TITLE')).filter(Boolean);
+assertEqual(titled.length, 3, 'each bar must carry a tooltip with its real value');
+assert(titled.some((t) => t.textContent.includes('2026-09-06') && t.textContent.includes('250,000,000')),
+  'bar tooltip must expose the real token count');
+
+renderHistory({ daily: [{ date: '2026-10-03', total_tokens: 0, cost_usd: 0 }] });
+assert(registry.get('history').textContent.includes('No historical usage data available'),
+  'an all-zero history must render an explicit empty state');
+assert(all(registry.get('history')).filter((e) => e.tagName === 'RECT').length === 0,
+  'an all-zero history must not draw bars');
+
+/* ---------------- model table ---------------- */
+renderModels(MODELS);
+const rows = all(registry.get('models')).filter((e) => e.tagName === 'TR');
+assertEqual(rows.length, 3, 'model table must render one row per model');
+assert(rows[0].textContent.includes('z-ai/glm-5.3'), 'rows must be sorted by cost descending');
+assert(rows[0].textContent.includes('$7.82'), 'top row must show its real cost');
+assert(rows[2].textContent.includes('—'), 'a model with no reported cost must show — not $0');
+assert(registry.get('model-stamp').textContent.includes('2026-09-27'), 'model stamp must show the window');
+
+renderModels({ models: [] });
+assert(registry.get('models').textContent.includes('No model data available'),
+  'an empty model list must render an explicit empty state');
+
+/* ---------------- no unsafe DOM APIs ---------------- */
+assert(!code.includes('innerHTML'), 'dashboard script must not use innerHTML');
+assert(!code.includes('insertAdjacentHTML'), 'dashboard script must not use insertAdjacentHTML');
+assert(!code.includes('document.write'), 'dashboard script must not use document.write');
+
+console.log('OK: dashboard DOM contract holds');

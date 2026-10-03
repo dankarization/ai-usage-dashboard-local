@@ -1,0 +1,91 @@
+"""Tests for the self-contained dashboard page.
+
+Two layers:
+
+* Static invariants: the page must not pull external assets or use unsafe DOM
+  APIs, and it must keep the endpoints the service actually serves.
+* Behavioural contract: the real dashboard script is executed against a small
+  DOM shim (``tests/dashboard_dom_harness.js``) so quota semantics are asserted
+  on rendered output rather than on source substrings.
+"""
+from pathlib import Path
+import re
+import shutil
+import subprocess
+
+import pytest
+
+import local_display_service
+from dashboard_page import DASHBOARD_HTML
+
+HARNESS = Path(__file__).resolve().parent / 'dashboard_dom_harness.js'
+
+
+def _extract_script(html: str) -> str:
+    match = re.search(r'<script>(.*?)</script>', html, re.S)
+    assert match, 'dashboard HTML must contain an inline script'
+    return match.group(1)
+
+
+def test_page_has_no_external_assets():
+    for needle in ('<script src=', '<link ', 'innerHTML', 'document.write', 'insertAdjacentHTML', 'cdn.'):
+        assert needle not in DASHBOARD_HTML, f'dashboard must not use {needle!r}'
+    # The only absolute URL may be the SVG namespace, which is not a network fetch.
+    urls = {u for u in re.findall(r'https?://[^\s"\')]+', DASHBOARD_HTML)}
+    assert urls <= {'http://www.w3.org/2000/svg'}, f'unexpected external URL(s): {sorted(urls)}'
+
+
+def test_page_exposes_responsive_and_accessibility_hooks():
+    assert 'viewport' in DASHBOARD_HTML
+    assert '@media (max-width:640px)' in DASHBOARD_HTML
+    assert 'prefers-reduced-motion' in DASHBOARD_HTML
+    # Quota bars are real progressbars with an accessible name and value.
+    assert "setAttribute('role', 'progressbar')" in DASHBOARD_HTML
+    assert 'aria-valuenow' in DASHBOARD_HTML
+    assert 'aria-label' in DASHBOARD_HTML
+
+
+def test_page_calls_the_live_endpoints():
+    for endpoint in ('/api/v1/quotas', '/api/v1/model-breakdown?days=7&daily=false',
+                     '/api/v1/display/update', '/token_usage.json'):
+        assert endpoint in DASHBOARD_HTML, f'dashboard must call {endpoint}'
+
+
+def test_page_distinguishes_unavailable_from_zero():
+    # An unavailable window must render an explicit explanation, never a 0% bar.
+    assert "'Used: —'" in DASHBOARD_HTML
+    assert 'No percentage reported for this window.' in DASHBOARD_HTML
+    assert "'—'" in DASHBOARD_HTML
+    # NordRouter is excluded from the quota grid and rendered in its own section.
+    assert "row.provider !== 'nordrouter' && row.provider !== 'codex'" in DASHBOARD_HTML
+
+
+def test_page_draws_history_only_from_real_buckets():
+    assert 'No historical usage data available.' in DASHBOARD_HTML
+    assert 'payload.daily' in DASHBOARD_HTML
+    # No fabricated series, token totals, or placeholder chart data.
+    assert 'Math.random' not in DASHBOARD_HTML
+    assert 'lorem' not in DASHBOARD_HTML.lower()
+
+
+def test_dashboard_routes_serve_the_page():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(local_display_service.app)
+    for route in ('/', '/dashboard'):
+        response = client.get(route)
+        assert response.status_code == 200
+        assert response.headers['content-type'].startswith('text/html')
+        assert 'AI Usage Dashboard' in response.text
+
+
+@pytest.mark.skipif(shutil.which('node') is None, reason='node is required for the DOM harness')
+def test_dashboard_script_satisfies_rendered_contract(tmp_path):
+    script_path = tmp_path / 'dashboard.js'
+    script_path.write_text(_extract_script(DASHBOARD_HTML))
+    result = subprocess.run(
+        ['node', str(HARNESS), str(script_path)],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, f'DOM harness failed:\n{result.stdout}\n{result.stderr}'
+    assert 'OK: dashboard DOM contract holds' in result.stdout
