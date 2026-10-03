@@ -66,6 +66,25 @@ its own `auth.json` and optional ChatGPT account ID for quota requests, with its
 own session-log fallback. Missing profiles still appear as placeholders with
 unknown (null) percentages, never 0% used / 100% remaining.
 
+To enable the second account, create a separate Codex home and sign in there,
+then point the dashboard at it:
+
+```bash
+CODEX_HOME=~/.codex-secondary codex login
+```
+
+```bash
+# private .env
+CODEX_HOME_2=~/.codex-secondary
+CODEX_LABEL_2=you@example.com
+```
+
+Codex writes that account's own `auth.json` under the second home, and the
+dashboard reads it read-only to request that account's quota. A login held by a
+separate tool is not reused: those stores are private to that tool, this
+dashboard does not export credentials out of them, and a second Codex login is
+the supported way to give it a credential it may read.
+
 `npx ccusage codex daily` runs separately with each profile's `CODEX_HOME`;
 local daily tokens and estimated costs are summed into the GPT category. An
 identical resolved home is counted once. Per-profile exports are cached in

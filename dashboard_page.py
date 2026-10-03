@@ -395,6 +395,10 @@ function limitGroup(group, root) {
   var chip = node('span', statusText(status), head);
   chip.className = 'chip ' + statusClass(status);
   group.windows.forEach(function (window) { windowRow(card, window); });
+  // A placeholder account is only useful if it says how to become real.
+  if (status === 'not_configured') {
+    node('p', 'No second Codex login on this machine yet.', card).className = 'unavailable';
+  }
 }
 
 /* A provider that reports a real percentage but no explicit status is live. */

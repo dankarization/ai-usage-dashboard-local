@@ -206,6 +206,8 @@ assert(unconfigured.textContent.includes('Not configured'), 'codex_2 must be lab
 assert(unconfigured.textContent.includes('Used: —'), 'codex_2 must show Used: — not 0%');
 assert(!unconfigured.textContent.includes('0% used'), 'an unconfigured window must never claim 0% used');
 assert(unconfigured.textContent.includes('No percentage reported'), 'codex_2 must explain the missing value');
+assert(unconfigured.textContent.includes('No second Codex login on this machine yet.'),
+  'an unconfigured account must say what is missing');
 
 const grokCard = cardFor(quotaRoot, 'Grok')[0];
 assert(grokCard, 'Grok card missing from the quota grid');
@@ -319,15 +321,19 @@ assert(registry.get('est-sub').textContent.includes('estimate'),
 /* ---------------- snapshot time ---------------- */
 // The header must use the offset-aware field and render it in local time with
 // a relative age, never the naive server string relabelled as local time.
-const fresh = snapshotLabel('2026-10-03T19:51:45+00:00', '2026-10-03T12:51:45');
+// Timestamps are relative to now so the staleness threshold stays meaningful.
+const freshIso = new Date(Date.now() - 60000).toISOString();
+const fresh = snapshotLabel(freshIso, '2026-10-03T12:51:45');
 assert(fresh.text.includes('snapshot '), 'a snapshot label must be prefixed with snapshot');
 assert(!fresh.text.includes('12:51:45'), 'a snapshot must not fall back to the naive server string');
-assertEqual(fresh.stale, false, 'a just-taken snapshot must not be marked stale');
+assertEqual(fresh.stale, false, 'a one-minute-old snapshot must not be marked stale');
 
 const old = snapshotLabel(new Date(Date.now() - 3 * 3600000).toISOString(), null);
 assertEqual(old.stale, true, 'a three-hour-old snapshot must be marked stale');
 assert(old.text.includes('3h ago'), 'a stale snapshot must show its relative age, got: ' + old.text);
 
+// A legacy cached payload has no offset-aware field; it must not be presented
+// as the viewer's local time.
 const legacy = snapshotLabel(null, '2026-10-03T12:51:45');
 assert(legacy.text.includes('server time'),
   'a legacy naive timestamp must be labelled as server time, not local time');
