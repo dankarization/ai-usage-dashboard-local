@@ -84,6 +84,22 @@ def test_page_shows_configured_and_unconfigured_account_states():
     assert 'No percentage reported for this window.' in DASHBOARD_HTML
 
 
+def test_page_renders_snapshot_time_from_offset_aware_field():
+    """The header must not present a naive server timestamp as local time.
+
+    generated_at is Pacific wall clock with no offset, so a browser would read
+    it as its own local time and show the wrong hour. The page must prefer the
+    offset-aware generated_at_utc and label a legacy value as server time.
+    """
+    assert 'function snapshotLabel(' in DASHBOARD_HTML
+    assert 'generated_at_utc' in DASHBOARD_HTML
+    assert 'server time' in DASHBOARD_HTML
+    assert 'function relativeAge(' in DASHBOARD_HTML
+    # A stale snapshot must be marked rather than presented as current.
+    assert 'STALE_AFTER_MS' in DASHBOARD_HTML
+    assert 'stale' in DASHBOARD_HTML
+
+
 def test_page_distinguishes_unavailable_from_zero():
     # An unavailable window must render an explicit explanation, never a 0% bar.
     assert "'Used: —'" in DASHBOARD_HTML

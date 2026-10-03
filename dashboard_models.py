@@ -21,7 +21,8 @@ class DashboardMeta(BaseModel):
     """Metadata describing the dashboard generation run."""
 
     version: int = Field(default=1, description='Payload schema version. Incremented on breaking shape changes.')
-    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the payload was generated.')
+    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the payload was generated. Naive Pacific wall clock kept for the e-ink firmware; prefer generated_at_utc for display.')
+    generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) marking when the payload was generated. Consumers render it in their own timezone.')
     start_date: Optional[str] = Field(default=None, description='Inclusive start date of the daily window, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date of the daily window, YYYY-MM-DD.')
     days: Optional[int] = Field(default=None, description='Number of days covered by the daily array, inclusive of both endpoints.')
@@ -125,7 +126,8 @@ class AutomationQuotaSnapshot(AccountMetrics):
 class QuotasResponse(BaseModel):
     """Compact quota response intended for scripts and agents."""
 
-    generated_at: Optional[str] = Field(default=None, description='Generation time of the cached dashboard snapshot in local ISO format.')
+    generated_at: Optional[str] = Field(default=None, description='Generation time of the cached dashboard snapshot in local ISO format. Naive Pacific wall clock kept for backward compatibility; prefer generated_at_utc.')
+    generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) of the cached dashboard snapshot. Consumers render it in their own timezone.')
     quotas: list[AutomationQuotaSnapshot] = Field(default_factory=list, description='Current quota windows across all available providers.')
 
 
@@ -144,7 +146,8 @@ class HealthResponse(BaseModel):
 
     status: str = Field(description='Service status, e.g. "ok".')
     service: str = Field(description='Service name, e.g. "ai_usage_dashboard".')
-    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) of the health check.')
+    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) of the health check. Naive Pacific wall clock kept for backward compatibility; prefer generated_at_utc.')
+    generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) of the health check.')
 
 
 class UpdateRequest(BaseModel):
@@ -202,7 +205,8 @@ class ModelBreakdownTotals(BaseModel):
 class ModelBreakdownMeta(BaseModel):
     """Metadata for the model-breakdown response."""
 
-    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the breakdown was generated.')
+    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the breakdown was generated. Naive Pacific wall clock kept for the e-ink firmware; prefer generated_at_utc for display.')
+    generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) marking when the breakdown was generated.')
     start_date: Optional[str] = Field(default=None, description='Inclusive start date, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date, YYYY-MM-DD.')
     days: Optional[int] = Field(default=None, description='Number of days covered, inclusive of both endpoints.')

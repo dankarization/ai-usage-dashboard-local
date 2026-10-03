@@ -87,7 +87,7 @@ global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({})
 const code = fs.readFileSync(jsPath, 'utf8');
 vm.runInThisContext(code, { filename: jsPath });
 
-['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'subscriptionEstimate', 'renderEstimate']
+['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'subscriptionEstimate', 'renderEstimate', 'snapshotLabel', 'relativeAge']
   .forEach((name) => assert(typeof global[name] === 'function' || typeof eval(name) === 'function',
     'dashboard script did not expose ' + name));
 
@@ -144,7 +144,7 @@ function all(root) { return walk(root, []); }
 function withRole(root, role) { return all(root).filter((e) => e.getAttribute('role') === role); }
 function findByText(root, needle) { return all(root).filter((e) => e.textContent.includes(needle)); }
 function cardFor(root, needle) {
-  return all(root).filter((e) => e.classList.contains('card') && e.textContent.includes(needle));
+  return all(root).filter((e) => e.classList.contains('limit-group') && e.textContent.includes(needle));
 }
 
 /* ---------------- pure helpers ---------------- */
@@ -175,17 +175,20 @@ renderQuotas(QUOTAS);
 const codexRoot = registry.get('codex');
 const quotaRoot = registry.get('quotas');
 
-const codexCards = all(codexRoot).filter((e) => e.classList.contains('card'));
-assert(codexCards.length === 2, 'expected two Codex profile cards, got ' + codexCards.length);
+const codexRows = all(codexRoot).filter((e) => e.classList.contains('limit-group'));
+assert(codexRows.length === 2, 'expected two Codex account rows, got ' + codexRows.length);
 // Account order must follow the quota payload: codex_1 before codex_2.
-assert(codexCards[0].textContent.includes('codex_1'), 'codex_1 must render before codex_2');
-assert(codexCards[1].textContent.includes('codex_2'), 'codex_2 must be the second Codex card');
-// Each card carries a brand mark.
-assertEqual(all(codexCards[0]).filter((e) => e.classList.contains('brandtile'))[0].textContent, 'OI',
-  'Codex cards must carry the OI brand mark');
+assert(codexRows[0].textContent.includes('codex_1'), 'codex_1 must render before codex_2');
+assert(codexRows[1].textContent.includes('codex_2'), 'codex_2 must be the second Codex row');
+// Each row carries a brand mark.
+assertEqual(all(codexRows[0]).filter((e) => e.classList.contains('brandtile'))[0].textContent, 'OI',
+  'Codex rows must carry the OI brand mark');
+// A not-configured account is a subdued single row, not a large empty card.
+assert(codexRows[1].classList.contains('subdued'),
+  'an unconfigured account must render as a subdued row');
 
 const configured = cardFor(codexRoot, 'codex_1')[0];
-assert(configured, 'codex_1 card missing');
+assert(configured, 'codex_1 row missing');
 const configuredBars = withRole(configured, 'progressbar');
 assert(configuredBars.length === 1, 'configured codex window must render exactly one bar');
 assertEqual(configuredBars[0].getAttribute('aria-valuenow'), '10', 'codex_1 aria-valuenow');
@@ -193,10 +196,10 @@ const configuredFill = all(configuredBars[0]).find((e) => e.classList.contains('
 assert(configuredFill.classList.contains('ok'), 'codex_1 at 10% must be colour-coded ok');
 assertEqual(configuredFill.style.width, '10%', 'codex_1 fill width');
 assert(configured.textContent.includes('10% used'), 'codex_1 must show its real percentage');
-assert(configured.textContent.includes('90% remaining'), 'codex_1 must show remaining');
+assert(configured.textContent.includes('90% left'), 'codex_1 must show its remaining percentage');
 
 const unconfigured = cardFor(codexRoot, 'codex_2')[0];
-assert(unconfigured, 'codex_2 card missing');
+assert(unconfigured, 'codex_2 row missing');
 assert(withRole(unconfigured, 'progressbar').length === 0,
   'an unconfigured window must not render a percentage bar');
 assert(unconfigured.textContent.includes('Not configured'), 'codex_2 must be labelled Not configured');
@@ -212,7 +215,7 @@ const grokFill = all(grokBars[0]).find((e) => e.classList.contains('fill'));
 assert(grokFill.classList.contains('danger'), 'Grok at 100% must be colour-coded danger');
 assertEqual(grokFill.style.width, '100%', 'Grok fill width');
 assert(grokCard.textContent.includes('100% used'), 'Grok must show 100% used');
-assert(grokCard.textContent.includes('0% remaining'), 'Grok must show 0% remaining');
+assert(grokCard.textContent.includes('0% left'), 'Grok must show 0% left');
 // The live Grok row carries a real percentage but no explicit status field;
 // it must read as Active, not as Unknown.
 assert(grokCard.textContent.includes('Active'), 'a window with a real percentage must read as Active');
@@ -225,8 +228,8 @@ assertEqual(effectiveStatus({ status: 'not_configured', windows: [{ used_percent
   'an explicit status wins over the percentage fallback');
 
 assert(!quotaRoot.textContent.includes('NordRouter'), 'NordRouter must not appear in the quota grid');
-assertEqual(all(quotaRoot).filter((e) => e.classList.contains('card')).length, 1,
-  'the quota grid must hold exactly the Grok card when only Grok is present');
+assertEqual(all(quotaRoot).filter((e) => e.classList.contains('limit-group')).length, 1,
+  'the quota list must hold exactly the Grok row when only Grok is present');
 assertEqual(orderGroups([{ provider: 'glm', account: '' }, { provider: 'grok', account: '' }, { provider: 'codex', account: 'codex_2' }, { provider: 'codex', account: 'codex_1' }])
   .map((g) => g.provider + (g.account || '')).join(','),
   'codexcodex_1,codexcodex_2,grok,glm',
@@ -312,6 +315,25 @@ renderEstimate();
 assertEqual(registry.get('est-value').textContent, '$20.00', 'a real estimate must render its sum');
 assert(registry.get('est-sub').textContent.includes('estimate'),
   'the estimate must be labelled as an estimate');
+
+/* ---------------- snapshot time ---------------- */
+// The header must use the offset-aware field and render it in local time with
+// a relative age, never the naive server string relabelled as local time.
+const fresh = snapshotLabel('2026-10-03T19:51:45+00:00', '2026-10-03T12:51:45');
+assert(fresh.text.includes('snapshot '), 'a snapshot label must be prefixed with snapshot');
+assert(!fresh.text.includes('12:51:45'), 'a snapshot must not fall back to the naive server string');
+assertEqual(fresh.stale, false, 'a just-taken snapshot must not be marked stale');
+
+const old = snapshotLabel(new Date(Date.now() - 3 * 3600000).toISOString(), null);
+assertEqual(old.stale, true, 'a three-hour-old snapshot must be marked stale');
+assert(old.text.includes('3h ago'), 'a stale snapshot must show its relative age, got: ' + old.text);
+
+const legacy = snapshotLabel(null, '2026-10-03T12:51:45');
+assert(legacy.text.includes('server time'),
+  'a legacy naive timestamp must be labelled as server time, not local time');
+assertEqual(legacy.stale, true, 'a legacy naive timestamp must not be presented as current');
+assertEqual(relativeAge(Date.now() - 7 * 60000), '7m ago', 'relativeAge reports minutes');
+assertEqual(relativeAge(Date.now()), 'just now', 'relativeAge reports a fresh timestamp');
 
 /* ---------------- no unsafe DOM APIs ---------------- */
 assert(!code.includes('innerHTML'), 'dashboard script must not use innerHTML');

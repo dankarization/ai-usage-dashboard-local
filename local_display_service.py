@@ -65,6 +65,24 @@ def generate_latest_payload() -> dict[str, Any]:
     return build_latest_dashboard_payload(days=30, no_cost=False, skip_desktop_chart=True)
 
 
+def _pacific_naive_to_utc_iso(value: Any) -> str | None:
+    """Resolve a legacy naive Pacific ``generated_at`` to an offset-aware UTC ISO.
+
+    Older cached payloads predate ``generated_at_utc``. Their ``generated_at``
+    is Pacific wall clock with no offset, so it must be labelled Pacific before
+    conversion; otherwise a browser would read it as its own local time.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    return parsed.astimezone(ZoneInfo("UTC")).isoformat(timespec="seconds")
+
+
 @app.get(
     "/health",
     response_model=HealthResponse,
@@ -75,6 +93,7 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "service": "ai_usage_dashboard",
         "generated_at": datetime.now(ZoneInfo("America/Los_Angeles")).replace(tzinfo=None).isoformat(timespec="seconds"),
+        "generated_at_utc": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds"),
     }
 
 
@@ -118,8 +137,10 @@ def quotas() -> dict[str, Any]:
             "usage": item.get("usage"),
             "remaining": item.get("remaining"),
         })
+    meta = payload.get("meta") or {}
     return {
-        "generated_at": (payload.get("meta") or {}).get("generated_at"),
+        "generated_at": meta.get("generated_at"),
+        "generated_at_utc": meta.get("generated_at_utc") or _pacific_naive_to_utc_iso(meta.get("generated_at")),
         "quotas": quota_items,
     }
 

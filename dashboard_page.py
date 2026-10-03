@@ -1,13 +1,23 @@
 """Self-contained local dashboard without external assets.
 
+Layout and design tokens are adapted from the OpenCodex GUI design system
+(https://github.com/lidge-jun/opencodex, MIT License, (c) 2026 opencodex
+contributors): role-based colour tokens, a 10/11/12/13/14/16/20/24 type scale,
+a 4px spacing base, 4/6/8/12/16/pill radii, and the rule that a container is
+added to group information, not merely to divide it. No OpenCodex source code
+or assets are copied; only published token values and layout conventions.
+
 The page is a single HTML document served by ``local_display_service``. It keeps
-three invariants:
+these invariants:
 
 * No external assets: no ``<script src=``, no ``<link>``, no ``innerHTML``.
-* No invented data: every number comes from a live endpoint, and a window that
-  has no percentage renders as "unavailable"/"not configured", never as 0%.
+* No invented data: every number comes from a live endpoint, and a window with
+  no percentage renders as "unavailable"/"not configured", never as 0%.
 * Honest history: the daily chart is drawn only from real ``token_usage.json``
   buckets and shows an explicit empty state when every bucket is zero.
+* Honest snapshot time: the header renders the offset-aware ``generated_at_utc``
+  in the viewer's own timezone with a relative age, and marks a stale snapshot
+  instead of presenting it as current.
 """
 
 DASHBOARD_HTML = r'''<!doctype html>
@@ -18,153 +28,150 @@ DASHBOARD_HTML = r'''<!doctype html>
 <meta name="color-scheme" content="dark">
 <title>AI Usage Dashboard</title>
 <style>
+/* Design tokens adapted from the OpenCodex design system (MIT). */
 :root{
-  --bg:#0b0f17; --panel:#131a26; --panel-2:#182131; --line:#26334a;
-  --text:#e8eef8; --muted:#94a3b8; --faint:#64748b;
-  --accent:#6ea8fe; --ok:#34d399; --warn:#fbbf24; --danger:#f87171; --neutral:#7c8ba1;
-  --radius:14px; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.22);
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --bg:#1c1c1c; --surface:#232323; --raised:#2b2b2b; --line:#343434; --line-soft:#2c2c2c;
+  --text:#ececec; --muted:#a6a6a6; --faint:#8a8a8a;
+  --green:#4ecb9d; --amber:#fbbf24; --red:#f87171; --accent:#7aa2f7; --neutral:#8a8a8a;
+  --radius-xs:6px; --radius-sm:8px; --radius:12px; --pill:999px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px;
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --font-code:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --motion-fast:120ms;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
-  background:
-    radial-gradient(1100px 520px at 12% -12%,rgba(110,168,254,.10),transparent 62%),
-    radial-gradient(900px 460px at 100% 0%,rgba(52,211,153,.07),transparent 60%),
-    var(--bg);
-  color:var(--text);
-  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  background:var(--bg);color:var(--text);
+  font:13px/1.35 var(--font-ui);
   -webkit-font-smoothing:antialiased;
-  padding:0 0 56px;
+  padding:0 0 36px;
 }
-.wrap{max-width:1180px;margin:0 auto;padding:0 18px}
-a{color:var(--accent)}
+.wrap{max-width:1120px;margin:0 auto;padding:0 var(--s5)}
 
 /* ---------- top bar ---------- */
-.topbar{
-  position:sticky;top:0;z-index:20;
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-  background:rgba(11,15,23,.82);border-bottom:1px solid var(--line);
-}
-.topbar-in{max-width:1180px;margin:0 auto;padding:13px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:11px;min-width:0}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(52,211,153,.15);flex:none}
-h1{font-size:1.06rem;margin:0;letter-spacing:-.01em;font-weight:650;white-space:nowrap}
-.sub{color:var(--faint);font-size:.8rem;margin:0;white-space:nowrap}
+.topbar{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+.topbar-in{max-width:1120px;margin:0 auto;padding:9px var(--s5);display:flex;align-items:center;gap:var(--s3)}
+.brand{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.dot{width:7px;height:7px;border-radius:var(--pill);background:var(--green);flex:none}
+h1{font-size:14px;margin:0;font-weight:600;white-space:nowrap;letter-spacing:-.01em}
 .spacer{flex:1 1 auto}
+.stamp{color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stamp.stale{color:var(--amber)}
 .btn{
-  appearance:none;border:1px solid var(--line);background:var(--panel-2);color:var(--text);
-  font:inherit;font-weight:600;font-size:.86rem;padding:9px 16px;border-radius:10px;cursor:pointer;
-  display:inline-flex;align-items:center;gap:8px;transition:background .15s,border-color .15s,transform .06s;
+  appearance:none;border:1px solid var(--line);background:var(--raised);color:var(--text);
+  font:500 13px/1 var(--font-ui);padding:7px 13px;border-radius:var(--radius-sm);cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;transition:background var(--motion-fast),border-color var(--motion-fast);
 }
-.btn:hover{background:#1e293c;border-color:#33415c}
-.btn:active{transform:translateY(1px)}
+.btn:hover{background:#333;border-color:#444}
 .btn[disabled]{opacity:.55;cursor:progress}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#08111f}
-.btn.primary:hover{background:#8ab8ff;border-color:#8ab8ff}
-.pulse{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.9}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#14171f}
+.btn.primary:hover{background:#8fb3f9;border-color:#8fb3f9}
+.pulse{width:6px;height:6px;border-radius:var(--pill);background:currentColor}
 .busy .pulse{animation:blink 1s infinite}
 @keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
-.stamp{color:var(--faint);font-size:.78rem;font-variant-numeric:tabular-nums}
 
-/* ---------- layout ---------- */
-section{margin-top:26px}
-.sec-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 12px}
-h2{font-size:.95rem;margin:0;font-weight:650;letter-spacing:.02em;text-transform:uppercase;color:#b9c6da}
-h3{font-size:.95rem;margin:0;font-weight:600}
-.note{color:var(--faint);font-size:.78rem;margin:0}
-.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-.card{
-  background:linear-gradient(180deg,var(--panel),var(--panel-2));
-  border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);
-}
-.card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.badge{
-  font-size:.74rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
-  padding:4px 9px;border-radius:999px;border:1px solid var(--line);color:#cbd5e1;background:#1b2434;
-}
-.badge.p-codex{color:#a7c7ff;border-color:#2f4570;background:#16203a}
-.badge.p-grok{color:#e2c6ff;border-color:#4a3670;background:#221a33}
-.badge.p-glm{color:#a7f3d0;border-color:#2c5a4b;background:#14261f}
-.badge.p-claude{color:#f5c9a8;border-color:#5c4530;background:#2a2018}
-.badge.p-antigravity{color:#a8e5f5;border-color:#2c5560;background:#14242a}
-.badge.p-cursor{color:#c9d4ff;border-color:#3a4470;background:#1a1f33}
-.badge.p-ollama{color:#e6e6e6;border-color:#3d4653;background:#20252d}
-.badge.p-nordrouter{color:#a7f3d0;border-color:#2c5a4b;background:#14261f}
-.badge.account{font-family:var(--mono);text-transform:none;font-weight:600;color:var(--muted)}
-.chip{
-  margin-left:auto;font-size:.72rem;font-weight:700;padding:4px 9px;border-radius:999px;
-  border:1px solid var(--line);color:var(--muted);background:#1a2130;white-space:nowrap;
-}
-.chip.ok{color:var(--ok);border-color:#245c46;background:#10241c}
-.chip.warn,.chip.stale{color:var(--warn);border-color:#5c4a17;background:#241f10}
-.chip.danger{color:var(--danger);border-color:#5c2a2a;background:#241313}
-.chip.unknown,.chip.not_configured,.chip.unavailable{color:var(--neutral);border-color:#33415580;background:#1a2130}
-.brandtile{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);font-weight:800;font-size:.82rem;flex:none;letter-spacing:-.02em}
+/* ---------- sections: flat, hairline separated ---------- */
+section{margin-top:var(--s5)}
+.sec-head{display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;margin:0 0 var(--s2)}
+h2{font-size:12px;margin:0;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.note{color:var(--faint);font-size:11px;margin:0}
+h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s3) var(--s4)}
+.panel.flat{padding:2px var(--s4)}
 
-/* ---------- stat tiles ---------- */
-.stat{padding:15px 16px}
-.stat .k{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
-.stat .v{font-size:1.5rem;font-weight:680;letter-spacing:-.02em;margin-top:5px;font-variant-numeric:tabular-nums}
-.stat .s{color:var(--faint);font-size:.75rem;margin-top:3px}
-.stat .v.unknown{color:var(--faint);font-weight:600}
+/* ---------- summary strip ---------- */
+.strip{display:flex;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.strip-item{padding:11px var(--s4);border-left:1px solid var(--line);min-width:0;flex:1 1 150px}
+.strip-item:first-child{border-left:0}
+.strip-item .k{color:var(--faint);font-size:11px;margin-bottom:3px;white-space:nowrap}
+.strip-item .v{font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.2}
+.strip-item .v.unknown{color:var(--faint);font-weight:500}
+.strip-item .s{color:var(--faint);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
+.pillrow{display:flex;gap:6px;flex-wrap:wrap;padding:9px var(--s4);border-top:1px solid var(--line);width:100%}
+.pill{font-size:11px;color:var(--muted);border:1px solid var(--line);background:var(--raised);border-radius:var(--pill);padding:2px 8px;font-variant-numeric:tabular-nums}
 
-/* ---------- quota windows ---------- */
-.win{padding:11px 0;border-top:1px dashed var(--line)}
-.win:first-of-type{border-top:0;padding-top:0}
-.win-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
-.win-label{font-size:.85rem;font-weight:600;color:#d7e0ee}
-.win-pct{font-size:.92rem;font-weight:700;font-variant-numeric:tabular-nums;color:var(--muted)}
-.win-pct.ok{color:var(--ok)} .win-pct.warn{color:var(--warn)} .win-pct.danger{color:var(--danger)}
-.track{position:relative;height:9px;border-radius:999px;background:#0e1622;border:1px solid #1f2a3d;overflow:hidden;margin:9px 0 7px}
-.fill{height:100%;border-radius:999px;transition:width .5s ease}
-.fill.ok{background:linear-gradient(90deg,#1f9d6b,#34d399)}
-.fill.warn{background:linear-gradient(90deg,#b4831f,#fbbf24)}
-.fill.danger{background:linear-gradient(90deg,#b53b3b,#f87171)}
-.fill.unknown{background:repeating-linear-gradient(135deg,#243044 0 6px,#1a2333 6px 12px)}
-.win-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--faint);font-size:.75rem;font-variant-numeric:tabular-nums}
-.win-foot b{color:var(--muted);font-weight:600}
-.unavailable{margin:2px 0 0;color:var(--faint);font-size:.8rem;font-style:italic}
+/* ---------- unified limit rows ---------- */
+.limit-group{padding:10px 0;border-top:1px solid var(--line-soft)}
+.limit-group:first-child{border-top:0}
+.limit-group.subdued{opacity:.7}
+.limit-head{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin-bottom:6px}
+.brandtile{
+  display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
+  border-radius:var(--radius-xs);border:1px solid var(--line);background:var(--raised);
+  font-weight:700;font-size:9px;flex:none;letter-spacing:-.02em;color:var(--muted)
+}
+.pname{font-size:13px;font-weight:600}
+.acct{font-family:var(--font-code);font-size:11px;color:var(--faint)}
+.chip{margin-left:auto;font-size:11px;font-weight:500;padding:2px 8px;border-radius:var(--pill);border:1px solid var(--line);color:var(--muted);background:var(--raised);white-space:nowrap}
+.chip.ok{color:var(--green);border-color:#2f5c4b;background:#1d2b26}
+.chip.warn,.chip.stale{color:var(--amber);border-color:#5a4a1c;background:#2a2416}
+.chip.danger{color:var(--red);border-color:#5c3030;background:#2b1d1d}
+.chip.unknown,.chip.not_configured,.chip.unavailable{color:var(--neutral);border-color:var(--line);background:var(--raised)}
+
+.win{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:3px 0}
+.win-label{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track{height:4px;border-radius:var(--pill);background:#171717;border:1px solid var(--line-soft);overflow:hidden}
+.fill{height:100%;border-radius:var(--pill);transition:width 400ms ease}
+.fill.ok{background:var(--green)} .fill.warn{background:var(--amber)} .fill.danger{background:var(--red)}
+.fill.unknown{background:repeating-linear-gradient(135deg,#3a3a3a 0 4px,#2c2c2c 4px 8px)}
+.win-val{font-size:12px;font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap}
+.win-val .rem{color:var(--faint);font-size:11px}
+.win-reset{grid-column:2/4;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.unavailable{margin:2px 0 0;color:var(--faint);font-size:11px;font-style:italic}
+
+/* ---------- nordrouter ---------- */
+.nr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-top:1px solid var(--line)}
+.nr-cell{padding:9px var(--s4) 9px 0}
+.nr-cell .k{color:var(--faint);font-size:11px;margin-bottom:2px}
+.nr-cell .v{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.nr-cell .v.unknown{color:var(--faint);font-weight:500}
+.two-col{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:var(--s5);margin-top:var(--s3)}
+ol.top{margin:0;padding:0;list-style:none}
+ol.top li{display:flex;justify-content:space-between;gap:var(--s3);padding:4px 0;border-top:1px solid var(--line-soft);font-size:12px}
+ol.top li:first-child{border-top:0}
+ol.top .id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-code);font-size:11px}
+ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:11px}
 
 /* ---------- chart ---------- */
-.chart-card{padding:14px 12px 8px}
 .chart-wrap{width:100%;overflow:hidden}
-svg.chart{display:block;width:100%;height:210px}
-.legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:.76rem;padding:6px 6px 2px}
-.legend span{display:inline-flex;align-items:center;gap:6px}
-.swatch{width:10px;height:10px;border-radius:3px;display:inline-block}
+svg.chart{display:block;width:100%;height:150px}
+.legend{display:flex;gap:var(--s4);flex-wrap:wrap;color:var(--faint);font-size:11px;padding:6px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.swatch{width:8px;height:8px;border-radius:2px;display:inline-block;background:var(--accent)}
 
 /* ---------- table ---------- */
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
-table{width:100%;border-collapse:collapse;font-size:.86rem}
-th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #1e2836;overflow-wrap:anywhere;vertical-align:top}
-th{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:700;white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:6px var(--s3) 6px 0;border-bottom:1px solid var(--line-soft);overflow-wrap:anywhere;vertical-align:middle}
+th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:500;white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
-tbody tr:hover{background:#151d2b}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.src{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
-.mono{font-family:var(--mono);font-size:.8rem}
-.bar-mini{height:6px;border-radius:999px;background:#0e1622;border:1px solid #1f2a3d;overflow:hidden;margin-top:6px;max-width:220px}
-.bar-mini i{display:block;height:100%;background:linear-gradient(90deg,#2f6fd0,#6ea8fe)}
+.src{font-family:var(--font-code);font-size:11px;color:var(--faint)}
+.bar-mini{height:3px;border-radius:var(--pill);background:#171717;overflow:hidden;margin-top:4px;max-width:180px;border:1px solid var(--line-soft)}
+.bar-mini i{display:block;height:100%;background:var(--accent)}
 
 /* ---------- misc ---------- */
-ol.top{margin:0;padding-left:20px}
-ol.top li{margin:6px 0;display:flex;justify-content:space-between;gap:10px}
-ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums}
-#error{color:#ffc9c2;font-size:.83rem;margin:10px 0 0}
-.empty{color:var(--faint);font-size:.83rem;font-style:italic;margin:6px 0}
-.pillrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
-.pill{font-size:.72rem;color:var(--muted);border:1px solid var(--line);background:#161e2c;border-radius:999px;padding:3px 9px;font-variant-numeric:tabular-nums}
-.foot{margin-top:30px;color:var(--faint);font-size:.76rem;text-align:center}
+#error{color:#f0a8a2;font-size:12px;margin:var(--s3) 0 0}
+.empty{color:var(--faint);font-size:12px;font-style:italic;margin:6px 0}
+.foot{margin-top:var(--s6);color:var(--faint);font-size:11px;text-align:center}
 
 @media (max-width:640px){
-  .wrap{padding:0 13px}
-  .topbar-in{padding:11px 13px;gap:10px}
-  h1{font-size:.98rem} .sub{display:none}
-  .grid{grid-template-columns:1fr;gap:12px}
-  .stat .v{font-size:1.35rem}
-  svg.chart{height:170px}
-  body{padding-bottom:40px}
+  .wrap{padding:0 var(--s3)}
+  .topbar-in{padding:8px var(--s3);gap:var(--s2)}
+  h1{font-size:13px}
+  .stamp{font-size:10px}
+  .strip-item{flex:1 1 44%;padding:9px var(--s3);border-top:1px solid var(--line)}
+  .strip-item:nth-child(-n+2){border-top:0}
+  .strip-item:nth-child(odd){border-left:0}
+  .strip-item .v{font-size:16px}
+  .panel{padding:var(--s2) var(--s3)}
+  .panel.flat{padding:2px var(--s3)}
+  .win{grid-template-columns:1fr;gap:2px;padding:5px 0}
+  .win-reset{grid-column:1}
+  .win-val{order:2}
+  svg.chart{height:130px}
+  .btn{padding:8px 12px}
 }
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important}
@@ -177,7 +184,6 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums}
     <div class="brand">
       <span class="dot" aria-hidden="true"></span>
       <h1>AI Usage Dashboard</h1>
-      <p class="sub">local · read-only</p>
     </div>
     <div class="spacer"></div>
     <span id="stamp" class="stamp" aria-live="polite">Loading…</span>
@@ -189,37 +195,39 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums}
   <p id="error" role="status" aria-live="polite"></p>
 
   <section aria-labelledby="h-hero">
-    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note">Last 30 days · amounts in USD · times in your browser timezone</p></div>
-    <div id="hero" class="grid"></div>
+    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note">last 30 days · USD · times shown in your browser timezone</p></div>
+    <div id="hero" class="strip"></div>
   </section>
 
   <section aria-labelledby="h-codex">
     <div class="sec-head"><h2 id="h-codex">Codex accounts</h2><p class="note">ChatGPT plan · 5-hour and weekly windows shown separately</p></div>
-    <div id="codex" class="grid"></div>
+    <div class="panel flat"><div id="codex"></div></div>
   </section>
 
   <section aria-labelledby="h-grok">
     <div class="sec-head"><h2 id="h-grok">Grok</h2><p class="note">SuperGrok / X Premium weekly pool</p></div>
-    <div id="quotas" class="grid"></div>
+    <div class="panel flat"><div id="quotas"></div></div>
   </section>
 
   <section aria-labelledby="h-nord">
     <div class="sec-head"><h2 id="h-nord">NordRouter</h2><p id="nr-status" class="note"></p></div>
-    <div id="metrics" class="grid"></div>
-    <div class="grid" style="margin-top:14px">
-      <div class="card"><h3>Top-5 models today</h3><div id="today"></div></div>
-      <div class="card"><h3>Top-5 models · 7d</h3><div id="week"></div></div>
+    <div class="panel">
+      <div id="metrics" class="nr-grid"></div>
+      <div class="two-col">
+        <div><h3>Top-5 models today</h3><div id="today"></div></div>
+        <div><h3>Top-5 models · 7d</h3><div id="week"></div></div>
+      </div>
     </div>
   </section>
 
   <section aria-labelledby="h-history">
-    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note">Daily tokens from local buckets · drawn only where real data exists</p></div>
-    <div id="history" class="card chart-card"></div>
+    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note">daily tokens from local buckets · drawn only where real data exists</p></div>
+    <div id="history" class="panel chart-wrap"></div>
   </section>
 
   <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">Model costs</h2><p class="note">Reported costs only; — means unavailable, not zero</p></div>
-    <div class="card">
+    <div class="sec-head"><h2 id="h-models">Model costs</h2><p class="note">reported costs only; — means unavailable, not zero</p></div>
+    <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
         <table>
@@ -240,7 +248,7 @@ var number = function (value) { return typeof value === 'number' && Number.isFin
 
 function usd(value) {
   if (!number(value)) return '—';
-  var digits = Math.abs(value) >= 100 ? 2 : (Math.abs(value) >= 1 ? 2 : 4);
+  var digits = Math.abs(value) >= 1 ? 2 : 4;
   return '$' + value.toFixed(digits);
 }
 function tokens(value) {
@@ -272,6 +280,36 @@ function countdown(ms) {
   if (days > 0) return 'in ' + days + 'd ' + hours + 'h';
   if (hours > 0) return 'in ' + hours + 'h ' + mins + 'm';
   return 'in ' + mins + 'm';
+}
+/* Relative age of a timestamp, e.g. "just now", "7m ago", "3h ago". */
+function relativeAge(ms) {
+  if (!number(ms)) return null;
+  var delta = Date.now() - ms;
+  if (delta < 60000) return 'just now';
+  var minutes = Math.floor(delta / 60000);
+  if (minutes < 60) return minutes + 'm ago';
+  var hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + 'h ago';
+  return Math.floor(hours / 24) + 'd ago';
+}
+/* A snapshot older than this is reported as stale rather than current. */
+var STALE_AFTER_MS = 15 * 60 * 1000;
+/* Describe the snapshot instant.
+   `utc` is the offset-aware generated_at_utc, so the browser can render it in
+   the viewer's own timezone. A legacy naive value has no offset and would be
+   misread as local time, so it is surfaced as raw server time instead. */
+function snapshotLabel(utc, fallback) {
+  var ms = utc ? new Date(utc).getTime() : NaN;
+  if (Number.isNaN(ms)) {
+    return { text: 'snapshot ' + (fallback || 'unknown') + ' (server time)', stale: true };
+  }
+  var zone = '';
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (error) { zone = ''; }
+  var age = relativeAge(ms);
+  return {
+    text: 'snapshot ' + new Date(ms).toLocaleString() + (zone ? ' · ' + zone : '') + (age ? ' · ' + age : ''),
+    stale: Date.now() - ms > STALE_AFTER_MS,
+  };
 }
 function providerName(provider) {
   var key = String(provider || 'unknown');
@@ -307,20 +345,10 @@ function statusText(status) {
   return key ? key : 'Unknown';
 }
 
-/* ---------- quota windows ---------- */
-function windowRow(card, window) {
-  var used = window.used_percentage;
-  var row = node('div', undefined, card); row.className = 'win';
-  var top = node('div', undefined, row); top.className = 'win-top';
-  node('span', window.label || 'Quota', top).className = 'win-label';
-  var pct = node('span', undefined, top);
-  if (number(window.used_percentage)) {
-    pct.textContent = window.used_percentage + '% used';
-    pct.className = 'win-pct ' + severity(window.used_percentage);
-  } else {
-    pct.textContent = 'Used: —';
-    pct.className = 'win-pct';
-  }
+/* ---------- limit rows ---------- */
+function windowRow(container, window) {
+  var row = node('div', undefined, container); row.className = 'win';
+  node('span', window.label || 'Quota', row).className = 'win-label';
 
   if (number(window.used_percentage)) {
     var track = node('div', undefined, row);
@@ -333,33 +361,37 @@ function windowRow(card, window) {
     var fill = node('div', undefined, track);
     fill.className = 'fill ' + severity(window.used_percentage);
     fill.style.width = Math.max(0, Math.min(100, window.used_percentage)) + '%';
-  } else {
-    var empty = node('div', undefined, row); empty.className = 'track';
-    node('div', undefined, empty).className = 'fill unknown';
-    node('p', 'No percentage reported for this window.', row).className = 'unavailable';
-  }
 
-  var foot = node('div', undefined, row); foot.className = 'win-foot';
-  var resetMs = window.next_reset_time_ms;
-  var resetIso = window.next_reset_iso;
-  var when = countdown(resetMs);
-  var resetText = 'Reset: ' + (resetMs || resetIso ? time(resetIso || resetMs) : '—');
-  if (when) resetText += ' (' + when + ')';
-  node('span', resetText, foot);
-  if (window.remaining !== null && window.remaining !== undefined) {
-    node('span', 'Remaining: ' + window.remaining, foot);
-  } else if (number(window.remaining_percentage)) {
-    node('span', window.remaining_percentage + '% remaining', foot);
+    var val = node('span', undefined, row); val.className = 'win-val';
+    node('span', window.used_percentage + '% used', val);
+    if (window.remaining !== null && window.remaining !== undefined) {
+      node('span', ' · ' + window.remaining + ' remaining', val).className = 'rem';
+    } else if (number(window.remaining_percentage)) {
+      node('span', ' · ' + window.remaining_percentage + '% left', val).className = 'rem';
+    }
+
+    var resetMs = window.next_reset_time_ms;
+    var resetIso = window.next_reset_iso;
+    if (resetMs || resetIso) {
+      var when = countdown(resetMs);
+      node('span', 'resets ' + time(resetIso || resetMs) + (when ? ' (' + when + ')' : ''), row).className = 'win-reset';
+    }
+  } else {
+    var emptyTrack = node('div', undefined, row); emptyTrack.className = 'track';
+    node('div', undefined, emptyTrack).className = 'fill unknown';
+    node('span', 'Used: —', row).className = 'win-val';
+    node('p', 'No percentage reported for this window.', container).className = 'unavailable';
   }
 }
 
-function quotaCard(group, root) {
-  var card = node('div', undefined, root); card.className = 'card';
-  var head = node('div', undefined, card); head.className = 'card-head';
-  node('span', brandMark(group.provider), head).className = 'brandtile';
-  node('span', providerName(group.provider), head).className = 'badge p-' + String(group.provider || 'unknown').toLowerCase();
-  if (group.account) node('span', group.account, head).className = 'badge account';
+function limitGroup(group, root) {
   var status = effectiveStatus(group);
+  var card = node('div', undefined, root);
+  card.className = 'limit-group' + (status === 'not_configured' ? ' subdued' : '');
+  var head = node('div', undefined, card); head.className = 'limit-head';
+  node('span', brandMark(group.provider), head).className = 'brandtile';
+  node('span', providerName(group.provider), head).className = 'pname';
+  if (group.account) node('span', group.account, head).className = 'acct';
   var chip = node('span', statusText(status), head);
   chip.className = 'chip ' + statusClass(status);
   group.windows.forEach(function (window) { windowRow(card, window); });
@@ -415,7 +447,7 @@ function renderQuotas(data) {
   var codexRoot = $('codex');
   codexRoot.replaceChildren();
   if (codex.length) {
-    orderGroups(groupQuotas(codex)).forEach(function (group) { quotaCard(group, codexRoot); });
+    orderGroups(groupQuotas(codex)).forEach(function (group) { limitGroup(group, codexRoot); });
   } else {
     node('p', 'No Codex snapshot available.', codexRoot).className = 'empty';
   }
@@ -424,26 +456,31 @@ function renderQuotas(data) {
   if (!others.length) {
     node('p', 'No Grok or other quota snapshots available.', root).className = 'empty';
   } else {
-    orderGroups(groupQuotas(others)).forEach(function (group) { quotaCard(group, root); });
+    orderGroups(groupQuotas(others)).forEach(function (group) { limitGroup(group, root); });
   }
 
   var nr = rows.find(function (row) { return row.provider === 'nordrouter'; }) || {};
   var nrStatus = $('nr-status');
-  var text = nr.status ? 'Status: ' + statusText(nr.status) : 'No snapshot available — press Refresh';
-  if (nr.today_complete === false) text += ' · Today model list incomplete; spend may use a fallback';
+  var text = nr.status ? 'status: ' + statusText(nr.status) : 'no snapshot available — press Refresh';
+  if (nr.today_complete === false) text += ' · today model list incomplete; spend may use a fallback';
   if (nr.today_basis) text += ' · ' + nr.today_basis;
   nrStatus.textContent = text;
 
   $('metrics').replaceChildren();
-  [['Balance USD', 'balance_usd'], ['Spend today', 'spend_today_usd'], ['Spend 7d', 'spend_7d_usd'], ['Spend 30d', 'spend_30d_usd']]
+  [['Balance', 'balance_usd'], ['Spend today', 'spend_today_usd'], ['Spend 7d', 'spend_7d_usd'], ['Spend 30d', 'spend_30d_usd']]
     .forEach(function (pair) {
-      var box = node('div', undefined, $('metrics')); box.className = 'card stat';
+      var box = node('div', undefined, $('metrics')); box.className = 'nr-cell';
       node('div', pair[0], box).className = 'k';
       var value = node('div', usd(nr[pair[1]]), box);
       value.className = 'v' + (number(nr[pair[1]]) ? '' : ' unknown');
     });
   topModels('today', nr.top_models_today);
   topModels('week', nr.top_models_7d);
+
+  var stamp = snapshotLabel(data.generated_at_utc, data.generated_at);
+  var stampNode = $('stamp');
+  stampNode.textContent = stamp.text;
+  stampNode.className = 'stamp' + (stamp.stale ? ' stale' : '');
   return rows;
 }
 
@@ -454,12 +491,21 @@ function topModels(id, rows) {
   rows.slice().sort(function (a, b) { return (b.amount_usd || 0) - (a.amount_usd || 0); }).slice(0, 5)
     .forEach(function (row) {
       var item = node('li', undefined, list);
-      node('span', row.id || 'Unknown', item);
+      var name = node('span', row.id || 'Unknown', item); name.className = 'id'; name.title = row.id || 'Unknown';
       node('span', usd(row.amount_usd) + ' · ' + tokens(row.tokens) + ' tok', item).className = 'amt';
     });
 }
 
-/* ---------- overview + history ---------- */
+/* ---------- summary ---------- */
+function stripItem(root, label, value, sub, unknown) {
+  var box = node('div', undefined, root); box.className = 'strip-item';
+  node('div', label, box).className = 'k';
+  var v = node('div', value, box);
+  v.className = 'v' + (unknown ? ' unknown' : '');
+  if (sub) node('div', sub, box).className = 's';
+  return box;
+}
+
 function renderHero(payload) {
   var summary = payload.summary || {};
   var daily = payload.daily || [];
@@ -467,40 +513,29 @@ function renderHero(payload) {
   var latest = active.length ? active[active.length - 1] : null;
   var root = $('hero');
   root.replaceChildren();
-  var tiles = [
-    ['Total tokens · 30d', number(summary.total_tokens) ? tokens(summary.total_tokens) : '—',
-      active.length + ' active day' + (active.length === 1 ? '' : 's')],
-    ['Total cost · 30d', usd(summary.total_cost_usd),
-      'reported spend + estimates'],
-    ['Latest active day', latest ? latest.date : '—',
-      latest ? tokens(latest.total_tokens) + ' tokens · ' + usd(latest.cost_usd) : 'no usage recorded'],
-    ['AI active time · 30d', number(summary.total_ai_hours) ? summary.total_ai_hours.toFixed(2) + ' h' : '—',
-      'from local session timing'],
-  ];
-  tiles.forEach(function (tile) {
-    var box = node('div', undefined, root); box.className = 'card stat';
-    node('div', tile[0], box).className = 'k';
-    var value = node('div', tile[1], box); value.className = 'v';
-    node('div', tile[2], box).className = 's';
-  });
+
+  stripItem(root, 'Tokens · 30d', number(summary.total_tokens) ? tokens(summary.total_tokens) : '—',
+    active.length + ' active day' + (active.length === 1 ? '' : 's'), !number(summary.total_tokens));
+  stripItem(root, 'Cost · 30d', usd(summary.total_cost_usd), 'reported spend + estimates', !number(summary.total_cost_usd));
+  stripItem(root, 'Latest active day', latest ? latest.date : '—',
+    latest ? tokens(latest.total_tokens) + ' · ' + usd(latest.cost_usd) : 'no usage recorded', !latest);
+  stripItem(root, 'AI active time · 30d', number(summary.total_ai_hours) ? summary.total_ai_hours.toFixed(2) + ' h' : '—',
+    'from local session timing', !number(summary.total_ai_hours));
 
   // Subscription list-price equivalent. Filled by renderEstimate once the model
   // breakdown arrives; stays explicitly unavailable without measured tokens.
-  var est = node('div', undefined, root); est.className = 'card stat'; est.id = 'est-tile';
+  var est = node('div', undefined, root); est.className = 'strip-item'; est.id = 'est-tile';
   node('div', 'Subscription list-price equiv · 7d', est).className = 'k';
   var estValue = node('div', '—', est); estValue.className = 'v unknown'; estValue.id = 'est-value';
-  node('div', 'waiting for model data…', est).className = 's';
-  var estSub = node('div', undefined, est); estSub.id = 'est-sub';
+  var estSub = node('div', 'waiting for model data…', est); estSub.className = 's'; estSub.id = 'est-sub';
   renderEstimate();
 
   var cats = summary.categories || {};
   var pills = Object.keys(cats).filter(function (key) { return number(cats[key]) && cats[key] > 0; });
   if (pills.length) {
-    var row = node('div', undefined, root); row.className = 'card stat';
-    node('div', 'Tokens by source · 30d', row).className = 'k';
-    var holder = node('div', undefined, row); holder.className = 'pillrow';
+    var row = node('div', undefined, root); row.className = 'pillrow';
     pills.sort(function (a, b) { return cats[b] - cats[a]; }).forEach(function (key) {
-      node('span', key + ' ' + tokens(cats[key]), holder).className = 'pill';
+      node('span', key + ' ' + tokens(cats[key]), row).className = 'pill';
     });
   }
 }
@@ -524,20 +559,21 @@ function subscriptionEstimate(models) {
 function renderEstimate() {
   var value = $('est-value');
   var sub = $('est-sub');
-  if (!value || !sub) return;
-  if (!lastModels) { sub.textContent = 'waiting for model data…'; return; }
+  if (!value) return;
+  if (!lastModels) { if (sub) sub.textContent = 'waiting for model data…'; return; }
   var estimate = subscriptionEstimate(lastModels);
   if (!estimate.count) {
     value.textContent = '—';
     value.className = 'v unknown';
-    sub.textContent = 'unavailable · no measured subscription token data';
+    if (sub) sub.textContent = 'unavailable · no measured subscription token data';
     return;
   }
   value.textContent = usd(estimate.total);
   value.className = 'v';
-  sub.textContent = 'estimate from published list prices · ' + estimate.count + ' model' + (estimate.count === 1 ? '' : 's');
+  if (sub) sub.textContent = 'estimate from published list prices · ' + estimate.count + ' model' + (estimate.count === 1 ? '' : 's');
 }
 
+/* ---------- history chart ---------- */
 var SVG_NS = 'http://www.w3.org/2000/svg';
 function svgEl(tag, attrs, parent) {
   var element = document.createElementNS(SVG_NS, tag);
@@ -556,43 +592,43 @@ function renderHistory(payload) {
     return;
   }
   var width = Math.max(320, root.clientWidth || 900);
-  var height = 210, padL = 56, padR = 12, padT = 14, padB = 26;
+  var height = 150, padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
   var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img' }, root);
   svgEl('title', {}, svg).textContent = 'Daily token usage for the last ' + series.length + ' days';
-  for (var g = 0; g <= 4; g++) {
-    var y = padT + (plotH * g) / 4;
-    svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#1e2836', 'stroke-width': 1 }, svg);
-    var label = svgEl('text', { x: padL - 8, y: y + 4, fill: '#64748b', 'font-size': 10, 'text-anchor': 'end' }, svg);
-    label.textContent = tokens(peak * (1 - g / 4));
+  for (var g = 0; g <= 2; g++) {
+    var y = padT + (plotH * g) / 2;
+    svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);
+    var label = svgEl('text', { x: padL - 6, y: y + 3, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'end' }, svg);
+    label.textContent = tokens(peak * (1 - g / 2));
   }
   var slot = plotW / series.length;
-  var barW = Math.max(2, Math.min(26, slot * 0.62));
+  var barW = Math.max(2, Math.min(22, slot * 0.6));
   series.forEach(function (day, index) {
     var ratio = day.total_tokens / peak;
-    var barH = Math.max(ratio > 0 ? 2 : 0, plotH * ratio);
+    var barH = Math.max(ratio > 0 ? 1.5 : 0, plotH * ratio);
     var x = padL + slot * index + (slot - barW) / 2;
     var rect = svgEl('rect', {
-      x: x, y: padT + plotH - barH, width: barW, height: barH, rx: 2, fill: '#6ea8fe', opacity: 0.92,
+      x: x, y: padT + plotH - barH, width: barW, height: barH, rx: 1.5, fill: '#7aa2f7', opacity: 0.9,
     }, svg);
     svgEl('title', {}, rect).textContent = day.date + ' · ' + day.total_tokens.toLocaleString() + ' tokens · ' + usd(day.cost_usd);
     if (index === 0 || index === series.length - 1 || index % Math.ceil(series.length / 6) === 0) {
-      var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 8, fill: '#64748b', 'font-size': 10, 'text-anchor': 'middle' }, svg);
+      var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
       xl.textContent = day.date.slice(5);
     }
   });
   var legend = node('div', undefined, root); legend.className = 'legend';
   var item = node('span', undefined, legend);
-  var swatch = node('span', undefined, item); swatch.className = 'swatch'; swatch.style.background = '#6ea8fe';
-  node('span', 'Daily tokens · ' + series.length + ' days · peak ' + tokens(peak), item);
-  var span = node('span', undefined, legend);
-  node('span', 'Total ' + tokens(series.reduce(function (sum, day) { return sum + day.total_tokens; }, 0)) + ' tokens', span);
+  node('span', undefined, item).className = 'swatch';
+  node('span', 'daily tokens · ' + series.length + ' days · peak ' + tokens(peak), item);
+  node('span', 'total ' + tokens(series.reduce(function (sum, day) { return sum + day.total_tokens; }, 0)) + ' tokens',
+    node('span', undefined, legend));
 }
 
 /* ---------- model table ---------- */
 function renderModels(data) {
   var meta = data.meta || {};
-  $('model-stamp').textContent = 'Model snapshot: ' + time(meta.generated_at) +
+  $('model-stamp').textContent = 'snapshot ' + time(meta.generated_at_utc || meta.generated_at) +
     (meta.start_date && meta.end_date ? ' · ' + meta.start_date + ' → ' + meta.end_date : '');
   var body = $('models');
   body.replaceChildren();
@@ -640,7 +676,6 @@ function json(url, options) {
 }
 
 var busy = false;
-var lastQuotas = null;
 function reload(force) {
   if (busy) return;
   busy = true;
@@ -658,11 +693,7 @@ function reload(force) {
 
   prefix.then(function () {
     return Promise.all([
-      json('/api/v1/quotas').then(function (data) {
-        lastQuotas = data;
-        renderQuotas(data);
-        $('stamp').textContent = 'Snapshot ' + time(data.generated_at);
-      }).catch(function (error) {
+      json('/api/v1/quotas').then(renderQuotas).catch(function (error) {
         errors.push('Quotas: ' + error.message + '. Last displayed data retained.');
       }),
       json('/api/v1/model-breakdown?days=7&daily=false').then(renderModels).catch(function (error) {
@@ -684,7 +715,6 @@ function reload(force) {
 
 $('refresh').addEventListener('click', function () { reload(true); });
 window.addEventListener('resize', function () {
-  if (!lastQuotas) return;
   json('/token_usage.json').then(renderHistory).catch(function () {});
 });
 reload(false);

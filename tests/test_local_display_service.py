@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -97,6 +97,7 @@ def test_get_quotas_returns_compact_automation_shape(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {
         "generated_at": "2026-07-11T22:47:45",
+        "generated_at_utc": "2026-07-12T05:47:45+00:00",
         "quotas": [
             {
                 "provider": "codex",
@@ -134,7 +135,11 @@ def test_get_quotas_reuses_cache_without_refresh(monkeypatch):
     response = TestClient(local_display_service.app).get("/api/v1/quotas")
 
     assert response.status_code == 200
-    assert response.json() == {"generated_at": "2026-07-11T22:47:45", "quotas": []}
+    assert response.json() == {
+        "generated_at": "2026-07-11T22:47:45",
+        "generated_at_utc": "2026-07-12T05:47:45+00:00",
+        "quotas": [],
+    }
 
 
 def test_get_quotas_reads_disk_without_refresh(monkeypatch, tmp_path):
@@ -163,7 +168,7 @@ def test_get_quotas_returns_empty_when_no_cache_exists(monkeypatch, tmp_path):
     response = TestClient(local_display_service.app).get("/api/v1/quotas")
 
     assert response.status_code == 200
-    assert response.json() == {"generated_at": None, "quotas": []}
+    assert response.json() == {"generated_at": None, "generated_at_utc": None, "quotas": []}
 
 
 def test_get_quotas_has_typed_openapi_response():
@@ -171,6 +176,53 @@ def test_get_quotas_has_typed_openapi_response():
 
     response_schema = schema["paths"]["/api/v1/quotas"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert response_schema == {"$ref": "#/components/schemas/QuotasResponse"}
+
+
+def test_health_exposes_offset_aware_timestamp():
+    body = TestClient(local_display_service.app).get("/health").json()
+    assert body["generated_at_utc"]
+    parsed = datetime.fromisoformat(body["generated_at_utc"])
+    assert parsed.tzinfo is not None, 'health generated_at_utc must carry a UTC offset'
+    assert parsed.utcoffset().total_seconds() == 0
+    # The naive field is kept for the e-ink firmware, which prints it verbatim.
+    assert body["generated_at"]
+    assert datetime.fromisoformat(body["generated_at"]).tzinfo is None
+
+
+def test_quotas_generated_at_utc_resolves_the_true_instant(monkeypatch):
+    """A naive Pacific generated_at must not be re-read as the viewer's local time.
+
+    The bug: the server published Pacific wall clock with no offset, so a browser
+    in Asia/Tbilisi rendered 22:47 as 22:47 local, eleven hours off. The
+    offset-aware field must resolve to the same instant regardless of viewer.
+    """
+    monkeypatch.setattr(local_display_service, "_cached_payload", {
+        "meta": {"generated_at": "2026-07-11T22:47:45"},
+        "summary": {},
+        "daily": [],
+        "quotas": [],
+    })
+
+    body = TestClient(local_display_service.app).get("/api/v1/quotas").json()
+
+    parsed = datetime.fromisoformat(body["generated_at_utc"])
+    assert parsed.tzinfo is not None, 'generated_at_utc must be offset-aware'
+    # 22:47:45 Pacific (PDT, UTC-7) is 05:47:45 UTC on the following day.
+    assert parsed.astimezone(timezone.utc) == datetime(2026, 7, 12, 5, 47, 45, tzinfo=timezone.utc)
+
+
+def test_quotas_generated_at_utc_prefers_the_stored_value(monkeypatch):
+    """An explicit generated_at_utc wins over the naive fallback."""
+    monkeypatch.setattr(local_display_service, "_cached_payload", {
+        "meta": {"generated_at": "2026-07-11T22:47:45", "generated_at_utc": "2026-07-11T22:47:45+00:00"},
+        "summary": {},
+        "daily": [],
+        "quotas": [],
+    })
+
+    body = TestClient(local_display_service.app).get("/api/v1/quotas").json()
+
+    assert body["generated_at_utc"] == "2026-07-11T22:47:45+00:00"
 
 
 def test_post_update_returns_fresh_dashboard_shape(monkeypatch):
@@ -457,7 +509,7 @@ def test_html_dashboard_renders_generic_quota_section_for_all_providers():
     # The generic renderer must emit a label, a used percentage and a reset line.
     assert 'used_percentage' in html
     assert 'next_reset_time_ms' in html
-    assert 'Reset: ' in html
+    assert 'resets ' in html
 
 
 def test_quotas_endpoint_normalizes_grok_provider(monkeypatch):

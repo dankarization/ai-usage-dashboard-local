@@ -382,6 +382,7 @@ def build_eink_dashboard_payload(
     meta: dict[str, object] = {
         'version': 1,
         'generated_at': datetime.now(ZoneInfo('America/Los_Angeles')).replace(tzinfo=None).isoformat(timespec='seconds'),
+        'generated_at_utc': _now_utc_iso(),
         'start_date': start_date,
         'end_date': end_date,
         'days': len(all_dates),
@@ -947,6 +948,16 @@ def _epoch_s_to_iso(s: int | float | None) -> str | None:
     if s is None:
         return None
     return datetime.fromtimestamp(int(s)).isoformat(timespec='seconds')
+
+def _now_utc_iso() -> str:
+    """Offset-aware UTC timestamp for display consumers.
+
+    ``generated_at`` stays a naive Pacific wall clock for the e-ink firmware,
+    which prints the raw string. A naive value is ambiguous to every other
+    consumer (a browser re-reads it in its own timezone), so the offset-aware
+    value is published alongside it as ``generated_at_utc``.
+    """
+    return datetime.now(ZoneInfo('UTC')).isoformat(timespec='seconds')
 
 
 def export_codex_quota(home: Path | None = None) -> list[QuotaSnapshot]:
@@ -2650,6 +2661,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
     return {
         'meta': {
             'generated_at': datetime.now(ZoneInfo('America/Los_Angeles')).replace(tzinfo=None).isoformat(timespec='seconds'),
+            'generated_at_utc': _now_utc_iso(),
             'start_date': start_date_str,
             'end_date': end_date_str,
             'days': days,
