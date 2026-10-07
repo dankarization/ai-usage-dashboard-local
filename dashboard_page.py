@@ -13,8 +13,8 @@ these invariants:
 * No external assets: no ``<script src=``, no ``<link>``, no ``innerHTML``.
 * No invented data: every number comes from a live endpoint, and a window with
   no percentage renders as "unavailable"/"not configured", never as 0%.
-* Honest history: the daily chart is drawn only from real ``token_usage.json``
-  buckets and shows an explicit empty state when every bucket is zero.
+* Honest history: the daily chart uses Gateway model-day and direct NordRouter
+  account-day buckets; resizing reuses the same snapshot.
 * Honest snapshot time: the header renders the offset-aware ``generated_at_utc``
   in the viewer's own timezone with a relative age, and marks a stale snapshot
   instead of presenting it as current.
@@ -606,6 +606,7 @@ function renderEstimate() {
 }
 
 /* ---------- history chart ---------- */
+var lastHistoryData = null;
 var SVG_NS = 'http://www.w3.org/2000/svg';
 function svgEl(tag, attrs, parent) {
   var element = document.createElementNS(SVG_NS, tag);
@@ -614,6 +615,7 @@ function svgEl(tag, attrs, parent) {
   return element;
 }
 function renderHistory(payload) {
+  lastHistoryData = payload;
   var root = $('history');
   root.replaceChildren();
   var byDate = new Map();
@@ -772,7 +774,7 @@ function reload(force) {
 
 $('refresh').addEventListener('click', function () { reload(true); });
 window.addEventListener('resize', function () {
-  json('/token_usage.json').then(renderHistory).catch(function () {});
+  if (lastHistoryData) renderHistory(lastHistoryData);
 });
 reload(false);
 setInterval(function () { reload(false); }, 5 * 60000);

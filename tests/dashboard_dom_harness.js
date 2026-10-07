@@ -79,7 +79,8 @@ global.document = {
   createElement: (tag) => new Element(tag),
   createElementNS: (ns, tag) => new Element(tag, ns),
 };
-global.window = { addEventListener: () => {} };
+const windowListeners = {};
+global.window = { addEventListener: (type, fn) => { windowListeners[type] = fn; } };
 let autoRefreshTick;
 global.setInterval = (fn) => { autoRefreshTick = fn; return 0; };
 global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -302,6 +303,9 @@ renderHistory(historyFixture(PAYLOAD.daily));
 const history = registry.get('history');
 const rects = all(history).filter((e) => e.tagName === 'RECT');
 assertEqual(rects.length, 3, 'chart must draw one bar per day in the window, preserving the time axis');
+windowListeners.resize();
+assertEqual(all(history).filter((e) => e.tagName === 'RECT').length, 3,
+  'resizing must redraw from the same history source, not the legacy payload');
 const zeroBar = rects.find((r) => {
   const title = all(r).find((c) => c.tagName === 'TITLE');
   return title && title.textContent.includes('05.09.2026');
