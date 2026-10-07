@@ -752,7 +752,7 @@ function tableModels(data) {
   });
 }
 function modelSortValue(row, key) {
-  if (key === 'source') return row.source === 'nordrouter' ? 'NordRouter billed' : row.provider || null;
+  if (key === 'source') return row.source === 'nordrouter' ? 'NordRouter' : row.provider || null;
   if (key === 'model') return row.model || null;
   var detail = row.source === 'nordrouter' && key !== 'total' && key !== 'usd' ? row.comparison : row;
   var value = key === 'usd' ? row.cost_usd : detail && detail.totals && detail.totals[key];
@@ -801,7 +801,7 @@ function renderModels(data) {
   models.forEach(function (row) {
     var tr = node('tr', undefined, body);
     var srcCell = node('td', undefined, tr);
-    node('span', row.source === 'nordrouter' ? 'NordRouter billed' : row.provider || 'unknown', srcCell).className = 'src';
+    node('span', row.source === 'nordrouter' ? 'NordRouter' : row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
     node('span', row.model || '—', modelCell);
     if (row.daily && row.daily.length) {

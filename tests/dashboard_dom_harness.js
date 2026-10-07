@@ -318,7 +318,7 @@ assert(heroText.includes('OpenClaw estimated cost · 30d') && heroText.includes(
 assert(heroText.includes('comparison') && heroText.includes('21'), 'comparison duplicate shown but excluded');
 assert(registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct model appears in unified table');
 assertEqual(registry.get('models').children.map((row) => row.children[0].textContent).join(','),
-  'nordrouter,NordRouter billed,xai', 'unmatched route and billed model are distinct');
+  'nordrouter,NordRouter,xai', 'source labels identify providers without billing provenance');
 assert(registry.get('models-note').textContent.includes('billed USD'), 'table note explains cost provenance');
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
@@ -453,6 +453,9 @@ renderModels(mergedFixture);
 assertEqual(registry.get('models').children.length, 4, 'matched route becomes one billed row');
 const rowFor = (name) => registry.get('models').children.find((row) => row.children[1].textContent === name);
 const matchedRow = rowFor('z-ai/glm-5.3');
+assertEqual(matchedRow.children[0].textContent, 'NordRouter', 'direct model source has its original label');
+assertEqual(rowFor('unmatched-route').children[0].textContent, 'nordrouter', 'unmatched route source is unchanged');
+assertEqual(rowFor('other').children[0].textContent, 'xai', 'other provider source is unchanged');
 assertEqual(all(matchedRow.children[6]).find((e) => e.tagName === 'S').textContent, '765.4K',
   'OpenClaw tokens use compact formatting and are crossed out before direct tokens');
 assert(matchedRow.children[6].textContent.endsWith('1.2M'), 'direct tokens use compact formatting');
