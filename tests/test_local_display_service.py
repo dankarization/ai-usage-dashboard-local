@@ -11,36 +11,7 @@ from fastapi import Response
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from display_contract import (
-    green_button_should_fetch,
-    is_within_auto_update_window,
-    white_button_should_fetch,
-)
 import local_display_service
-
-
-def test_white_button_is_local_only():
-    assert white_button_should_fetch() is False
-
-
-def test_green_button_triggers_fetch():
-    assert green_button_should_fetch() is True
-
-
-def test_auto_update_window_excludes_before_8am():
-    assert is_within_auto_update_window(datetime(2026, 4, 1, 7, 59)) is False
-
-
-def test_auto_update_window_includes_8am():
-    assert is_within_auto_update_window(datetime(2026, 4, 1, 8, 0)) is True
-
-
-def test_auto_update_window_includes_959pm():
-    assert is_within_auto_update_window(datetime(2026, 4, 1, 21, 59)) is True
-
-
-def test_auto_update_window_includes_10pm():
-    assert is_within_auto_update_window(datetime(2026, 4, 1, 22, 0)) is True
 
 
 def test_health_endpoint_returns_ok_status():
@@ -185,7 +156,7 @@ def test_health_exposes_offset_aware_timestamp():
     parsed = datetime.fromisoformat(body["generated_at_utc"])
     assert parsed.tzinfo is not None, 'health generated_at_utc must carry a UTC offset'
     assert parsed.utcoffset().total_seconds() == 0
-    # The naive field is kept for the e-ink firmware, which prints it verbatim.
+    # The naive field is retained for legacy cache readers.
     assert body["generated_at"]
     assert datetime.fromisoformat(body["generated_at"]).tzinfo is None
 

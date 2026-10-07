@@ -368,7 +368,7 @@ for d, v in antigravity_data.get("gemini", {}).items():
 # similarly for claude, gpt_opencode, deepseek, other
 ```
 
-No new column in the stdout table. No new e-ink category. Antigravity tokens
+No new column in the stdout table. Antigravity tokens
 appear in existing buckets (primarily Gemini).
 
 ### 16.11 Robust Session Discovery via Database Scanning
@@ -406,7 +406,7 @@ for the current day.
 
 ### 16.13 Compatibility
 
-- No existing token columns, cost logic, or e-ink categories change.
+- No existing token columns or cost logic change.
 - When the LS is not running, `load_antigravity()` returns empty dicts — no
   crash, no error.
 - No new `.env` keys.
@@ -448,17 +448,6 @@ QuotaSnapshot(
     next_reset_iso='2026-06-29T17:38',
 )
 ```
-
-### 16.15 E-Ink / Simulator Changes
-
-- `firmware_logic.py`: `provider_color('antigravity')` returns `'cyan'` (same
-  as Ollama — both are multi-model platforms).
-- `eink_simulator.py`: `provider_display_name('antigravity')` returns
-  `'Antigravity'`; `provider_color('antigravity')` returns `TFT_CYAN`.
-- No new e-ink categories. The Antigravity quota entries flow through the
-  existing `quotas` array and render as bars in the quota panel.
-- `_MAX_QUOTAS = 12` in the simulator is sufficient for the 9 entries currently
-  produced (2 GLM + 2 Ollama + 2 Codex + 3 Antigravity).
 
 ## 12. GLM / Z.ai Coding Plan Quota
 
@@ -658,10 +647,8 @@ The JSON payload gains a `quotas` array that merges all providers:
 ]
 ```
 
-`glm_quota` is kept as a deprecated backward-compat alias. The e-ink firmware
-and stdout render the unified `quotas` array. Claude Code is not yet wired in;
-its endpoint (`/api/oauth/usage`) is documented in `docs/plan_quota_display.md`
-for a future phase.
+`glm_quota` is kept as a deprecated backward-compat alias. The web dashboard
+and stdout render the unified `quotas` array.
 
 ## 14. Ollama Quota (HTML Parse)
 
@@ -683,8 +670,7 @@ UTC ISO string from `data-time`; `next_reset_time_ms` is the epoch-ms form.
 ### 14.3 Provider Order
 
 `quotas` is assembled in display order: z.ai GLM -> Ollama -> Codex -> Claude ->
-Antigravity -> Grok. This matches the e-ink firmware's rendering top-to-bottom
-in the quota panel.
+Antigravity -> Grok.
 
 ### 14.4 Grok Weekly Pool (grpc-web)
 
@@ -809,4 +795,4 @@ call `POST /api/v1/display/update`.
 ### 17.4 Compatibility
 
 This is an additive endpoint. It does not alter the existing unified `quotas`
-array in `DashboardPayload` or the e-ink JSON contract.
+array in `DashboardPayload` or the cached JSON contract.

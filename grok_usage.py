@@ -337,17 +337,3 @@ async def _read_grok_bot_usage(cookie: str, timeout: float) -> dict[str, Any]:
 def export_grok_bot_quota(cookie: str, timeout: float = 10.0) -> list[dict[str, Any]]:
     """Read the independent weekly Grok Bot limit from the authenticated relay."""
     return [asyncio.run(_read_grok_bot_usage(cookie, timeout))]
-
-
-def filter_quotas_for_eink(quotas: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """E-ink shows Antigravity Gemini only; drop Antigravity Claude/GPT bars."""
-    filtered: list[dict[str, Any]] = []
-    for quota in quotas:
-        provider = str(quota.get('provider', '')).lower()
-        label = str(quota.get('label', '')).lower()
-        if provider == 'grok_bot' and quota.get('percentage') is None:
-            continue
-        if provider == 'antigravity' and 'gemini' not in label:
-            continue
-        filtered.append(quota)
-    return filtered

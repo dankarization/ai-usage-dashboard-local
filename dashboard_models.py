@@ -21,7 +21,7 @@ class DashboardMeta(BaseModel):
     """Metadata describing the dashboard generation run."""
 
     version: int = Field(default=1, description='Payload schema version. Incremented on breaking shape changes.')
-    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the payload was generated. Naive Pacific wall clock kept for the e-ink firmware; prefer generated_at_utc for display.')
+    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the payload was generated. Legacy naive Pacific wall clock; prefer generated_at_utc for display.')
     generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) marking when the payload was generated. Consumers render it in their own timezone.')
     start_date: Optional[str] = Field(default=None, description='Inclusive start date of the daily window, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date of the daily window, YYYY-MM-DD.')
@@ -141,7 +141,7 @@ class DashboardPayload(BaseModel):
     summary: DashboardSummary = Field(default_factory=DashboardSummary, description='Aggregate totals across the date window.')
     daily: list[DailyEntry] = Field(default_factory=list, description='One entry per day in the date window, ordered by date.')
     glm_quota: Optional[list[GlmQuotaSnapshot]] = Field(default=None, description='Z.ai coding-plan quota snapshots (5-hour, weekly, monthly windows). Present only when GLM_BEARER_TOKEN is set and the quota fetch succeeds. Deprecated alias of quotas; prefer quotas for new consumers.')
-    quotas: Optional[list[QuotaSnapshot]] = Field(default=None, description='Unified quota snapshots across providers (GLM 5h/weekly/monthly, Codex 5h/weekly). Present when any provider quota is available. The e-ink firmware and stdout render this single array.')
+    quotas: Optional[list[QuotaSnapshot]] = Field(default=None, description='Unified quota snapshots across providers (GLM 5h/weekly/monthly, Codex 5h/weekly). Present when any provider quota is available. The web dashboard and stdout render this single array.')
 
 
 class HealthResponse(BaseModel):
@@ -209,7 +209,7 @@ class ModelBreakdownTotals(BaseModel):
 class ModelBreakdownMeta(BaseModel):
     """Metadata for the model-breakdown response."""
 
-    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the breakdown was generated. Naive Pacific wall clock kept for the e-ink firmware; prefer generated_at_utc for display.')
+    generated_at: Optional[str] = Field(default=None, description='ISO timestamp (local, seconds precision) marking when the breakdown was generated. Legacy naive Pacific wall clock; prefer generated_at_utc for display.')
     generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) marking when the breakdown was generated.')
     start_date: Optional[str] = Field(default=None, description='Inclusive start date, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date, YYYY-MM-DD.')

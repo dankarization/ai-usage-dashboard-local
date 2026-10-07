@@ -1,7 +1,7 @@
 [project]
 name = "ai-usage-dashboard"
 version = "0.1.0"
-description = "Local AI token usage aggregation, cost estimation, and e-ink dashboard output"
+description = "Local AI token usage aggregation, cost estimation, and web dashboard"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110,<1",
@@ -16,15 +16,11 @@ dependencies = [
 dev = [
     "pytest>=8.3,<9",
 ]
-eink = [
-    "bleak>=0.22,<1",
-]
 
 [tool.pytest.ini_options]
 markers = [
     "live_api: tests that call real provider APIs or require real local credentials",
     "live_antigravity: tests that require a running Antigravity Language Server on localhost",
-    "hardware: tests or checks that require physical e-ink hardware or Arduino tooling",
 ]
 
 [tool.setuptools]
@@ -35,9 +31,6 @@ py-modules = [
     "codex_usage",
     "dashboard_models",
     "dashboard_page",
-    "display_contract",
-    "eink_simulator",
-    "firmware_logic",
     "local_display_service",
     "grok_usage",
     "opencode_token_analyzer",

@@ -294,9 +294,7 @@ used percentage per family is reported as a `QuotaSnapshot` with
 `provider='antigravity'` and `label='<Family> 5h'`.
 
 The Antigravity quota entries are appended to the unified `quotas` array after
-Claude Code. They appear in the stdout quota block, the e-ink JSON payload, and
-the simulator render. The e-ink firmware renders them with the cyan color
-(same as Ollama, since Antigravity is a multi-model platform like Ollama).
+Claude Code. They appear in the stdout quota block and web dashboard payload.
 
 No `.env` keys are needed — quota is fetched from the same live LS process that
 provides token usage.
@@ -326,7 +324,7 @@ Add the coding-plan quota snapshot to `auto_usage.py`:
 
 - fetch the snapshot when `GLM_BEARER_TOKEN` is set
 - print a compact quota block after the token/cost table
-- embed the snapshot in the e-ink / dashboard JSON payload under `glm_quota`
+- embed the snapshot in the dashboard JSON payload under `glm_quota`
 - cache the raw response to `glm_quota.json` for offline reuse
 
 ### Quota Windows

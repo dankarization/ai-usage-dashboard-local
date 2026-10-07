@@ -9,7 +9,6 @@ import pytest
 from grok_usage import (
     _read_grok_bot_usage,
     export_grok_quota,
-    filter_quotas_for_eink,
     parse_grok_bot_usage,
     parse_grok_credits_response,
 )
@@ -109,23 +108,6 @@ def test_parse_grok_credits_response_zero_usage_omits_percent_fields():
     assert parsed['period_label'] == 'Weekly'
     assert parsed['next_reset_time_ms'] == 1_786_434_449 * 1000
     assert parsed['product_usage'] == []
-
-
-def test_filter_quotas_for_eink_keeps_antigravity_gemini_only():
-    quotas = [
-        {'provider': 'glm', 'label': '5h', 'percentage': 1},
-        {'provider': 'antigravity', 'label': 'Gemini 5h', 'percentage': 10},
-        {'provider': 'antigravity', 'label': 'Claude 5h', 'percentage': 20},
-        {'provider': 'antigravity', 'label': 'GPT 5h', 'percentage': 30},
-        {'provider': 'grok', 'label': 'Weekly', 'percentage': 12},
-    ]
-    filtered = filter_quotas_for_eink(quotas)
-    labels = [(q['provider'], q['label']) for q in filtered]
-    assert labels == [
-        ('glm', '5h'),
-        ('antigravity', 'Gemini 5h'),
-        ('grok', 'Weekly'),
-    ]
 
 
 def test_parse_grok_bot_usage_is_separate_and_offset_aware():

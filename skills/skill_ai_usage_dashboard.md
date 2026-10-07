@@ -2,7 +2,7 @@
 
 ## When To Use
 
-Use this skill when the user asks to summarize local AI usage, estimate API-equivalent cost, inspect recent OpenCode or Claude Code token usage, generate an AI usage chart, or refresh the optional local e-ink dashboard JSON.
+Use this skill when the user asks to summarize local AI usage, estimate API-equivalent cost, inspect recent OpenCode or Claude Code token usage, generate an AI usage chart, or refresh the local web dashboard JSON.
 
 This skill is local-first. It reads data from the user's machine and writes local artifacts. It does not upload usage data anywhere.
 
@@ -62,7 +62,7 @@ Optional Grok weekly usage pool: set `GROK_COOKIE` in `.env` (browser cookie fro
 It may write local artifacts:
 
 - `token_usage_dashboard.png`: desktop chart, local/private generated output.
-- `token_usage_eink.json`: E1002 display payload, local/private generated output.
+- `token_usage_eink.json`: web dashboard cache payload (legacy filename), local/private generated output.
 - `usage.json`, `cursor.csv`, `glm.json`, `glm_quota.json`, `ollama_settings.html`, `cursor_usage_summary.json`: raw provider exports, local/private generated output.
 
 These files are intentionally gitignored.
@@ -172,19 +172,12 @@ It returns the same dashboard JSON shape used by `token_usage_eink.json`: `meta`
 
 It deduplicates by `response_id` against the local `antigravity_usage_cache.json`, persists the merged set, and returns `{"received": N, "new": M, "duplicate": K, "total_cache": T}`. Intended for cross-machine aggregation — see `skills/skill_antigravity_push.md` for the satellite-side workflow.
 
-## E-Ink Reference Implementation
-
-`eink/` is optional. It is a reference implementation for Seeed Studio reTerminal E1002, not part of normal setup. Most users can ignore it.
-
-Only create `eink/e1002/secrets.h` when compiling or flashing that hardware sketch. The public `secrets.h.example` shows the required placeholders; real Wi-Fi credentials, local service URLs, and device IDs stay in the ignored private file.
-
 ## Privacy Rules
 
 - Treat all generated usage files as private.
 - Keep real provider credentials only in `.env`.
-- Keep Wi-Fi credentials and E1002 service URLs only in `eink/e1002/secrets.h`; ordinary users do not need this file.
 - Public docs must use fake hosts such as `YOUR_LOCAL_HOST` and fake tokens such as `replace-with-your-real-token`.
-- Do not add personal absolute paths, private hostnames, fixed LAN IPs, or real usage screenshots to public files.
+- Do not commit unredacted usage screenshots or personal account identifiers.
 
 ## Validation
 
@@ -198,12 +191,8 @@ git check-ignore .env token_usage_eink.json token_usage_dashboard.png usage.json
 
 Also run a privacy scan for fixed LAN IPs, personal absolute paths, private deployment hostnames, old workspace paths, and secret-manager references.
 
-If firmware changed and Arduino tooling is available, compile `eink/e1002/e1002.ino` with the ESP32-S3 settings documented in `docs/test.md`.
-
 ## Known Caveats
 
 - Cursor and GLM exports require private credentials and should be treated as optional.
 - OpenCode archive support depends on a separate `opencode_skill` installation or path.
-- The e-ink firmware is a companion project; Python tests mirror only its pure logic, not hardware behavior.
-- The E1002 panel runs in 1-bit mode: solid colors render black, mid-gray renders white (a full bar looks empty). Only black or white+pattern fills are reliably visible. Read `eink/e1002/README.md` ("Panel Color Behavior") before choosing any fill color.
-- The display service keeps an in-memory payload snapshot; code changes to `auto_usage.py` (labels, quota fields) require a service restart plus a `POST /api/v1/display/update` refresh before the e-ink sees them.
+- The display service keeps an in-memory payload snapshot; code changes to `auto_usage.py` (labels, quota fields) require a service restart plus a `POST /api/v1/display/update` refresh before the web page sees them.

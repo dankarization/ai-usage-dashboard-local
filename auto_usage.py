@@ -110,7 +110,7 @@ class GlmQuotaSnapshot(TypedDict, total=False):
 
 
 # Unified quota snapshot across providers (GLM, Codex, Claude Code).
-# The e-ink firmware and stdout render this single array; the per-provider
+# The web dashboard and stdout render this single array; the per-provider
 # GLM-only `glm_quota` field is kept as a backward-compat alias.
 class QuotaSnapshot(TypedDict, total=False):
     provider: str
@@ -427,7 +427,7 @@ def write_eink_dashboard_payload(
     quotas: list[QuotaSnapshot] | None = None,
     nordrouter: dict | None = None,
 ) -> dict[str, object]:
-    # E-ink drops Antigravity Claude/GPT quota bars; full list stays in API via same quotas field
+    # The web dashboard receives the complete provider quota list.
     # when callers pass unfiltered quotas to generate_dashboard stdout and filtered ones here.
     payload = build_eink_dashboard_payload(
         cursor,
@@ -744,7 +744,7 @@ def normalize_cursor_quota(body: dict[str, object] | None) -> list[QuotaSnapshot
     reset_ms = _iso_utc_to_epoch_ms(cycle_end) if isinstance(cycle_end, str) else None
     reset_iso = _iso_utc_to_local(cycle_end) if isinstance(cycle_end, str) else None
     snapshots: list[QuotaSnapshot] = []
-    # Labels render as "<Provider> <label>" on the e-ink: "Cursor Models" and
+    # Labels render as "<Provider> <label>" on the web dashboard: "Cursor Models" and
     # "Cursor Other". "Other Models" in full would overflow the 195px panel.
     for label, pct in (('Models', cursor_models_pct), ('Other', api_pct)):
         snapshots.append({
@@ -967,8 +967,8 @@ def _epoch_s_to_iso(s: int | float | None) -> str | None:
 def _now_utc_iso() -> str:
     """Offset-aware UTC timestamp for display consumers.
 
-    ``generated_at`` stays a naive Pacific wall clock for the e-ink firmware,
-    which prints the raw string. A naive value is ambiguous to every other
+    ``generated_at`` stays a naive Pacific wall clock for legacy cache readers.
+    A naive value is ambiguous to every other
     consumer (a browser re-reads it in its own timezone), so the offset-aware
     value is published alongside it as ``generated_at_utc``.
     """
@@ -2288,7 +2288,7 @@ def generate_dashboard(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok
     if not skip_desktop_chart:
         generate_dashboard_desktop(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs, daily_active_seconds, nordrouter=nordrouter)
     # Full quotas stay in the JSON/API (including Antigravity Claude/GPT).
-    # E-ink firmware filters Antigravity to Gemini-only when rendering.
+    # Retain all quota rows for the web dashboard.
     return write_eink_dashboard_payload(cursor, glm, gemini, claude, gpt_opencode, deepseek, grok, qwen, other, start_date, end_date, daily_costs, daily_active_seconds, glm_quota=glm_quota, quotas=quotas, nordrouter=nordrouter)
 
 
