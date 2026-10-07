@@ -293,6 +293,16 @@ assert(titled.some((t) => t.textContent.includes('06.09.2026') && t.textContent.
 assert(all(history).filter((e) => e.tagName === 'TEXT').some((e) => e.textContent === '06.09.2026'),
   'chart axis uses full day.month.year labels');
 
+history.clientWidth = 320;
+const mobileDays = Array.from({ length: 30 }, (_, i) => ({
+  date: new Date(Date.UTC(2026, 8, 8 + i)).toISOString().slice(0, 10),
+  total_tokens: 1, cost_usd: 0,
+}));
+renderHistory({ daily: mobileDays });
+const mobileAxis = all(history).filter((e) => e.tagName === 'TEXT' && /^\d{2}\.\d{2}\.\d{4}$/.test(e.textContent));
+assert(mobileAxis.length <= 3, 'narrow chart must space full-date ticks apart');
+delete history.clientWidth;
+
 renderHistory({ daily: [{ date: '2026-10-03', total_tokens: 0, cost_usd: 0 }] });
 assert(registry.get('history').textContent.includes('No historical usage data available'),
   'an all-zero history must render an explicit empty state');

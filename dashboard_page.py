@@ -626,6 +626,8 @@ function renderHistory(payload) {
   }
   var slot = plotW / series.length;
   var barW = Math.max(2, Math.min(22, slot * 0.6));
+  var axisLabels = Math.min(6, Math.max(2, Math.floor(plotW / 90)));
+  var labelEvery = Math.ceil(series.length / axisLabels);
   series.forEach(function (day, index) {
     var ratio = day.total_tokens / peak;
     var barH = Math.max(ratio > 0 ? 1.5 : 0, plotH * ratio);
@@ -634,7 +636,7 @@ function renderHistory(payload) {
       x: x, y: padT + plotH - barH, width: barW, height: barH, rx: 1.5, fill: '#7aa2f7', opacity: 0.9,
     }, svg);
     svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + day.total_tokens.toLocaleString() + ' tokens · ' + usd(day.cost_usd);
-    if (index === 0 || index === series.length - 1 || index % Math.ceil(series.length / 6) === 0) {
+    if (index === 0 || index === series.length - 1 || index % labelEvery === 0) {
       var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
       xl.textContent = dateOnly(day.date);
     }
