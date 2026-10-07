@@ -268,11 +268,9 @@ def test_failed_export_uses_only_its_profile_cache(monkeypatch, tmp_path):
 
 
 def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypatch):
+    import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
-    for name in ('load_opencode_detailed', 'load_claude_code_detailed', 'load_antigravity_detailed',
-                 '_load_cursor_detailed', 'load_glm', 'load_codex'):
-        monkeypatch.setattr(usage, name, lambda *a, **kw: {})
-    monkeypatch.setattr(usage._dsh_usage, 'load_dsh_detailed', lambda **kw: {})
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
     monkeypatch.setattr(nr.Client, 'get', lambda *a, **kw: (analytics(), False))
     result = usage.build_model_breakdown(7)
     entry = result['models'][0]

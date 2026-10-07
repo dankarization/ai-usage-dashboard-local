@@ -103,7 +103,8 @@ const QUOTAS = {
       used_percentage: null, remaining_percentage: null, next_reset_time_ms: null,
       next_reset_iso: null, usage: null, remaining: null },
     { provider: 'grok', label: 'Weekly', used_percentage: 100, remaining_percentage: 0,
-      next_reset_time_ms: 1791064244000, next_reset_iso: '2026-10-04T01:50:44', usage: null, remaining: null },
+      next_reset_time_ms: 1791064244000, next_reset_iso: '2026-10-04T01:50:44', usage: null, remaining: null,
+      product_usage: [{ product: 2, label: 'Grok Build', usage_percent: 100 }] },
     { provider: 'grok_bot', label: 'Weekly Grok Bot Limit', status: 'ok',
       used_percentage: 100, remaining_percentage: 0, next_reset_time_ms: 1791537783029 },
     { status: 'ok', balance_usd: 17.075988, spend_today_usd: 0.0, spend_7d_usd: 15.006731,
@@ -232,6 +233,8 @@ const grokFill = all(grokBars[0]).find((e) => e.classList.contains('fill'));
 assert(grokFill.classList.contains('danger'), 'Grok at 100% must be colour-coded danger');
 assertEqual(grokFill.style.width, '100%', 'Grok fill width');
 assert(grokCard.textContent.includes('100% used'), 'Grok must show 100% used');
+assert(grokCard.textContent.includes('Grok Build: 100.0%'), 'Grok must show the verified product name and percentage');
+assert(grokCard.textContent.includes('not tokens or separate limits'), 'product percentage must not be represented as tokens or a separate limit');
 assert(grokCard.textContent.includes('0% left'), 'Grok must show 0% left');
 // The live Grok row carries a real percentage but no explicit status field;
 // it must read as Active, not as Unknown.
@@ -292,7 +295,10 @@ assert(heroText.includes('$46.46'), 'hero must show the 30d cost');
 assert(heroText.includes('2 active days'), 'hero must count only days with real usage');
 assert(heroText.includes('06.09.2026'), 'hero must point at the latest active day in day.month.year order');
 
-renderHistory(PAYLOAD);
+function historyFixture(daily) {
+  return { source_daily: { nordrouter: daily.map((day) => ({ date: day.date, tokens: day.total_tokens })) }, models: [] };
+}
+renderHistory(historyFixture(PAYLOAD.daily));
 const history = registry.get('history');
 const rects = all(history).filter((e) => e.tagName === 'RECT');
 assertEqual(rects.length, 3, 'chart must draw one bar per day in the window, preserving the time axis');
@@ -320,12 +326,12 @@ const mobileDays = Array.from({ length: 30 }, (_, i) => ({
   date: new Date(Date.UTC(2026, 8, 8 + i)).toISOString().slice(0, 10),
   total_tokens: 1, cost_usd: 0,
 }));
-renderHistory({ daily: mobileDays });
+renderHistory(historyFixture(mobileDays));
 const mobileAxis = all(history).filter((e) => e.tagName === 'TEXT' && /^\d{2}\.\d{2}\.\d{4}$/.test(e.textContent));
 assert(mobileAxis.length <= 3, 'narrow chart must space full-date ticks apart');
 delete history.clientWidth;
 
-renderHistory({ daily: [{ date: '2026-10-03', total_tokens: 0, cost_usd: 0 }] });
+renderHistory(historyFixture([{ date: '2026-10-03', total_tokens: 0, cost_usd: 0 }]));
 assert(registry.get('history').textContent.includes('No historical usage data available'),
   'an all-zero history must render an explicit empty state');
 assert(all(registry.get('history')).filter((e) => e.tagName === 'RECT').length === 0,
@@ -351,16 +357,15 @@ renderModels({ models: [] });
 assert(registry.get('models').textContent.includes('No model data available'),
   'an empty model list must render an explicit empty state');
 
-/* ---------------- subscription list-price estimate ---------------- */
-// NordRouter cost is actual billed spend and must never be counted as an
-// estimate; only subscription sources with measured tokens count.
+/* ---------------- OpenClaw model-price estimate ---------------- */
+// NordRouter cost is billed spend and must never be counted as an estimate.
 var est = subscriptionEstimate([
   { source: 'nordrouter', cost_usd: 100.0 },
-  { source: 'codex', cost_usd: 12.5 },
+  { source: 'openclaw', cost_usd: 12.5 },
   { source: 'glm', cost_usd: null },
 ]);
-assertEqual(est.count, 1, 'only priced subscription sources count toward the estimate');
-assertEqual(est.total, 12.5, 'the estimate sums subscription list prices only');
+assertEqual(est.count, 1, 'only priced OpenClaw sources count toward the estimate');
+assertEqual(est.total, 12.5, 'the estimate sums Gateway model costs only');
 assertEqual(subscriptionEstimate([{ source: 'nordrouter', cost_usd: 5 }]).count, 0,
   'a NordRouter-only dataset yields no subscription estimate');
 
@@ -373,7 +378,7 @@ assert(registry.get('est-sub').textContent.includes('unavailable'),
 assert(!registry.get('est-value').textContent.includes('0'),
   'a missing estimate must never be rendered as 0');
 
-lastModels = [{ source: 'codex', cost_usd: 12.5 }, { source: 'grok', cost_usd: 7.5 }];
+lastModels = [{ source: 'openclaw', cost_usd: 12.5 }, { source: 'openclaw', cost_usd: 7.5 }];
 renderEstimate();
 assertEqual(registry.get('est-value').textContent, '$20.00', 'a real estimate must render its sum');
 assert(registry.get('est-sub').textContent.includes('estimate'),

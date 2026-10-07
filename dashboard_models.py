@@ -109,6 +109,7 @@ class QuotaSnapshot(AccountMetrics):
     next_reset_iso: Optional[str] = Field(default=None, description='Local ISO timestamp (seconds precision) at which the window resets. Derived from next_reset_time_ms.')
     usage: Optional[int] = Field(default=None, description='Absolute count already used. Present only for the GLM monthly tool quota.')
     remaining: Optional[int] = Field(default=None, description='Remaining count before the window resets. Present only for the GLM monthly tool quota.')
+    product_usage: Optional[list[dict]] = Field(default=None, description='Grok provider-defined product enum and usage_percent pairs; not token counts or separate limits.')
 
 
 class AutomationQuotaSnapshot(AccountMetrics):
@@ -122,6 +123,7 @@ class AutomationQuotaSnapshot(AccountMetrics):
     next_reset_iso: Optional[str] = Field(default=None, description='Local ISO timestamp at which the quota window resets. May be absent.')
     usage: Optional[int] = Field(default=None, description='Absolute count already used when the upstream provider exposes it.')
     remaining: Optional[int] = Field(default=None, description='Absolute count remaining when the upstream provider exposes it.')
+    product_usage: Optional[list[dict]] = Field(default=None, description='Grok provider-defined product enum and usage_percent pairs; not token counts or separate limits.')
 
 
 class QuotasResponse(BaseModel):
@@ -185,8 +187,10 @@ class ModelBreakdownEntry(BaseModel):
 
     cost_usd: Optional[float] = Field(default=None, description="Reported provider spend for this model and window.")
 
-    source: str = Field(description='Data source label: opencode, claude_code, antigravity, cursor, glm, codex, or nordrouter.')
-    model: str = Field(description='Model identifier as reported by the source, e.g. gpt-5.6-sol, claude-opus-5, composer-2.5-fast.')
+    source: str = Field(description='History authority: openclaw or nordrouter. The OpenClaw source excludes its NordRouter-routed usage.')
+    provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')
+    account: Optional[str] = Field(default=None, description='Provider account identity when verified; unknown for Gateway aggregate usage.')
+    model: str = Field(description='Model identifier reported by the source; names alone do not prove account identity.')
     totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window.')
     daily: list[ModelDailyEntry] = Field(default_factory=list, description='Per-day token entries for this model, ordered by date. Empty when ?daily=false is passed.')
 
@@ -211,6 +215,8 @@ class ModelBreakdownMeta(BaseModel):
     start_date: Optional[str] = Field(default=None, description='Inclusive start date, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date, YYYY-MM-DD.')
     days: Optional[int] = Field(default=None, description='Number of days covered, inclusive of both endpoints.')
+    openclaw_status: Optional[str] = Field(default=None, description='Gateway usage rollup status: fresh/refreshing/stale/unavailable.')
+    nordrouter_status: Optional[str] = Field(default=None, description='Direct NordRouter analytics status.')
 
 
 class ModelBreakdownResponse(BaseModel):
@@ -219,6 +225,7 @@ class ModelBreakdownResponse(BaseModel):
     meta: ModelBreakdownMeta = Field(default_factory=ModelBreakdownMeta, description='Metadata describing the generation run.')
     totals: ModelBreakdownTotals = Field(default_factory=ModelBreakdownTotals, description='Aggregate token totals across all models.')
     models: list[ModelBreakdownEntry] = Field(default_factory=list, description='Per-model entries, ordered by total tokens descending.')
+    source_daily: Optional[dict] = Field(default=None, description='Source-level daily rows, currently direct NordRouter account buckets; not per-model splits.')
 
 
 class AntigravityIngestRequest(BaseModel):

@@ -2509,7 +2509,7 @@ def _load_cursor_detailed(path=None) -> dict[date, dict[str, dict[str, int]]]:
     return {d: dict(m) for d, m in daily_models.items()}
 
 
-def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict[str, object]:
+def build_legacy_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict[str, object]:
     """Build per-model token usage breakdown across all data sources.
 
     Returns a dict suitable for ``ModelBreakdownResponse`` serialization.
@@ -2702,6 +2702,70 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
             'cache_hit_rate': cache_hit_rate,
         },
         'models': model_entries,
+    }
+
+
+def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict[str, object]:
+    """New history contract: Gateway non-NordRouter usage + direct NordRouter.
+
+    Local Codex/OpenCode/Claude exports remain available to old CLI reports,
+    but are deliberately not imported into this API to avoid overlapping the
+    OpenClaw rollups or claiming provider-account identity they do not carry.
+    """
+    import openclaw_usage
+
+    start_str, end_str, _, _ = get_date_range(days)
+    models = []
+    gateway_status = 'ok'
+    try:
+        gateway = openclaw_usage.fetch_usage(start_str, end_str)
+        models.extend(openclaw_usage.model_entries(gateway, include_daily=include_daily))
+        cache_status = (gateway.get('cacheStatus') or {}).get('status')
+        if cache_status and cache_status != 'fresh':
+            gateway_status = str(cache_status)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        gateway_status = 'unavailable'
+
+    # Direct NordRouter analytics is the sole NordRouter history authority.
+    nr_status = 'not_configured'
+    nr_daily = []
+    nr_key = os.environ.get('NORDROUTER_API_KEY', '')
+    if nr_key:
+        nr, stale = _nordrouter_usage.Client(nr_key).get('analytics', days=max(1, min(days, 90)))
+        nr_status = 'stale' if stale else 'ok'
+        if nr:
+            nr_daily = [dict(row) for row in nr.get('daily', [])]
+            for model in nr.get('top_models', []):
+                tokens = int(model['tokens'])
+                models.append({
+                    'source': 'nordrouter', 'provider': 'nordrouter',
+                    'account': 'unknown', 'model': model['id'],
+                    'totals': {'total': tokens}, 'daily': [],
+                    'cost_usd': float(model['amount_usd']),
+                })
+
+    models.sort(key=lambda row: row['totals']['total'], reverse=True)
+    detailed = [m['totals'] for m in models if m['source'] == 'openclaw']
+    def amount(field):
+        return sum(t.get(field) or 0 for t in detailed)
+    total_input, total_output = amount('input'), amount('output')
+    cache_read = amount('cache_read')
+    return {
+        'meta': {
+            'generated_at': datetime.now(ZoneInfo('America/Los_Angeles')).replace(tzinfo=None).isoformat(timespec='seconds'),
+            'generated_at_utc': _now_utc_iso(), 'start_date': start_str,
+            'end_date': end_str, 'days': days,
+            'openclaw_status': gateway_status, 'nordrouter_status': nr_status,
+        },
+        'totals': {
+            'input': total_input, 'output': total_output, 'cache_read': cache_read,
+            'cache_write': amount('cache_write'),
+            'total': sum(m['totals']['total'] for m in models),
+            'input_output_ratio': round(total_input / total_output, 2) if total_output else None,
+            'cache_hit_rate': round(cache_read / (total_input + cache_read), 4) if total_input + cache_read else None,
+        },
+        'source_daily': {'nordrouter': nr_daily if include_daily else []},
+        'models': models,
     }
 
 

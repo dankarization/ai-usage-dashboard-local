@@ -24,7 +24,7 @@ You do not need every platform connected on day one. The tool enables each sourc
 - **Claude Code**: If you use Claude Code, the tool reads local Claude Code project JSONL logs by default. No API key is required.
 - **OpenCode**: If you use OpenCode, the tool reads the main local OpenCode SQLite database by default. If you also use `opencode_skill` for archive querying, set `AI_USAGE_OPENCODE_SKILL_PATH` in `.env`.
 - **Cursor**: To include Cursor dashboard exports, set `CURSOR_COOKIE` in `.env`. This browser cookie must stay private. With the cookie present, the dashboard also fetches `GET /api/usage-summary` and adds the two monthly quota windows shown on the Cursor spending page to the unified `quotas` array: `Cursor Models` (the "Cursor models" bar = Composer + Cursor's own models, `autoPercentUsed`) and `Cursor Other` (the "Other models" bar = other named/frontier models, `apiPercentUsed`), both resetting at the billing-cycle end. An expired cookie returns a non-JSON login page, which is rejected so the last good cached snapshot (`cursor_usage_summary.json`) is preserved.
-- **Grok**: To include SuperGrok / X Premium weekly usage pool, set `GROK_COOKIE` in `.env` (browser cookie from grok.com while logged in). This cookie must stay private. A 0% week omits the float field in the grpc-web response (proto3 default); the parser maps that to 0% so the quota bar still appears. Token category `grok` is filled from local OpenCode usage independently of the cookie.
+- **Grok**: To include SuperGrok / X Premium weekly usage pool, set `GROK_COOKIE` in `.env` (browser cookie from grok.com while logged in). This cookie must stay private. A 0% week omits the float field in the grpc-web response (proto3 default); the parser maps that to 0% so the quota bar still appears. The legacy local-source rollup's `grok` category can use OpenCode data; the new history uses only OpenClaw's xAI route.
   Grok Bot has a separate weekly limit, read through grok.com's authenticated bot relay (`bot.usage`) with the same cookie. Its percentage and reset are shown in a distinct row; if the relay cannot be read, that row remains **unavailable** rather than copying the SuperGrok weekly pool value.
 - **GLM/Z.ai**: To include the GLM/Z.ai usage API, set `GLM_BEARER_TOKEN` in `.env`. This bearer token must stay private.
 
@@ -146,11 +146,22 @@ forcing a provider refresh. The web page triggers a provider refresh on opening
 and every five minutes while open. Multiple automatic clients share a recent
 snapshot; the manual Refresh button always forces a new collection. Other API
 clients can call `POST /api/v1/display/update` when fresh data is required.
+For Grok, `product_usage` may contain product codes and their contributions to
+the same shared weekly credit pool. These percentages are not token counts or
+separate product limits. Only verified codes 2 (Grok Build) and 4 (Grok Chat)
+are named; other codes stay unknown. Grok Bot remains a separate quota row.
 
 `GET /api/v1/model-breakdown` returns per-model token usage (input, output,
-cache_read, cache_write, total) across all data sources, sorted by total tokens
-descending. Sources that only provide total tokens (GLM API, Codex) have
-per-category fields set to `null`. Query params:
+cache_read, cache_write, total) from the OpenClaw Gateway for all providers
+except NordRouter. NordRouter tokens/spend come directly from its analytics API;
+NordRouter-routed Gateway rows are omitted to avoid double counting. The
+Gateway's `byModel` rollup supplies token-type window totals, while its
+`modelDaily` rows supply day × provider × model **total** tokens only; daily
+input/output/cache fields are therefore `null`. NordRouter model totals cover
+the window, and `source_daily.nordrouter` holds account-wide daily totals, not
+invented per-model daily splits. `provider` is the reported route; `account`
+stays `unknown` because the Gateway aggregate does not identify the provider
+account (including which Codex login). Source status is in `meta`. Query params:
 
 - `days` (default 30): number of days to cover.
 - `daily` (default true): set to `false` to omit per-day entries and return
@@ -223,12 +234,13 @@ and open `http://127.0.0.1:7995/dashboard` (or `/`). The self-contained dark
 page uses no CDN or additional dependencies. It displays NordRouter balance,
 spend and top models, each Codex profile's quotas, a generic **Quotas** section
 covering every other provider returned by `/api/v1/quotas` (for example GLM,
-Cursor, Ollama, Claude, Antigravity and Grok), and reported model costs
-for seven days. Each quota card shows its window label, used percentage,
+Cursor, Ollama, Claude, Antigravity and Grok), plus Gateway/direct-NordRouter
+daily history and model usage for seven days. The overview above it remains a
+separately labelled legacy local-source 30-day rollup. Each quota card shows its window label, used percentage,
 a progress bar and the reset time. Unknown costs and quotas appear as `—`,
 never as zero.
 
-The page calls `POST /api/v1/display/update` every 60 seconds (and when
+The page calls `POST /api/v1/display/update` every five minutes (and when
 **Refresh** is pressed), then reloads the quota and model-breakdown endpoints.
 Snapshot timestamps, provider stale status, and incomplete NordRouter today
 data are shown; network failures preserve the last displayed values. Dates use

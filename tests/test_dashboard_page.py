@@ -46,7 +46,7 @@ def test_page_exposes_responsive_and_accessibility_hooks():
 
 
 def test_page_calls_the_live_endpoints():
-    for endpoint in ('/api/v1/quotas', '/api/v1/model-breakdown?days=7&daily=false',
+    for endpoint in ('/api/v1/quotas', '/api/v1/model-breakdown?days=7&daily=true',
                      '/api/v1/display/update', '/token_usage.json'):
         assert endpoint in DASHBOARD_HTML, f'dashboard must call {endpoint}'
 
@@ -72,9 +72,9 @@ def test_page_marks_brand_and_colors_by_remaining_capacity():
 
 def test_page_labels_list_price_estimate_and_never_fakes_it():
     assert 'function subscriptionEstimate(' in DASHBOARD_HTML
-    assert "row.source !== 'nordrouter'" in DASHBOARD_HTML
-    assert 'unavailable · no measured subscription token data' in DASHBOARD_HTML
-    assert 'estimate from published list prices' in DASHBOARD_HTML
+    assert "row.source === 'openclaw'" in DASHBOARD_HTML
+    assert 'unavailable · no priced OpenClaw usage' in DASHBOARD_HTML
+    assert 'Gateway model-price estimate' in DASHBOARD_HTML
     # The estimate must not be invented when there is no measured token data.
     assert "value.textContent = '—'" in DASHBOARD_HTML
 
@@ -111,7 +111,7 @@ def test_page_distinguishes_unavailable_from_zero():
 
 def test_page_draws_history_only_from_real_buckets():
     assert 'No historical usage data available.' in DASHBOARD_HTML
-    assert 'payload.daily' in DASHBOARD_HTML
+    assert 'payload.source_daily' in DASHBOARD_HTML
     # No fabricated series, token totals, or placeholder chart data.
     assert 'Math.random' not in DASHBOARD_HTML
     assert 'lorem' not in DASHBOARD_HTML.lower()

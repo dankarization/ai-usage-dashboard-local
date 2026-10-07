@@ -8,6 +8,7 @@ import pytest
 
 from grok_usage import (
     _read_grok_bot_usage,
+    export_grok_quota,
     filter_quotas_for_eink,
     parse_grok_bot_usage,
     parse_grok_credits_response,
@@ -68,6 +69,16 @@ def test_parse_grok_credits_response_weekly_pool():
     assert parsed['next_reset_time_ms'] == 1_785_829_649 * 1000
     assert parsed['product_usage'][0]['product'] == 2
     assert parsed['product_usage'][0]['usage_percent'] == 12.5
+
+
+def test_export_preserves_product_code_without_inventing_name(monkeypatch):
+    import grok_usage
+    product = _key(1, 0) + _varint(2) + _float_field(2, 12.5)
+    body = _envelope(_len_field(1, _float_field(1, 12.5) + _len_field(7, product)))
+    monkeypatch.setattr(grok_usage, 'fetch_grok_credits_config', lambda cookie: body)
+    snapshot = export_grok_quota('fixture-cookie')[0]
+    assert snapshot['product_usage'] == [{'product': 2, 'label': 'Grok Build', 'usage_percent': 12.5}]
+    assert 'tokens' not in snapshot
 
 
 def test_parse_grok_credits_response_zero_usage_omits_percent_fields():

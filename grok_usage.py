@@ -18,6 +18,10 @@ from typing import Any
 
 GROK_CREDITS_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig'
 GROK_BOT_URL = 'wss://grok.com/ws/bot/'
+# Verified against live CLI-proxy samples in CodexBar's Grok provider notes:
+# https://github.com/steipete/CodexBar/blob/main/docs/grok.md
+# Other ids remain unnamed until independently established.
+PRODUCT_LABELS = {2: 'Grok Build', 4: 'Grok Chat'}
 # Empty GetGrokCreditsConfigRequest inside a grpc-web data frame.
 _GRPC_WEB_EMPTY_REQUEST = b'\x00\x00\x00\x00\x00'
 
@@ -252,10 +256,33 @@ def export_grok_quota(cookie: str) -> list[dict[str, Any]]:
     """Return unified QuotaSnapshot-shaped list for the weekly usage pool."""
     raw = fetch_grok_credits_config(cookie)
     parsed = parse_grok_credits_response(raw)
+    product_usage = parsed['product_usage']
+    # These are contributions to the same shared pool, not independent limits.
+    # An incomplete/malformed set must not be presented as a full breakdown.
+    valid_products = (
+        product_usage
+        and all(isinstance(item.get('product'), int)
+                and isinstance(item.get('usage_percent'), (int, float))
+                and math.isfinite(item['usage_percent'])
+                and item['usage_percent'] >= 0 for item in product_usage)
+        and len({item['product'] for item in product_usage}) == len(product_usage)
+        and abs(sum(item['usage_percent'] for item in product_usage)
+                - parsed['credit_usage_percent']) <= 1.0
+    )
+    if valid_products:
+        product_usage = [
+            {'product': item['product'],
+             'label': PRODUCT_LABELS.get(item['product'], f"Product {item['product']} (unknown)"),
+             'usage_percent': item['usage_percent']}
+            for item in product_usage if item['usage_percent'] > 0
+        ]
+    else:
+        product_usage = []
     snapshot: dict[str, Any] = {
         'provider': 'grok',
         'label': parsed['period_label'],
         'percentage': parsed['used_percentage'],
+        'product_usage': product_usage,
     }
     if parsed.get('next_reset_time_ms') is not None:
         snapshot['next_reset_time_ms'] = parsed['next_reset_time_ms']

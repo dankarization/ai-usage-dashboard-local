@@ -130,7 +130,7 @@ def quotas() -> dict[str, Any]:
     for item in payload.get("quotas") or []:
         used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
         quota_items.append({
-            **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis") if k in item},
+            **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis", "product_usage") if k in item},
             "provider": item.get("provider", "unknown"),
             "label": item.get("label", "unknown"),
             "used_percentage": used_percentage,
@@ -152,7 +152,7 @@ def quotas() -> dict[str, Any]:
     "/api/v1/model-breakdown",
     response_model=ModelBreakdownResponse,
     summary="Return per-model token usage breakdown",
-    description="Returns per-model token usage (input, output, cache_read, cache_write, total) across all data sources (OpenCode, Claude Code, Antigravity, Cursor, GLM, Codex). Sources that only provide total tokens have per-category fields set to null. Pass ?daily=false to omit per-day entries and return totals only. Note: Cursor, GLM, and Codex data come from the most recent export (typically 30 days); requesting days>30 may return incomplete data for those sources.",
+    description="Returns OpenClaw Gateway non-NordRouter usage plus direct NordRouter analytics. Gateway per-model window totals have input/output/cache fields; model-day rows have total tokens only, so those fields are null. Codex account identity is unknown. NordRouter model totals are window aggregates and its daily rows are account-wide, not per-model. Pass ?daily=false to omit daily entries.",
 )
 def model_breakdown(days: int = 30, daily: bool = True) -> dict[str, Any]:
     days = max(1, min(days, 90))

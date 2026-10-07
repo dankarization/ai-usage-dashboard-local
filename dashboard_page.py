@@ -198,7 +198,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   <p id="error" role="status" aria-live="polite"></p>
 
   <section aria-labelledby="h-hero">
-    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note">last 30 days · USD · times shown in your browser timezone</p></div>
+    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note">legacy local-source rollup · last 30 days · separate from OpenClaw history below</p></div>
     <div id="hero" class="strip"></div>
   </section>
 
@@ -224,17 +224,17 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-history">
-    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note">daily tokens from local buckets · drawn only where real data exists</p></div>
+    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note">OpenClaw non-NordRouter + direct NordRouter daily tokens</p></div>
     <div id="history" class="panel chart-wrap"></div>
   </section>
 
   <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">Model costs</h2><p class="note">reported costs only; — means unavailable, not zero</p></div>
+    <div class="sec-head"><h2 id="h-models">Model usage</h2><p class="note">NordRouter reported spend; OpenClaw estimated cost · unknown account means unverified</p></div>
     <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
         <table>
-          <thead><tr><th>Source</th><th>Model</th><th class="num">Tokens</th><th class="num">Cost USD</th></tr></thead>
+          <thead><tr><th>Source / route</th><th>Model / day</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num">Total</th><th class="num">USD</th></tr></thead>
           <tbody id="models"></tbody>
         </table>
       </div>
@@ -396,6 +396,12 @@ function windowRow(container, window) {
       var when = countdown(resetMs);
       node('span', 'resets ' + time(resetMs || resetIso) + (when ? ' (' + when + ')' : ''), row).className = 'win-reset';
     }
+    if (window.provider === 'grok' && Array.isArray(window.product_usage) && window.product_usage.length) {
+      var productText = window.product_usage.map(function (item) {
+        return (item.label || ('Product ' + item.product + ' (unknown)')) + ': ' + item.usage_percent.toFixed(1) + '%';
+      }).join(' · ');
+      node('span', productText + ' of shared credits (not tokens or separate limits)', row).className = 'win-reset';
+    }
   } else {
     var emptyTrack = node('div', undefined, row); emptyTrack.className = 'track';
     node('div', undefined, emptyTrack).className = 'fill unknown';
@@ -545,7 +551,7 @@ function renderHero(payload) {
   var root = $('hero');
   root.replaceChildren();
 
-  stripItem(root, 'Tokens · 30d', number(summary.total_tokens) ? tokens(summary.total_tokens) : '—',
+  stripItem(root, 'Legacy local tokens · 30d', number(summary.total_tokens) ? tokens(summary.total_tokens) : '—',
     active.length + ' active day' + (active.length === 1 ? '' : 's'), !number(summary.total_tokens));
   stripItem(root, 'Cost · 30d', usd(summary.total_cost_usd), 'reported spend + estimates', !number(summary.total_cost_usd));
   stripItem(root, 'Latest active day', latest ? dateOnly(latest.date) : '—',
@@ -553,10 +559,9 @@ function renderHero(payload) {
   stripItem(root, 'AI active time · 30d', number(summary.total_ai_hours) ? summary.total_ai_hours.toFixed(2) + ' h' : '—',
     'from local session timing', !number(summary.total_ai_hours));
 
-  // Subscription list-price equivalent. Filled by renderEstimate once the model
-  // breakdown arrives; stays explicitly unavailable without measured tokens.
+  // OpenClaw model-price estimate, separate from NordRouter billed spend.
   var est = node('div', undefined, root); est.className = 'strip-item'; est.id = 'est-tile';
-  node('div', 'Subscription list-price equiv · 7d', est).className = 'k';
+  node('div', 'OpenClaw estimated cost · 7d', est).className = 'k';
   var estValue = node('div', '—', est); estValue.className = 'v unknown'; estValue.id = 'est-value';
   var estSub = node('div', 'waiting for model data…', est); estSub.className = 's'; estSub.id = 'est-sub';
   renderEstimate();
@@ -571,16 +576,12 @@ function renderHero(payload) {
   }
 }
 
-/* ---------- subscription list-price equivalent ---------- */
-/* Only subscription sources are counted: NordRouter cost_usd is actual billed
-   spend, not an estimate, so it is excluded. Every other source reports an
-   API list-price equivalent derived from measured tokens and published rates.
-   Without measured subscription tokens the figure is unavailable, never 0. */
+/* ---------- OpenClaw modeled cost, separate from NordRouter billed spend ---------- */
 var lastModels = null;
 function subscriptionEstimate(models) {
   var rows = models || [];
   var priced = rows.filter(function (row) {
-    return row.source !== 'nordrouter' && number(row.cost_usd);
+    return row.source === 'openclaw' && number(row.cost_usd);
   });
   return {
     count: priced.length,
@@ -596,12 +597,12 @@ function renderEstimate() {
   if (!estimate.count) {
     value.textContent = '—';
     value.className = 'v unknown';
-    if (sub) sub.textContent = 'unavailable · no measured subscription token data';
+    if (sub) sub.textContent = 'unavailable · no priced OpenClaw usage';
     return;
   }
   value.textContent = usd(estimate.total);
   value.className = 'v';
-  if (sub) sub.textContent = 'estimate from published list prices · ' + estimate.count + ' model' + (estimate.count === 1 ? '' : 's');
+  if (sub) sub.textContent = 'Gateway model-price estimate · ' + estimate.count + ' model' + (estimate.count === 1 ? '' : 's');
 }
 
 /* ---------- history chart ---------- */
@@ -615,8 +616,18 @@ function svgEl(tag, attrs, parent) {
 function renderHistory(payload) {
   var root = $('history');
   root.replaceChildren();
-  var daily = payload.daily || [];
-  var series = daily.filter(function (day) { return number(day.total_tokens); });
+  var byDate = new Map();
+  (payload.models || []).forEach(function (model) {
+    if (model.source !== 'openclaw') return;
+    (model.daily || []).forEach(function (day) {
+      byDate.set(day.date, (byDate.get(day.date) || 0) + day.total);
+    });
+  });
+  ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
+    byDate.set(day.date, (byDate.get(day.date) || 0) + day.tokens);
+  });
+  var series = Array.from(byDate, function (item) { return { date: item[0], total_tokens: item[1], cost_usd: null }; })
+    .sort(function (a, b) { return a.date.localeCompare(b.date); });
   var peak = series.reduce(function (max, day) { return Math.max(max, day.total_tokens); }, 0);
   if (!series.length || peak <= 0) {
     node('p', 'No historical usage data available.', root).className = 'empty';
@@ -663,7 +674,8 @@ function renderModels(data) {
   var meta = data.meta || {};
   $('model-stamp').textContent = 'snapshot ' +
     (meta.generated_at_utc ? time(meta.generated_at_utc) : serverTime(meta.generated_at) + ' (server time)') +
-    (meta.start_date && meta.end_date ? ' · ' + dateOnly(meta.start_date) + ' → ' + dateOnly(meta.end_date) : '');
+    (meta.start_date && meta.end_date ? ' · ' + dateOnly(meta.start_date) + ' → ' + dateOnly(meta.end_date) : '') +
+    ' · OpenClaw ' + (meta.openclaw_status || 'unknown') + ' · NordRouter ' + (meta.nordrouter_status || 'unknown');
   var body = $('models');
   body.replaceChildren();
   var models = (data.models || []).slice().sort(function (a, b) {
@@ -675,7 +687,7 @@ function renderModels(data) {
   if (!models.length) {
     var emptyRow = node('tr', undefined, body);
     var emptyCell = node('td', 'No model data available.', emptyRow);
-    emptyCell.colSpan = 4;
+    emptyCell.colSpan = 8;
     return;
   }
   var top = models.reduce(function (max, row) {
@@ -685,8 +697,20 @@ function renderModels(data) {
   models.forEach(function (row) {
     var tr = node('tr', undefined, body);
     var srcCell = node('td', undefined, tr);
-    node('span', row.source || '—', srcCell).className = 'src';
-    node('td', row.model || '—', tr);
+    node('span', (row.source || '—') + ' / ' + (row.provider || 'unknown'), srcCell).className = 'src';
+    var modelCell = node('td', undefined, tr);
+    node('span', row.model || '—', modelCell);
+    if (row.account) node('div', 'account: ' + row.account, modelCell).className = 'src';
+    if (row.daily && row.daily.length) {
+      var detail = node('details', undefined, modelCell);
+      node('summary', row.daily.length + ' daily rows', detail);
+      row.daily.forEach(function (day) {
+        node('div', dateOnly(day.date) + ' · ' + tokens(day.total) + ' tokens', detail).className = 'src';
+      });
+    }
+    ['input', 'output', 'cache_read', 'cache_write'].forEach(function (field) {
+      var cell = node('td', tokens(row.totals && row.totals[field]), tr); cell.className = 'num';
+    });
     var total = row.totals && number(row.totals.total) ? row.totals.total : null;
     var tokCell = node('td', tokens(total), tr); tokCell.className = 'num';
     if (total && top > 0) {
@@ -730,12 +754,11 @@ function reload(force) {
       json('/api/v1/quotas').then(renderQuotas).catch(function (error) {
         errors.push('Quotas: ' + error.message + '. Last displayed data retained.');
       }),
-      json('/api/v1/model-breakdown?days=7&daily=false').then(renderModels).catch(function (error) {
+      json('/api/v1/model-breakdown?days=7&daily=true').then(function (data) { renderModels(data); renderHistory(data); }).catch(function (error) {
         errors.push('Models: ' + error.message + '. Last displayed data retained.');
       }),
       json('/token_usage.json').then(function (payload) {
         renderHero(payload);
-        renderHistory(payload);
       }).catch(function (error) {
         errors.push('History: ' + error.message + '. Last displayed data retained.');
       }),
