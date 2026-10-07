@@ -290,8 +290,8 @@ const titled = rects.map((r) => all(r).find((c) => c.tagName === 'TITLE')).filte
 assertEqual(titled.length, 3, 'each bar must carry a tooltip with its real value');
 assert(titled.some((t) => t.textContent.includes('06.09.2026') && t.textContent.includes('250,000,000')),
   'bar tooltip must expose the real token count');
-assert(all(history).filter((e) => e.tagName === 'TEXT').some((e) => e.textContent === '06.09'),
-  'chart axis uses day.month labels');
+assert(all(history).filter((e) => e.tagName === 'TEXT').some((e) => e.textContent === '06.09.2026'),
+  'chart axis uses full day.month.year labels');
 
 renderHistory({ daily: [{ date: '2026-10-03', total_tokens: 0, cost_usd: 0 }] });
 assert(registry.get('history').textContent.includes('No historical usage data available'),

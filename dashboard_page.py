@@ -636,7 +636,7 @@ function renderHistory(payload) {
     svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + day.total_tokens.toLocaleString() + ' tokens · ' + usd(day.cost_usd);
     if (index === 0 || index === series.length - 1 || index % Math.ceil(series.length / 6) === 0) {
       var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
-      xl.textContent = dateOnly(day.date).slice(0, 5);
+      xl.textContent = dateOnly(day.date);
     }
   });
   var legend = node('div', undefined, root); legend.className = 'legend';
