@@ -109,7 +109,7 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
 .chip.danger{color:var(--red);border-color:#5c3030;background:#2b1d1d}
 .chip.unknown,.chip.not_configured,.chip.unavailable{color:var(--neutral);border-color:var(--line);background:var(--raised)}
 
-.win{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:3px 0}
+.win{display:grid;grid-template-columns:160px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:3px 0}
 .win-label{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .track{height:4px;border-radius:var(--pill);background:#171717;border:1px solid var(--line-soft);overflow:hidden}
 .fill{height:100%;border-radius:var(--pill);transition:width 400ms ease}
