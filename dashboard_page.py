@@ -617,13 +617,8 @@ function renderHistory(payload) {
   (payload.models || []).forEach(function (model) {
     if (model.source !== 'openclaw') return;
     var nord = String(model.provider).toLowerCase() === 'nordrouter';
-    var key = (nord ? 'nordrouter' : 'openclaw') + '\u0000' + String(model.provider || 'unknown') + '\u0000' + String(model.model || 'unknown');
-    var category = categories.get(key);
-    if (!category) {
-      category = { key: key, label: (nord ? 'NordRouter / ' : String(model.provider || 'unknown') + ' / ') +
-        String(model.model || 'unknown'), total: 0, nord: nord };
-      categories.set(key, category);
-    }
+    var key = String(model.model || 'unknown');
+    if (!categories.has(key)) categories.set(key, { key: key, label: key, total: 0 });
     (model.daily || []).forEach(function (day) {
       if (!number(day.total) || day.total < 0) return;
       var dates = nord ? nordByDate : byDate;
@@ -657,7 +652,7 @@ function renderHistory(payload) {
     var remainder = direct - allocations.reduce(function (sum, item) { return sum + item.amount; }, 0);
     allocations.sort(function (a, b) { return b.fraction - a.fraction || a.key.localeCompare(b.key); });
     for (var i = 0; i < remainder; i++) allocations[i].amount++;
-    allocations.forEach(function (item) { buckets.set(item.key, item.amount); });
+    allocations.forEach(function (item) { buckets.set(item.key, (buckets.get(item.key) || 0) + item.amount); });
   });
   byDate.forEach(function (buckets) {
     buckets.forEach(function (amount, key) {
@@ -684,7 +679,7 @@ function renderHistory(payload) {
   var width = Math.max(320, root.clientWidth || 900);
   var height = 150, padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
-  var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Daily token usage stacked by model; NordRouter model shares estimated from OpenClaw, daily total from direct account' }, root);
+  var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Daily token usage stacked by model' }, root);
   svgEl('title', {}, svg).textContent = 'Daily token usage by model for the last ' + series.length + ' days';
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
@@ -708,7 +703,7 @@ function renderHistory(payload) {
         fill: category.color,
       }, svg);
       svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + category.label + ' · ' +
-        amount.toLocaleString() + (category.nord ? ' allocated tokens' : ' tokens') +
+        amount.toLocaleString() + ' tokens' +
         ' (day total ' + day.total_tokens.toLocaleString() + ')';
       stacked += barH;
     });
@@ -717,11 +712,7 @@ function renderHistory(payload) {
       xl.textContent = dateOnly(day.date);
     }
   });
-  node('div', 'daily tokens · ' + series.length + ' days · peak ' + tokens(peak) + ' · total ' +
-    tokens(series.reduce(function (sum, day) { return sum + day.total_tokens; }, 0)) + ' tokens', root).className = 'chart-summary';
-  if (modelCategories.some(function (category) { return category.nord; })) {
-    node('div', 'NordRouter model shares estimated from OpenClaw; daily totals use direct account data.', root).className = 'chart-summary';
-  }
+  node('div', 'daily tokens · ' + series.length + ' days · peak ' + tokens(peak), root).className = 'chart-summary';
   var legend = node('div', undefined, root); legend.className = 'legend';
   stackOrder.forEach(function (category) {
     var item = node('span', undefined, legend); item.className = 'legend-item';

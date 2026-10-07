@@ -330,15 +330,19 @@ const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 2, '30d draws separate OpenClaw and NordRouter model segments');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, 'models have distinct colours');
-assert(chart.textContent.includes('NordRouter / nr-route') && chart.textContent.includes('xai / grok-test'),
-  'legend identifies each model route');
+let legend = all(chart).filter((e) => e.classList.contains('legend-item'));
+assertEqual(legend.map((e) => e.textContent).join(','), 'grok-test,nr-route',
+  'legend identifies models without provider prefixes');
 assert(!chart.textContent.includes('all models; daily split unavailable'), 'NordRouter route uses model-day data');
-assert(chart.textContent.includes('20 allocated tokens') && !chart.textContent.includes('21 allocated tokens'),
+assert(chart.textContent.includes('nr-route · 20 tokens') && !chart.textContent.includes('nr-route · 21 tokens'),
   'direct NordRouter daily total replaces comparison-only route total');
-assert(chart.textContent.includes('total 30 tokens'), 'history excludes the 21-token duplicate');
+assert(chart.textContent.includes('day total 30'), 'history excludes the 21-token duplicate');
+let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
+assertEqual(summary.length, 1, 'history has one summary line');
+assertEqual(summary[0].textContent, 'daily tokens · 1 days · peak 30', 'summary excludes total and estimate note');
 windowListeners.resize();
 assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize keeps model segments');
-assert(chart.textContent.includes('total 30 tokens'), 'resize keeps deduplicated history');
+assert(chart.textContent.includes('day total 30'), 'resize keeps deduplicated history');
 selectedDays = 7;
 renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 },
   sources: { nordrouter: { tokens: 4, billed_cost_usd: 0.1, complete: true },
@@ -355,11 +359,14 @@ assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,
   '7d overview updates both source chips');
 assert(registry.get('cost-models').textContent.includes('direct-7d'), '7d direct cost table');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
-assert(chart.textContent.includes('total 9 tokens'), '7d history');
+assert(chart.textContent.includes('day total 9'), '7d history');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 2, '7d draws both model segments');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, '7d models have distinct colours');
-assert(chart.textContent.includes('4 allocated tokens'), '7d NordRouter segment reconciles to direct source');
+assert(chart.textContent.includes('nr-7d · 4 tokens'), '7d NordRouter segment reconciles to direct source');
+summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
+assertEqual(summary.length, 1, '7d has one summary line');
+assertEqual(summary[0].textContent, 'daily tokens · 1 days · peak 9', '7d summary excludes total and estimate note');
 assert(registry.get('metrics').textContent.includes('Billed spend · 7d'), 'NordRouter metric follows selection');
 assert(registry.get('selected-top-label').textContent.includes('7d'), 'top-model period follows selection');
 Object.entries(sectionNotes).forEach(([id, value]) => {
@@ -370,12 +377,27 @@ renderHistory({ models: [
   { source: 'openclaw', provider: 'nordrouter', model: 'B', daily: [{ date: '2026-10-03', total: 2 }] },
   { source: 'openclaw', provider: 'xai', model: 'C', daily: [{ date: '2026-10-03', total: 5 }] },
 ], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 7 }] } });
-assert(chart.textContent.includes('NordRouter / A · 4 allocated tokens') &&
-  chart.textContent.includes('NordRouter / B · 3 allocated tokens'),
+assert(chart.textContent.includes('A · 4 tokens') &&
+  chart.textContent.includes('B · 3 tokens'),
   'NordRouter model shares use largest-remainder allocation to exact direct total');
-assert(chart.textContent.includes('total 12 tokens'), 'allocated model bars preserve canonical day total');
+assert(chart.textContent.includes('day total 12'), 'allocated model bars preserve canonical day total');
 assertEqual(new Set(all(chart).filter((e) => e.tagName === 'RECT').map((e) => e.getAttribute('fill'))).size, 3,
   'three individual models keep distinct colours');
+renderHistory({ models: [
+  { source: 'openclaw', provider: 'nordrouter', model: 'Shared', daily: [{ date: '2026-10-03', total: 3 }] },
+  { source: 'openclaw', provider: 'xai', model: 'Shared', daily: [{ date: '2026-10-03', total: 5 }] },
+  { source: 'openclaw', provider: 'local', model: 'Shared', daily: [{ date: '2026-10-03', total: 2 }] },
+  { source: 'openclaw', provider: 'openai', model: 'Other', daily: [{ date: '2026-10-03', total: 1 }] },
+], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } });
+legend = all(chart).filter((e) => e.classList.contains('legend-item'));
+assertEqual(legend.map((e) => e.textContent).join(','), 'Other,Shared',
+  'the same model across providers has one legend entry');
+segments = all(chart).filter((e) => e.tagName === 'RECT');
+assertEqual(segments.length, 2, 'same model draws one combined segment per day');
+assert(chart.textContent.includes('Shared · 11 tokens') && chart.textContent.includes('day total 12'),
+  'combined model includes direct-allocated NordRouter and both other providers exactly once');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
+  'one colour is assigned per distinct model');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,
@@ -522,7 +544,7 @@ async function waitForReload() {
   assert(calls.some((url) => url.includes('days=7&daily=true')), 'toggle requests seven-day model data');
   assert(!calls.includes('/api/v1/display/update'), 'period switch does not force unrelated provider collection');
   assert(registry.get('hero').textContent.includes('Total tokens · 7d'), 'toggle repaints overview');
-  assert(registry.get('history').textContent.includes('total 9 tokens'), 'toggle repaints history');
+  assert(registry.get('history').textContent.includes('day total 9'), 'toggle repaints history');
   assert(registry.get('cost-models').textContent.includes('direct-7d'), 'toggle repaints direct model costs');
   assert(registry.get('models').textContent.includes('grok-7d'), 'toggle repaints OpenClaw model usage');
   assertEqual(registry.get('period-7').getAttribute('aria-pressed'), 'true', 'toggle updates pressed state');
