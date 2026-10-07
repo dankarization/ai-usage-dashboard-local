@@ -46,8 +46,8 @@ def test_page_exposes_responsive_and_accessibility_hooks():
 
 
 def test_page_calls_the_live_endpoints():
-    for endpoint in ('/api/v1/quotas', '/api/v1/model-breakdown?days=7&daily=true',
-                     '/api/v1/display/update', '/token_usage.json'):
+    for endpoint in ('/api/v1/quotas', '/api/v1/model-breakdown?days=',
+                     '/api/v1/display/update'):
         assert endpoint in DASHBOARD_HTML, f'dashboard must call {endpoint}'
 
 
@@ -71,12 +71,12 @@ def test_page_marks_brand_and_colors_by_remaining_capacity():
 
 
 def test_page_labels_list_price_estimate_and_never_fakes_it():
-    assert 'function subscriptionEstimate(' in DASHBOARD_HTML
-    assert "row.source === 'openclaw'" in DASHBOARD_HTML
-    assert 'unavailable · no priced OpenClaw usage' in DASHBOARD_HTML
-    assert 'Gateway model-price estimate' in DASHBOARD_HTML
-    # The estimate must not be invented when there is no measured token data.
-    assert "value.textContent = '—'" in DASHBOARD_HTML
+    assert 'OpenClaw estimated cost' in DASHBOARD_HTML
+    assert 'NordRouter billed cost' in DASHBOARD_HTML
+    assert 'excludes NordRouter route' in DASHBOARD_HTML
+    assert 'id="period-30"' in DASHBOARD_HTML
+    assert 'id="period-7"' in DASHBOARD_HTML
+    assert 'id="cost-models"' in DASHBOARD_HTML
 
 
 def test_page_shows_configured_and_unconfigured_account_states():

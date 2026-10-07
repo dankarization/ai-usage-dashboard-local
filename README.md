@@ -152,16 +152,27 @@ separate product limits. Only verified codes 2 (Grok Build) and 4 (Grok Chat)
 are named; other codes stay unknown. Grok Bot remains a separate quota row.
 
 `GET /api/v1/model-breakdown` returns per-model token usage (input, output,
-cache_read, cache_write, total) from the OpenClaw Gateway for all providers
-except NordRouter. NordRouter tokens/spend come directly from its analytics API;
-NordRouter-routed Gateway rows are omitted to avoid double counting. The
+cache_read, cache_write, total) from the OpenClaw Gateway, including its
+NordRouter route for temporary side-by-side comparison. Canonical NordRouter
+tokens and billed spend come directly from its analytics API; NordRouter-routed
+Gateway rows are visible in OpenClaw model usage but excluded from Overview,
+cost estimates and daily history to avoid double counting. The
 Gateway's `byModel` rollup supplies token-type window totals, while its
 `modelDaily` rows supply day × provider × model **total** tokens only; daily
 input/output/cache fields are therefore `null`. NordRouter model totals cover
 the window, and `source_daily.nordrouter` holds account-wide daily totals, not
 invented per-model daily splits. `provider` is the reported route; `account`
 stays `unknown` because the Gateway aggregate does not identify the provider
-account (including which Codex login). Source status is in `meta`. Query params:
+account (including which Codex login). Source status is in `meta`; `sources`
+gives direct NordRouter daily-bucket tokens and billed window cost alongside
+non-NordRouter Gateway tokens and modeled cost. The OpenClaw cost sums only
+priced models and explicitly labels the estimate partial when models lack
+price data; a zero or missing price is not fabricated. The direct model-cost rows are
+window aggregates and may not sum exactly to direct account daily buckets.
+The web dashboard has one 30d (default) / 7d selector for Overview, history,
+direct NordRouter model costs, OpenClaw model usage, and selected-window
+NordRouter metrics. Balance, today's spend/models, and provider quota/reset
+windows retain their own inherent periods. Query params:
 
 - `days` (default 30): number of days to cover.
 - `daily` (default true): set to `false` to omit per-day entries and return

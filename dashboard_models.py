@@ -187,7 +187,7 @@ class ModelBreakdownEntry(BaseModel):
 
     cost_usd: Optional[float] = Field(default=None, description="Reported provider spend for this model and window.")
 
-    source: str = Field(description='History authority: openclaw or nordrouter. The OpenClaw source excludes its NordRouter-routed usage.')
+    source: str = Field(description='Data source: openclaw or direct nordrouter. OpenClaw NordRouter-route rows are comparison-only and excluded from totals.')
     provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')
     account: Optional[str] = Field(default=None, description='Provider account identity when verified; unknown for Gateway aggregate usage.')
     model: str = Field(description='Model identifier reported by the source; names alone do not prove account identity.')
@@ -202,7 +202,7 @@ class ModelBreakdownTotals(BaseModel):
     output: int = Field(default=0, description='Total output tokens across all models that provide per-category breakdown.')
     cache_read: int = Field(default=0, description='Total cache-read tokens across all models that provide per-category breakdown.')
     cache_write: int = Field(default=0, description='Total cache-write tokens across all models that provide per-category breakdown.')
-    total: int = Field(default=0, description='Total tokens across all models (including sources without per-category breakdown).')
+    total: Optional[int] = Field(default=None, description='Canonical OpenClaw non-NordRouter plus direct NordRouter daily tokens; null if a source is unavailable.')
     input_output_ratio: Optional[float] = Field(default=None, description='Input divided by output (non-cached input / output). None when output is zero.')
     cache_hit_rate: Optional[float] = Field(default=None, description='Cache-read tokens divided by (input + cache_read). None when the denominator is zero.')
 
@@ -226,6 +226,7 @@ class ModelBreakdownResponse(BaseModel):
     totals: ModelBreakdownTotals = Field(default_factory=ModelBreakdownTotals, description='Aggregate token totals across all models.')
     models: list[ModelBreakdownEntry] = Field(default_factory=list, description='Per-model entries, ordered by total tokens descending.')
     source_daily: Optional[dict] = Field(default=None, description='Source-level daily rows, currently direct NordRouter account buckets; not per-model splits.')
+    sources: Optional[dict] = Field(default=None, description='Canonical source totals and cost provenance; OpenClaw NordRouter comparison rows excluded.')
 
 
 class AntigravityIngestRequest(BaseModel):

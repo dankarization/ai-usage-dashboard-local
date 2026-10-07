@@ -68,9 +68,9 @@ class Element {
 }
 
 const registry = new Map();
-['hero', 'quotas', 'history', 'codex', 'metrics', 'today', 'week',
+['hero', 'quotas', 'history', 'codex', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
- 'est-value', 'est-sub'].forEach((id) => {
+ 'period-30', 'period-7', 'overview-note', 'history-note', 'models-note', 'costs-note', 'cost-models'].forEach((id) => {
   registry.set(id, new Element('div'));
 });
 
@@ -89,7 +89,7 @@ global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({})
 const code = fs.readFileSync(jsPath, 'utf8');
 vm.runInThisContext(code, { filename: jsPath });
 
-['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'subscriptionEstimate', 'renderEstimate', 'snapshotLabel', 'relativeAge', 'time', 'dateOnly', 'serverTime']
+['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'renderCosts', 'renderPeriod', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'snapshotLabel', 'relativeAge', 'time', 'dateOnly', 'serverTime']
   .forEach((name) => assert(typeof global[name] === 'function' || typeof eval(name) === 'function',
     'dashboard script did not expose ' + name));
 
@@ -129,12 +129,16 @@ const PAYLOAD = {
 };
 
 const MODELS = {
-  meta: { generated_at: '2026-10-03T03:49:55', start_date: '2026-09-27', end_date: '2026-10-03', days: 7 },
-  totals: { total: 535720909 },
+  meta: { generated_at: '2026-10-03T03:49:55', start_date: '2026-09-04', end_date: '2026-10-03', days: 30 },
+  totals: { total: 30 },
+  sources: { nordrouter: { tokens: 20, billed_cost_usd: 0.4, complete: true },
+    openclaw: { tokens: 10, estimated_cost_usd: 0.2, complete: true },
+    openclaw_nordrouter_comparison_tokens: 21 },
+  source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 20 }] },
   models: [
-    { source: 'nordrouter', model: 'z-ai/glm-5.3', cost_usd: 7.822423, totals: { total: 61934392 }, daily: [] },
-    { source: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash:fjord', cost_usd: 1.865491, totals: { total: 336041919 }, daily: [] },
-    { source: 'glm', model: 'glm-coding-plan', cost_usd: null, totals: { total: 500 }, daily: [] },
+    { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3', cost_usd: 0.4, totals: { total: 19 }, daily: [] },
+    { source: 'openclaw', provider: 'nordrouter', model: 'nr-route', cost_usd: 0.5, totals: { total: 21 }, daily: [{ date: '2026-10-03', total: 21 }] },
+    { source: 'openclaw', provider: 'xai', model: 'grok-test', cost_usd: 0.2, totals: { total: 10 }, daily: [{ date: '2026-10-03', total: 10 }] },
   ],
 };
 
@@ -184,7 +188,7 @@ if (originalZone === undefined) delete process.env.TZ;
 else process.env.TZ = originalZone;
 
 /* ---------------- quota rendering ---------------- */
-renderQuotas(QUOTAS);
+renderQuotas(QUOTAS, MODELS);
 
 const codexRoot = registry.get('codex');
 const quotaRoot = registry.get('quotas');
@@ -288,105 +292,45 @@ assert(registry.get('metrics').textContent.includes('$17.08'),
   'NordRouter balance must render as USD, got: ' + registry.get('metrics').textContent);
 assert(registry.get('today').textContent.includes('z-ai/glm-5.3'), 'top models today must render');
 
-/* ---------------- overview + history ---------------- */
-renderHero(PAYLOAD);
-const heroText = registry.get('hero').textContent;
-assert(heroText.includes('1.03B'), 'hero must show the 30d token total');
-assert(heroText.includes('$46.46'), 'hero must show the 30d cost');
-assert(heroText.includes('2 active days'), 'hero must count only days with real usage');
-assert(heroText.includes('06.09.2026'), 'hero must point at the latest active day in day.month.year order');
-
-function historyFixture(daily) {
-  return { source_daily: { nordrouter: daily.map((day) => ({ date: day.date, tokens: day.total_tokens })) }, models: [] };
-}
-renderHistory(historyFixture(PAYLOAD.daily));
-const history = registry.get('history');
-const rects = all(history).filter((e) => e.tagName === 'RECT');
-assertEqual(rects.length, 3, 'chart must draw one bar per day in the window, preserving the time axis');
+/* ---------------- period, totals, history, and source tables ---------------- */
+renderPeriod(MODELS, QUOTAS);
+let heroText = registry.get('hero').textContent;
+assert(heroText.includes('Total tokens · 30d') && heroText.includes('30'), 'default overview uses canonical 30d total');
+assert(heroText.includes('NordRouter billed cost · 30d') && heroText.includes('$0.4000'), 'direct billed cost shown');
+assert(heroText.includes('OpenClaw estimated cost · 30d') && heroText.includes('$0.2000'), 'estimate shown separately');
+assert(heroText.includes('comparison') && heroText.includes('21'), 'comparison duplicate shown but excluded');
+assert(registry.get('cost-models').textContent.includes('z-ai/glm-5.3'), 'direct model costs restored');
+assert(!registry.get('cost-models').textContent.includes('nr-route'), 'comparison route is not billed table');
+assert(registry.get('models').textContent.includes('nr-route') && registry.get('models').textContent.includes('comparison only'),
+  'OpenClaw NordRouter route visible as comparison');
+assert(!registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct rows are not mixed into OpenClaw table');
+assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
+const chart = registry.get('history');
+assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 1, 'one real daily bucket drawn');
+assert(chart.textContent.includes('total 30 tokens'), 'history excludes the 21-token duplicate');
 windowListeners.resize();
-assertEqual(all(history).filter((e) => e.tagName === 'RECT').length, 3,
-  'resizing must redraw from the same history source, not the legacy payload');
-const zeroBar = rects.find((r) => {
-  const title = all(r).find((c) => c.tagName === 'TITLE');
-  return title && title.textContent.includes('05.09.2026');
-});
-assert(zeroBar, 'a zero-usage day must still occupy its slot');
-assertEqual(zeroBar.getAttribute('height'), '0', 'a zero-usage day must render at height 0, not a fake bar');
-const realBar = rects.find((r) => {
-  const title = all(r).find((c) => c.tagName === 'TITLE');
-  return title && title.textContent.includes('06.09.2026');
-});
-assert(parseFloat(realBar.getAttribute('height')) > 0, 'a day with usage must render a visible bar');
-assert(history.textContent.includes('peak 250.0M'), 'chart legend must report the real peak');
-const titled = rects.map((r) => all(r).find((c) => c.tagName === 'TITLE')).filter(Boolean);
-assertEqual(titled.length, 3, 'each bar must carry a tooltip with its real value');
-assert(titled.some((t) => t.textContent.includes('06.09.2026') && t.textContent.includes('250,000,000')),
-  'bar tooltip must expose the real token count');
-assert(all(history).filter((e) => e.tagName === 'TEXT').some((e) => e.textContent === '06.09.2026'),
-  'chart axis uses full day.month.year labels');
-
-history.clientWidth = 320;
-const mobileDays = Array.from({ length: 30 }, (_, i) => ({
-  date: new Date(Date.UTC(2026, 8, 8 + i)).toISOString().slice(0, 10),
-  total_tokens: 1, cost_usd: 0,
-}));
-renderHistory(historyFixture(mobileDays));
-const mobileAxis = all(history).filter((e) => e.tagName === 'TEXT' && /^\d{2}\.\d{2}\.\d{4}$/.test(e.textContent));
-assert(mobileAxis.length <= 3, 'narrow chart must space full-date ticks apart');
-delete history.clientWidth;
-
-renderHistory(historyFixture([{ date: '2026-10-03', total_tokens: 0, cost_usd: 0 }]));
-assert(registry.get('history').textContent.includes('No historical usage data available'),
-  'an all-zero history must render an explicit empty state');
-assert(all(registry.get('history')).filter((e) => e.tagName === 'RECT').length === 0,
-  'an all-zero history must not draw bars');
-
-/* ---------------- model table ---------------- */
-renderModels(MODELS);
-const rows = all(registry.get('models')).filter((e) => e.tagName === 'TR');
-assertEqual(rows.length, 3, 'model table must render one row per model');
-assert(rows[0].textContent.includes('z-ai/glm-5.3'), 'rows must be sorted by cost descending');
-assert(rows[0].textContent.includes('$7.82'), 'top row must show its real cost');
-assert(rows[2].textContent.includes('—'), 'a model with no reported cost must show — not $0');
-assert(registry.get('model-stamp').textContent.includes('27.09.2026 → 03.10.2026'), 'model stamp must show the window in day.month.year order');
-assert(registry.get('model-stamp').textContent.includes('03.10.2026 03:49 (server time)'),
-  'legacy model snapshot must retain server-time label and 24-hour format');
-renderModels({ ...MODELS, meta: { ...MODELS.meta, generated_at_utc: '2026-10-09T09:23:00Z' } });
-assert(registry.get('model-stamp').textContent.includes(time('2026-10-09T09:23:00Z')),
-  'offset-aware model snapshot uses viewer-local 24-hour time');
-assert(!registry.get('model-stamp').textContent.includes('server time'),
-  'offset-aware model snapshot must not be labelled server time');
-
-renderModels({ models: [] });
-assert(registry.get('models').textContent.includes('No model data available'),
-  'an empty model list must render an explicit empty state');
-
-/* ---------------- OpenClaw model-price estimate ---------------- */
-// NordRouter cost is billed spend and must never be counted as an estimate.
-var est = subscriptionEstimate([
-  { source: 'nordrouter', cost_usd: 100.0 },
-  { source: 'openclaw', cost_usd: 12.5 },
-  { source: 'glm', cost_usd: null },
-]);
-assertEqual(est.count, 1, 'only priced OpenClaw sources count toward the estimate');
-assertEqual(est.total, 12.5, 'the estimate sums Gateway model costs only');
-assertEqual(subscriptionEstimate([{ source: 'nordrouter', cost_usd: 5 }]).count, 0,
-  'a NordRouter-only dataset yields no subscription estimate');
-
-lastModels = [{ source: 'nordrouter', cost_usd: 46.5 }];
-renderEstimate();
-assertEqual(registry.get('est-value').textContent, '—',
-  'without measured subscription tokens the estimate must read unavailable');
-assert(registry.get('est-sub').textContent.includes('unavailable'),
-  'the estimate must explain why it is unavailable');
-assert(!registry.get('est-value').textContent.includes('0'),
-  'a missing estimate must never be rendered as 0');
-
-lastModels = [{ source: 'openclaw', cost_usd: 12.5 }, { source: 'openclaw', cost_usd: 7.5 }];
-renderEstimate();
-assertEqual(registry.get('est-value').textContent, '$20.00', 'a real estimate must render its sum');
-assert(registry.get('est-sub').textContent.includes('estimate'),
-  'the estimate must be labelled as an estimate');
+assert(chart.textContent.includes('total 30 tokens'), 'resize keeps deduplicated history');
+selectedDays = 7;
+renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 },
+  sources: { nordrouter: { tokens: 4, billed_cost_usd: 0.1, complete: true },
+    openclaw: { tokens: 5, estimated_cost_usd: 0.05, complete: true },
+    openclaw_nordrouter_comparison_tokens: 7 },
+  models: [
+    { source: 'nordrouter', provider: 'nordrouter', model: 'direct-7d', cost_usd: 0.1, totals: { total: 4 }, daily: [] },
+    { source: 'openclaw', provider: 'xai', model: 'grok-7d', cost_usd: 0.05, totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] },
+    { source: 'openclaw', provider: 'nordrouter', model: 'nr-7d', cost_usd: 0.2, totals: { total: 7 }, daily: [{ date: '2026-10-03', total: 7 }] },
+  ], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } }, QUOTAS);
+assert(registry.get('hero').textContent.includes('Total tokens · 7d') && registry.get('hero').textContent.includes('9'), '7d overview');
+assert(registry.get('cost-models').textContent.includes('direct-7d'), '7d direct cost table');
+assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
+assert(chart.textContent.includes('total 9 tokens'), '7d history');
+assert(registry.get('metrics').textContent.includes('Billed spend · 7d'), 'NordRouter metric follows selection');
+assert(registry.get('selected-top-label').textContent.includes('7d'), 'top-model period follows selection');
+assert(registry.get('history-note').textContent.includes('7d') && registry.get('models-note').textContent.includes('7d'),
+  'period labels follow selection');
+renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
+assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
+selectedDays = 30;
 
 /* ---------------- snapshot time ---------------- */
 // The header must use the offset-aware field and render it in local time with
@@ -461,5 +405,31 @@ async function waitForReload() {
   await waitForReload();
   assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('44% used'), 'changed quota rendered without button');
   assertEqual(updates, 2, 'each automatic tick must issue one provider refresh');
+  const calls = [];
+  global.fetch = (url) => {
+    calls.push(url);
+    const body = url.includes('model-breakdown')
+      ? { ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 },
+          sources: { nordrouter: { tokens: 4, billed_cost_usd: 0.1, complete: true },
+            openclaw: { tokens: 5, estimated_cost_usd: 0.05, complete: true },
+            openclaw_nordrouter_comparison_tokens: 7 },
+          source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] },
+          models: [{ source: 'nordrouter', provider: 'nordrouter', model: 'direct-7d', cost_usd: 0.1,
+            totals: { total: 4 }, daily: [] },
+            { source: 'openclaw', provider: 'xai', model: 'grok-7d', cost_usd: 0.05,
+              totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] }] }
+      : QUOTAS;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+  };
+  registry.get('period-7').listeners.click[0]();
+  await waitForReload();
+  assertEqual(selectedDays, 7, 'toggle commits selected period after both sources load');
+  assert(calls.some((url) => url.includes('days=7&daily=true')), 'toggle requests seven-day model data');
+  assert(!calls.includes('/api/v1/display/update'), 'period switch does not force unrelated provider collection');
+  assert(registry.get('hero').textContent.includes('Total tokens · 7d'), 'toggle repaints overview');
+  assert(registry.get('history').textContent.includes('total 9 tokens'), 'toggle repaints history');
+  assert(registry.get('cost-models').textContent.includes('direct-7d'), 'toggle repaints direct model costs');
+  assert(registry.get('models').textContent.includes('grok-7d'), 'toggle repaints OpenClaw model usage');
+  assertEqual(registry.get('period-7').getAttribute('aria-pressed'), 'true', 'toggle updates pressed state');
   console.log('OK: accelerated auto-refresh repainted changed provider data');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

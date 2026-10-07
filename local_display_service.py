@@ -152,7 +152,7 @@ def quotas() -> dict[str, Any]:
     "/api/v1/model-breakdown",
     response_model=ModelBreakdownResponse,
     summary="Return per-model token usage breakdown",
-    description="Returns OpenClaw Gateway non-NordRouter usage plus direct NordRouter analytics. Gateway per-model window totals have input/output/cache fields; model-day rows have total tokens only, so those fields are null. Codex account identity is unknown. NordRouter model totals are window aggregates and its daily rows are account-wide, not per-model. Pass ?daily=false to omit daily entries.",
+    description="Returns OpenClaw Gateway usage including comparison-only NordRouter-route rows, plus canonical direct NordRouter analytics. Gateway model-day rows have total tokens only. Codex account identity is unknown. Direct NordRouter model totals are window aggregates, its daily rows account-wide. Canonical totals exclude the OpenClaw NordRouter duplicate. Pass ?daily=false to omit daily entries.",
 )
 def model_breakdown(days: int = 30, daily: bool = True) -> dict[str, Any]:
     days = max(1, min(days, 90))

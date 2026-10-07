@@ -593,11 +593,11 @@ def test_html_dashboard_routes_are_self_contained_and_do_not_collect(monkeypatch
         response = client.get(route)
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/html")
-        for text in ("NordRouter", "Codex", "Top-5 models", "Model usage", "Refresh",
+        for text in ("NordRouter", "Codex", "Top-5 models", "OpenClaw model usage", "Refresh",
                      "Quotas", 'id="quotas"',
                      "spend_today_usd", "spend_7d_usd", "spend_30d_usd",
                      "used_percentage", "next_reset_time_ms", "/api/v1/quotas",
-                     "/api/v1/model-breakdown?days=7&daily=true",
+                     "/api/v1/model-breakdown?days=",
                      "/api/v1/display/update", "60000"):
             assert text in response.text
         assert '<script src=' not in response.text

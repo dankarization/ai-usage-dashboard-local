@@ -2706,7 +2706,7 @@ def build_legacy_model_breakdown(days: int = 30, *, include_daily: bool = True) 
 
 
 def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict[str, object]:
-    """New history contract: Gateway non-NordRouter usage + direct NordRouter.
+    """Gateway rows for comparison; direct NordRouter is canonical for its route.
 
     Local Codex/OpenCode/Claude exports remain available to old CLI reports,
     but are deliberately not imported into this API to avoid overlapping the
@@ -2729,12 +2729,16 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
     # Direct NordRouter analytics is the sole NordRouter history authority.
     nr_status = 'not_configured'
     nr_daily = []
+    nr_window_cost = None
+    nr_window_days = None
     nr_key = os.environ.get('NORDROUTER_API_KEY', '')
     if nr_key:
         nr, stale = _nordrouter_usage.Client(nr_key).get('analytics', days=max(1, min(days, 90)))
         nr_status = 'stale' if stale else 'ok'
         if nr:
             nr_daily = [dict(row) for row in nr.get('daily', [])]
+            nr_window_cost = (nr.get('totals') or {}).get('amount_usd')
+            nr_window_days = nr.get('window_days')
             for model in nr.get('top_models', []):
                 tokens = int(model['tokens'])
                 models.append({
@@ -2745,7 +2749,10 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
                 })
 
     models.sort(key=lambda row: row['totals']['total'], reverse=True)
-    detailed = [m['totals'] for m in models if m['source'] == 'openclaw']
+    canonical_openclaw = [m for m in models if m['source'] == 'openclaw'
+                          and m['provider'].lower() != 'nordrouter']
+    priced_openclaw = [m for m in canonical_openclaw if m['cost_usd'] is not None]
+    detailed = [m['totals'] for m in canonical_openclaw]
     def amount(field):
         return sum(t.get(field) or 0 for t in detailed)
     total_input, total_output = amount('input'), amount('output')
@@ -2760,11 +2767,26 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
         'totals': {
             'input': total_input, 'output': total_output, 'cache_read': cache_read,
             'cache_write': amount('cache_write'),
-            'total': sum(m['totals']['total'] for m in models),
+            # Direct daily account buckets, not per-model top-list totals.
+            'total': (sum(m['totals']['total'] for m in canonical_openclaw) +
+                      sum(day['tokens'] for day in nr_daily)) if gateway_status != 'unavailable' and nr_daily else None,
             'input_output_ratio': round(total_input / total_output, 2) if total_output else None,
             'cache_hit_rate': round(cache_read / (total_input + cache_read), 4) if total_input + cache_read else None,
         },
         'source_daily': {'nordrouter': nr_daily if include_daily else []},
+        'sources': {
+            'openclaw': {'tokens': sum(m['totals']['total'] for m in canonical_openclaw),
+                         'estimated_cost_usd': sum(m['cost_usd'] for m in priced_openclaw)
+                         if priced_openclaw else None,
+                         'priced_models': len(priced_openclaw),
+                         'unpriced_models': len(canonical_openclaw) - len(priced_openclaw),
+                         'complete': gateway_status != 'unavailable'},
+            'nordrouter': {'tokens': sum(day['tokens'] for day in nr_daily) if nr_daily else None,
+                           'billed_cost_usd': nr_window_cost if nr_window_days == days else None,
+                           'window_days': nr_window_days, 'complete': bool(nr_daily) and nr_window_days == days},
+            'openclaw_nordrouter_comparison_tokens': sum(m['totals']['total'] for m in models
+                if m['source'] == 'openclaw' and m['provider'].lower() == 'nordrouter'),
+        },
         'models': models,
     }
 

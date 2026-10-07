@@ -67,6 +67,8 @@ h1{font-size:14px;margin:0;font-weight:600;white-space:nowrap;letter-spacing:-.0
 .btn[disabled]{opacity:.55;cursor:progress}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#14171f}
 .btn.primary:hover{background:#8fb3f9;border-color:#8fb3f9}
+.period{display:flex;gap:4px;flex:none}
+.period .btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#14171f}
 .pulse{width:6px;height:6px;border-radius:var(--pill);background:currentColor}
 .busy .pulse{animation:blink 1s infinite}
 @keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
@@ -190,6 +192,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
     <div class="spacer"></div>
     <span id="stamp" class="stamp" aria-live="polite">Loading…</span>
+    <div class="period" role="group" aria-label="Usage period">
+      <button id="period-30" class="btn" type="button" aria-pressed="true">30d</button>
+      <button id="period-7" class="btn" type="button" aria-pressed="false">7d</button>
+    </div>
     <button id="refresh" class="btn primary" type="button"><span class="pulse" aria-hidden="true"></span>Refresh</button>
   </div>
 </header>
@@ -198,7 +204,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   <p id="error" role="status" aria-live="polite"></p>
 
   <section aria-labelledby="h-hero">
-    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note">legacy local-source rollup · last 30 days · separate from OpenClaw history below</p></div>
+    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note" id="overview-note">Selected 30d · canonical direct NordRouter + non-NordRouter OpenClaw</p></div>
     <div id="hero" class="strip"></div>
   </section>
 
@@ -218,18 +224,26 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
       <div id="metrics" class="nr-grid"></div>
       <div class="two-col">
         <div><h3>Top-5 models today</h3><div id="today"></div></div>
-        <div><h3>Top-5 models · 7d</h3><div id="week"></div></div>
+        <div><h3 id="selected-top-label">Top-5 models · 30d</h3><div id="week"></div></div>
       </div>
     </div>
   </section>
 
   <section aria-labelledby="h-history">
-    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note">OpenClaw non-NordRouter + direct NordRouter daily tokens</p></div>
+    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note" id="history-note">Selected 30d · OpenClaw non-NordRouter + direct NordRouter daily tokens</p></div>
     <div id="history" class="panel chart-wrap"></div>
   </section>
 
+  <section aria-labelledby="h-costs">
+    <div class="sec-head"><h2 id="h-costs">NordRouter model costs</h2><p class="note" id="costs-note">Direct billed model totals · selected 30d; model rows may differ from account window total</p></div>
+    <div class="panel"><div class="scroll"><table>
+      <thead><tr><th>Model</th><th class="num">Tokens</th><th class="num">Billed USD</th></tr></thead>
+      <tbody id="cost-models"></tbody>
+    </table></div></div>
+  </section>
+
   <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">Model usage</h2><p class="note">NordRouter reported spend; OpenClaw estimated cost · unknown account means unverified</p></div>
+    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">Selected 30d · NordRouter-route rows shown for comparison only, excluded from Overview and history · account unknown means unverified</p></div>
     <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
@@ -475,7 +489,7 @@ function orderGroups(groups) {
   });
 }
 
-function renderQuotas(data) {
+function renderQuotas(data, models) {
   var rows = data.quotas || [];
   var root = $('quotas');
   root.replaceChildren();
@@ -504,7 +518,8 @@ function renderQuotas(data) {
   }
 
   $('metrics').replaceChildren();
-  [['Balance', 'balance_usd'], ['Spend today', 'spend_today_usd'], ['Spend 7d', 'spend_7d_usd'], ['Spend 30d', 'spend_30d_usd']]
+  [['Balance · current', 'balance_usd'], ['Spend today · current day', 'spend_today_usd'],
+   ['Billed spend · ' + selectedDays + 'd', selectedDays === 30 ? 'spend_30d_usd' : 'spend_7d_usd']]
     .forEach(function (pair) {
       var box = node('div', undefined, $('metrics')); box.className = 'nr-cell';
       node('div', pair[0], box).className = 'k';
@@ -512,7 +527,9 @@ function renderQuotas(data) {
       value.className = 'v' + (number(nr[pair[1]]) ? '' : ' unknown');
     });
   topModels('today', nr.top_models_today);
-  topModels('week', nr.top_models_7d);
+  $('selected-top-label').textContent = 'Top-5 models · ' + selectedDays + 'd';
+  topModels('week', (models.models || []).filter(function (row) { return row.source === 'nordrouter'; })
+    .map(function (row) { return { id: row.model, tokens: row.totals.total, amount_usd: row.cost_usd }; }));
 
   var stamp = snapshotLabel(data.generated_at_utc, data.generated_at);
   var stampNode = $('stamp');
@@ -544,65 +561,23 @@ function stripItem(root, label, value, sub, unknown) {
 }
 
 function renderHero(payload) {
-  var summary = payload.summary || {};
-  var daily = payload.daily || [];
-  var active = daily.filter(function (day) { return number(day.total_tokens) && day.total_tokens > 0; });
-  var latest = active.length ? active[active.length - 1] : null;
+  var sources = payload.sources || {};
+  var direct = sources.nordrouter || {};
+  var gateway = sources.openclaw || {};
   var root = $('hero');
   root.replaceChildren();
-
-  stripItem(root, 'Legacy local tokens · 30d', number(summary.total_tokens) ? tokens(summary.total_tokens) : '—',
-    active.length + ' active day' + (active.length === 1 ? '' : 's'), !number(summary.total_tokens));
-  stripItem(root, 'Cost · 30d', usd(summary.total_cost_usd), 'reported spend + estimates', !number(summary.total_cost_usd));
-  stripItem(root, 'Latest active day', latest ? dateOnly(latest.date) : '—',
-    latest ? tokens(latest.total_tokens) + ' · ' + usd(latest.cost_usd) : 'no usage recorded', !latest);
-  stripItem(root, 'AI active time · 30d', number(summary.total_ai_hours) ? summary.total_ai_hours.toFixed(2) + ' h' : '—',
-    'from local session timing', !number(summary.total_ai_hours));
-
-  // OpenClaw model-price estimate, separate from NordRouter billed spend.
-  var est = node('div', undefined, root); est.className = 'strip-item'; est.id = 'est-tile';
-  node('div', 'OpenClaw estimated cost · 7d', est).className = 'k';
-  var estValue = node('div', '—', est); estValue.className = 'v unknown'; estValue.id = 'est-value';
-  var estSub = node('div', 'waiting for model data…', est); estSub.className = 's'; estSub.id = 'est-sub';
-  renderEstimate();
-
-  var cats = summary.categories || {};
-  var pills = Object.keys(cats).filter(function (key) { return number(cats[key]) && cats[key] > 0; });
-  if (pills.length) {
-    var row = node('div', undefined, root); row.className = 'pillrow';
-    pills.sort(function (a, b) { return cats[b] - cats[a]; }).forEach(function (key) {
-      node('span', key + ' ' + tokens(cats[key]), row).className = 'pill';
-    });
-  }
-}
-
-/* ---------- OpenClaw modeled cost, separate from NordRouter billed spend ---------- */
-var lastModels = null;
-function subscriptionEstimate(models) {
-  var rows = models || [];
-  var priced = rows.filter(function (row) {
-    return row.source === 'openclaw' && number(row.cost_usd);
-  });
-  return {
-    count: priced.length,
-    total: priced.reduce(function (sum, row) { return sum + row.cost_usd; }, 0),
-  };
-}
-function renderEstimate() {
-  var value = $('est-value');
-  var sub = $('est-sub');
-  if (!value) return;
-  if (!lastModels) { if (sub) sub.textContent = 'waiting for model data…'; return; }
-  var estimate = subscriptionEstimate(lastModels);
-  if (!estimate.count) {
-    value.textContent = '—';
-    value.className = 'v unknown';
-    if (sub) sub.textContent = 'unavailable · no priced OpenClaw usage';
-    return;
-  }
-  value.textContent = usd(estimate.total);
-  value.className = 'v';
-  if (sub) sub.textContent = 'Gateway model-price estimate · ' + estimate.count + ' model' + (estimate.count === 1 ? '' : 's');
+  var full = direct.complete && gateway.complete;
+  stripItem(root, 'Total tokens · ' + selectedDays + 'd', full ? tokens(payload.totals.total) : '—',
+    full ? 'direct NordRouter ' + tokens(direct.tokens) + ' + other OpenClaw ' + tokens(gateway.tokens)
+      : 'incomplete source · total unavailable', !full);
+  stripItem(root, 'NordRouter billed cost · ' + selectedDays + 'd', usd(direct.billed_cost_usd),
+    'actual direct account window', !number(direct.billed_cost_usd));
+  stripItem(root, 'OpenClaw estimated cost · ' + selectedDays + 'd', usd(gateway.estimated_cost_usd),
+    'model-price estimate' + (gateway.unpriced_models ? ' · partial: ' + gateway.unpriced_models + ' unpriced models' : '') +
+    ' · excludes NordRouter route', !number(gateway.estimated_cost_usd));
+  stripItem(root, 'OpenClaw NordRouter comparison · ' + selectedDays + 'd',
+    tokens(sources.openclaw_nordrouter_comparison_tokens), 'excluded from canonical total and cost', false);
+  $('overview-note').textContent = 'Selected ' + selectedDays + 'd · canonical direct NordRouter + non-NordRouter OpenClaw';
 }
 
 /* ---------- history chart ---------- */
@@ -620,7 +595,7 @@ function renderHistory(payload) {
   root.replaceChildren();
   var byDate = new Map();
   (payload.models || []).forEach(function (model) {
-    if (model.source !== 'openclaw') return;
+    if (model.source !== 'openclaw' || String(model.provider).toLowerCase() === 'nordrouter') return;
     (model.daily || []).forEach(function (day) {
       byDate.set(day.date, (byDate.get(day.date) || 0) + day.total);
     });
@@ -657,7 +632,7 @@ function renderHistory(payload) {
     var rect = svgEl('rect', {
       x: x, y: padT + plotH - barH, width: barW, height: barH, rx: 1.5, fill: '#7aa2f7', opacity: 0.9,
     }, svg);
-    svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + day.total_tokens.toLocaleString() + ' tokens · ' + usd(day.cost_usd);
+    svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + day.total_tokens.toLocaleString() + ' tokens';
     if (index === 0 || index === series.length - 1 || index % labelEvery === 0) {
       var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
       xl.textContent = dateOnly(day.date);
@@ -680,12 +655,10 @@ function renderModels(data) {
     ' · OpenClaw ' + (meta.openclaw_status || 'unknown') + ' · NordRouter ' + (meta.nordrouter_status || 'unknown');
   var body = $('models');
   body.replaceChildren();
-  var models = (data.models || []).slice().sort(function (a, b) {
+  var models = (data.models || []).filter(function (row) { return row.source === 'openclaw'; }).sort(function (a, b) {
     return (b.cost_usd === null || b.cost_usd === undefined ? -1 : b.cost_usd) -
            (a.cost_usd === null || a.cost_usd === undefined ? -1 : a.cost_usd);
   });
-  lastModels = models;
-  renderEstimate();
   if (!models.length) {
     var emptyRow = node('tr', undefined, body);
     var emptyCell = node('td', 'No model data available.', emptyRow);
@@ -699,7 +672,9 @@ function renderModels(data) {
   models.forEach(function (row) {
     var tr = node('tr', undefined, body);
     var srcCell = node('td', undefined, tr);
-    node('span', (row.source || '—') + ' / ' + (row.provider || 'unknown'), srcCell).className = 'src';
+    var comparison = String(row.provider).toLowerCase() === 'nordrouter';
+    node('span', (row.source || '—') + ' / ' + (row.provider || 'unknown') +
+      (comparison ? ' · comparison only' : ''), srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
     node('span', row.model || '—', modelCell);
     if (row.account) node('div', 'account: ' + row.account, modelCell).className = 'src';
@@ -723,6 +698,23 @@ function renderModels(data) {
   });
 }
 
+function renderCosts(data) {
+  var body = $('cost-models'); body.replaceChildren();
+  var rows = (data.models || []).filter(function (row) { return row.source === 'nordrouter'; });
+  rows.sort(function (a, b) { return (b.cost_usd || 0) - (a.cost_usd || 0); });
+  if (!rows.length) {
+    var empty = node('tr', undefined, body); node('td', 'No direct NordRouter model data available.', empty).colSpan = 3;
+  }
+  rows.forEach(function (row) {
+    var tr = node('tr', undefined, body);
+    node('td', row.model, tr);
+    node('td', tokens(row.totals.total), tr).className = 'num';
+    node('td', usd(row.cost_usd), tr).className = 'num';
+  });
+  $('costs-note').textContent = 'Direct billed model totals · selected ' + selectedDays +
+    'd; model rows may differ from account window total';
+}
+
 /* ---------- loading ---------- */
 function json(url, options) {
   var controller = new AbortController();
@@ -738,44 +730,65 @@ function json(url, options) {
 }
 
 var busy = false;
-function reload(force) {
+var selectedDays = 30;
+function setPeriodButtons() {
+  [30, 7].forEach(function (days) {
+    var button = $('period-' + days);
+    button.setAttribute('aria-pressed', String(days === selectedDays));
+    button.disabled = busy;
+  });
+}
+function renderPeriod(models, quotas) {
+  renderHero(models);
+  renderQuotas(quotas, models);
+  renderHistory(models);
+  renderCosts(models);
+  renderModels(models);
+  $('history-note').textContent = 'Selected ' + selectedDays + 'd · OpenClaw non-NordRouter + direct NordRouter daily tokens';
+  $('models-note').textContent = 'Selected ' + selectedDays +
+    'd · NordRouter-route rows shown for comparison only, excluded from Overview and history · account unknown means unverified';
+}
+function reload(force, nextDays) {
   if (busy) return;
   busy = true;
   var button = $('refresh');
   button.disabled = true; button.classList.add('busy');
+  setPeriodButtons();
   $('error').textContent = '';
-  var errors = [];
-  var prefix = json('/api/v1/display/update', {
+  var days = nextDays || selectedDays;
+  var prefix = nextDays ? Promise.resolve() : json('/api/v1/display/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: force ? 'force_button' : 'auto_refresh', view: '7d', device_id: 'web_dashboard' }),
-      }).catch(function (error) { errors.push('Refresh failed: ' + error.message + '.'); })
+        body: JSON.stringify({ reason: force ? 'force_button' : 'auto_refresh', view: days + 'd', device_id: 'web_dashboard' }),
+      });
 
   prefix.then(function () {
     return Promise.all([
-      json('/api/v1/quotas').then(renderQuotas).catch(function (error) {
-        errors.push('Quotas: ' + error.message + '. Last displayed data retained.');
-      }),
-      json('/api/v1/model-breakdown?days=7&daily=true').then(function (data) { renderModels(data); renderHistory(data); }).catch(function (error) {
-        errors.push('Models: ' + error.message + '. Last displayed data retained.');
-      }),
-      json('/token_usage.json').then(function (payload) {
-        renderHero(payload);
-      }).catch(function (error) {
-        errors.push('History: ' + error.message + '. Last displayed data retained.');
-      }),
+      json('/api/v1/quotas'),
+      json('/api/v1/model-breakdown?days=' + days + '&daily=true'),
     ]);
-  }).then(function () {
-    if (errors.length) $('error').textContent = errors.join(' ');
+  }).then(function (results) {
+    if (results[1].meta.days !== days) throw new Error('period mismatch');
+    selectedDays = days;
+    renderPeriod(results[1], results[0]);
+  }).catch(function (error) {
+    $('error').textContent = 'Selected period unavailable: ' + error.message + '. Last displayed data retained.';
   }).finally(function () {
     busy = false; button.disabled = false; button.classList.remove('busy');
+    setPeriodButtons();
   });
 }
 
 $('refresh').addEventListener('click', function () { reload(true); });
+['30', '7'].forEach(function (days) {
+  $('period-' + days).addEventListener('click', function () {
+    if (Number(days) !== selectedDays) reload(false, Number(days));
+  });
+});
 window.addEventListener('resize', function () {
   if (lastHistoryData) renderHistory(lastHistoryData);
 });
+setPeriodButtons();
 reload(false);
 setInterval(function () { reload(false); }, 5 * 60000);
 </script>

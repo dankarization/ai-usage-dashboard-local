@@ -8,7 +8,7 @@ import openclaw_usage
 from auto_usage import build_model_breakdown
 
 
-def test_openclaw_model_projection_excludes_nordrouter_and_unknown_account():
+def test_openclaw_model_projection_includes_comparison_route_with_unknown_account():
     response = {'aggregates': {
         'byModel': [
             {'provider': 'openai', 'model': 'gpt-test', 'totals': {
@@ -24,7 +24,7 @@ def test_openclaw_model_projection_excludes_nordrouter_and_unknown_account():
         ],
     }}
     rows = openclaw_usage.model_entries(response, include_daily=True)
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert rows[0]['source'] == 'openclaw'
     assert rows[0]['provider'] == 'openai'
     assert rows[0]['account'] == 'unknown'
@@ -32,22 +32,31 @@ def test_openclaw_model_projection_excludes_nordrouter_and_unknown_account():
                                   'cache_write': 1, 'total': 10}
     assert rows[0]['daily'][0]['input'] is None
     assert rows[0]['daily'][0]['total'] == 10
+    assert rows[1]['provider'] == 'nordrouter'
+    assert rows[1]['daily'][0]['total'] == 20
 
 
 def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *_: {'aggregates': {
         'byModel': [{'provider': 'xai', 'model': 'grok-test',
                      'totals': {'input': 5, 'output': 3, 'cacheRead': 2,
-                                'cacheWrite': 0, 'totalTokens': 10}}],
+                                'cacheWrite': 0, 'totalTokens': 10, 'totalCost': 0.2}},
+                    {'provider': 'local', 'model': 'local-test',
+                     'totals': {'totalTokens': 2}},
+                    {'provider': 'nordrouter', 'model': 'nr-model',
+                     'totals': {'totalTokens': 21, 'totalCost': 0.5}}],
         'modelDaily': [{'date': '2026-10-07', 'provider': 'xai',
-                        'model': 'grok-test', 'tokens': 10, 'cost': 0.2}],
+                        'model': 'grok-test', 'tokens': 10, 'cost': 0.2},
+                       {'date': '2026-10-07', 'provider': 'nordrouter',
+                        'model': 'nr-model', 'tokens': 21, 'cost': 0.5}],
     }})
     class DirectClient:
         def __init__(self, key):
             assert key == 'fixture-key'
         def get(self, endpoint, **params):
             assert endpoint == 'analytics'
-            return {'daily': [{'date': '2026-10-07', 'tokens': 20,
+            return {'window_days': 7, 'totals': {'amount_usd': 0.4},
+                    'daily': [{'date': '2026-10-07', 'tokens': 20,
                                'amount_usd': 0.4}],
                     'top_models': [{'id': 'nr-model', 'tokens': 20,
                                     'amount_usd': 0.4}]}, False
@@ -55,6 +64,11 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     monkeypatch.setattr('auto_usage._nordrouter_usage.Client', DirectClient)
     result = build_model_breakdown(days=7)
     assert [(r['source'], r['provider'], r['totals']['total']) for r in result['models']] == [
-        ('nordrouter', 'nordrouter', 20), ('openclaw', 'xai', 10)]
+        ('openclaw', 'nordrouter', 21), ('nordrouter', 'nordrouter', 20),
+        ('openclaw', 'xai', 10), ('openclaw', 'local', 2)]
     assert result['source_daily']['nordrouter'][0]['tokens'] == 20
-    assert result['totals']['total'] == 30
+    assert result['totals']['total'] == 32
+    assert result['sources']['openclaw']['estimated_cost_usd'] == 0.2
+    assert result['sources']['openclaw']['unpriced_models'] == 1
+    assert result['sources']['nordrouter']['billed_cost_usd'] == 0.4
+    assert result['sources']['openclaw_nordrouter_comparison_tokens'] == 21

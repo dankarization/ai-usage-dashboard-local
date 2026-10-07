@@ -48,7 +48,7 @@ def _tokens(row: dict) -> dict:
 
 
 def model_entries(response: dict, *, include_daily: bool) -> list[dict]:
-    """Project provider/model identity; omit only the exact NordRouter route.
+    """Project provider/model identity, including comparison-only NordRouter rows.
 
     Model names alone do not prove a route or a provider account. Unknown
     account is explicit even for Codex, whose Gateway rollup has no account ID.
@@ -58,8 +58,6 @@ def model_entries(response: dict, *, include_daily: bool) -> list[dict]:
     for row in aggregate.get('modelDaily', []):
         provider, model = row.get('provider'), row.get('model')
         if not isinstance(provider, str) or not isinstance(model, str):
-            continue
-        if provider.lower() == 'nordrouter':
             continue
         if not isinstance(row.get('date'), str) or not isinstance(row.get('tokens'), int):
             continue
@@ -72,8 +70,6 @@ def model_entries(response: dict, *, include_daily: bool) -> list[dict]:
     for row in aggregate.get('byModel', []):
         provider, model = row.get('provider'), row.get('model')
         if not isinstance(provider, str) or not isinstance(model, str):
-            continue
-        if provider.lower() == 'nordrouter':
             continue
         totals = _tokens(row)
         if not isinstance(totals['total'], int) or totals['total'] <= 0:
