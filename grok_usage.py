@@ -1,18 +1,23 @@
-"""Fetch SuperGrok / X Premium weekly usage pool from grok.com.
+"""Fetch independent Grok weekly-pool and Grok Bot quotas from grok.com.
 
-Uses the same grpc-web endpoint the grok.com Settings → Usage page calls:
+The weekly pool uses the grpc-web endpoint the Settings → Usage page calls:
 POST /grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig
+Grok Bot uses the page's authenticated bot relay (`bot.usage` JSON-RPC).
 
 Auth is a browser cookie string in GROK_COOKIE (never commit real cookies).
 """
 from __future__ import annotations
 
+import asyncio
+import json
+import math
 import struct
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
 GROK_CREDITS_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig'
+GROK_BOT_URL = 'wss://grok.com/ws/bot/'
 # Empty GetGrokCreditsConfigRequest inside a grpc-web data frame.
 _GRPC_WEB_EMPTY_REQUEST = b'\x00\x00\x00\x00\x00'
 
@@ -257,6 +262,54 @@ def export_grok_quota(cookie: str) -> list[dict[str, Any]]:
     if parsed.get('next_reset_iso'):
         snapshot['next_reset_iso'] = parsed['next_reset_iso']
     return [snapshot]
+
+
+def parse_grok_bot_usage(message: dict[str, Any]) -> dict[str, Any]:
+    """Map the bot.usage JSON-RPC response to a separate quota snapshot."""
+    if message.get('jsonrpc') != '2.0' or message.get('id') != 1 or 'error' in message:
+        raise ValueError('unexpected Grok Bot usage response')
+    result = message.get('result')
+    if not isinstance(result, dict):
+        raise ValueError('missing Grok Bot usage result')
+    percent = result.get('usagePercent')
+    reset_ms = result.get('nextResetAtMs')
+    if (isinstance(percent, bool) or not isinstance(percent, (int, float))
+            or not math.isfinite(percent) or not 0 <= percent <= 100):
+        raise ValueError('invalid Grok Bot usage percentage')
+    if isinstance(reset_ms, bool) or not isinstance(reset_ms, int) or reset_ms <= 0:
+        raise ValueError('invalid Grok Bot reset time')
+    reset_iso = datetime.fromtimestamp(reset_ms / 1000, timezone.utc).isoformat(timespec='milliseconds')
+    return {
+        'provider': 'grok_bot',
+        'label': 'Weekly Grok Bot Limit',
+        'percentage': int(round(percent)),
+        'next_reset_time_ms': reset_ms,
+        'next_reset_iso': reset_iso,
+    }
+
+
+async def _read_grok_bot_usage(cookie: str, timeout: float) -> dict[str, Any]:
+    import websockets
+
+    async with asyncio.timeout(timeout):
+        async with websockets.connect(
+            GROK_BOT_URL, origin='https://grok.com', extra_headers={'Cookie': cookie},
+            open_timeout=timeout, close_timeout=2,
+        ) as socket:
+            await socket.send(json.dumps({'protocol_version': '1.0.0', 'kind': 'bot_client'}))
+            greeting = json.loads(await socket.recv())
+            if not isinstance(greeting, dict) or 'connection_id' not in greeting:
+                raise ValueError('invalid Grok Bot relay greeting')
+            await socket.send(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'bot.usage', 'params': {}}))
+            while True:
+                message = json.loads(await socket.recv())
+                if isinstance(message, dict) and message.get('id') == 1:
+                    return parse_grok_bot_usage(message)
+
+
+def export_grok_bot_quota(cookie: str, timeout: float = 10.0) -> list[dict[str, Any]]:
+    """Read the independent weekly Grok Bot limit from the authenticated relay."""
+    return [asyncio.run(_read_grok_bot_usage(cookie, timeout))]
 
 
 def filter_quotas_for_eink(quotas: list[dict[str, Any]]) -> list[dict[str, Any]]:

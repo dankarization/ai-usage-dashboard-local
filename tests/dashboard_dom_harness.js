@@ -88,7 +88,7 @@ global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({})
 const code = fs.readFileSync(jsPath, 'utf8');
 vm.runInThisContext(code, { filename: jsPath });
 
-['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'subscriptionEstimate', 'renderEstimate', 'snapshotLabel', 'relativeAge']
+['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'subscriptionEstimate', 'renderEstimate', 'snapshotLabel', 'relativeAge', 'time', 'dateOnly', 'serverTime']
   .forEach((name) => assert(typeof global[name] === 'function' || typeof eval(name) === 'function',
     'dashboard script did not expose ' + name));
 
@@ -104,8 +104,8 @@ const QUOTAS = {
       next_reset_iso: null, usage: null, remaining: null },
     { provider: 'grok', label: 'Weekly', used_percentage: 100, remaining_percentage: 0,
       next_reset_time_ms: 1791064244000, next_reset_iso: '2026-10-04T01:50:44', usage: null, remaining: null },
-    { provider: 'grok_bot', label: 'Weekly Grok Bot Limit', status: 'unavailable',
-      used_percentage: null, remaining_percentage: null },
+    { provider: 'grok_bot', label: 'Weekly Grok Bot Limit', status: 'ok',
+      used_percentage: 100, remaining_percentage: 0, next_reset_time_ms: 1791537783029 },
     { status: 'ok', balance_usd: 17.075988, spend_today_usd: 0.0, spend_7d_usd: 15.006731,
       spend_30d_usd: 46.459125, provider: 'nordrouter', label: 'NordRouter USD',
       used_percentage: null, remaining_percentage: null,
@@ -171,6 +171,15 @@ assert(/^in (6h 0m|5h 59m)$/.test(countdown(Date.now() + 6 * 3600000)),
 assert(/^in (2d 3h|2d 2h)$/.test(countdown(Date.now() + 2 * 86400000 + 3 * 3600000)),
   'countdown formats a day-scale delta, got ' + countdown(Date.now() + 2 * 86400000 + 3 * 3600000));
 assertEqual(countdown(Date.now() - 1000), 'resetting…', 'a past reset reads as resetting');
+const originalZone = process.env.TZ;
+process.env.TZ = 'Asia/Tbilisi';
+assertEqual(time('2026-10-09T09:23:00Z'), '09.10.2026 13:23', 'reset instant uses local 24-hour time');
+assertEqual(dateOnly('2026-09-06'), '06.09.2026', 'daily bucket uses day.month.year');
+assertEqual(serverTime('2026-10-03T12:51:45'), '03.10.2026 12:51', 'legacy server wall time uses same convention');
+process.env.TZ = 'America/New_York';
+assertEqual(time('2026-10-09T09:23:00Z'), '09.10.2026 05:23', 'reset instant follows viewer timezone');
+if (originalZone === undefined) delete process.env.TZ;
+else process.env.TZ = originalZone;
 
 /* ---------------- quota rendering ---------------- */
 renderQuotas(QUOTAS);
@@ -202,6 +211,7 @@ assert(configuredFill.classList.contains('ok'), 'codex_1 at 10% must be colour-c
 assertEqual(configuredFill.style.width, '10%', 'codex_1 fill width');
 assert(configured.textContent.includes('10% used'), 'codex_1 must show its real percentage');
 assert(configured.textContent.includes('90% left'), 'codex_1 must show its remaining percentage');
+assert(configured.textContent.includes('resets ' + time(1791580259000)), 'quota reset uses local date convention');
 
 const unconfigured = cardFor(codexRoot, 'second@example.test')[0];
 assert(unconfigured, 'codex_2 row missing');
@@ -238,8 +248,10 @@ assert(!quotaRoot.textContent.includes('NordRouter'), 'NordRouter must not appea
 assertEqual(all(quotaRoot).filter((e) => e.classList.contains('limit-group')).length, 2,
   'the quota list must hold separate Grok and Grok Bot rows');
 const botCard = cardFor(quotaRoot, 'Grok Bot')[0];
-assert(botCard && botCard.textContent.includes('Unavailable'), 'Grok Bot must be honestly unavailable');
-assert(withRole(botCard, 'progressbar').length === 0, 'Grok Bot must never copy the weekly pool percentage');
+assert(botCard && botCard.textContent.includes('100% used'), 'Grok Bot must show its independent percentage');
+assertEqual(withRole(botCard, 'progressbar').length, 1, 'Grok Bot must have its own quota bar');
+assert(botCard.textContent.includes('resets ' + time(1791537783029)), 'Grok Bot reset must use its independent instant');
+assert(!grokCard.textContent.includes(time(1791537783029)), 'Grok weekly pool must not inherit the Bot reset');
 assertEqual(orderGroups([{ provider: 'glm', account: '' }, { provider: 'grok', account: '' }, { provider: 'codex', account: 'codex_2' }, { provider: 'codex', account: 'codex_1' }])
   .map((g) => g.provider + (g.account || '')).join(','),
   'codexcodex_1,codexcodex_2,grok,glm',
@@ -256,7 +268,7 @@ const heroText = registry.get('hero').textContent;
 assert(heroText.includes('1.03B'), 'hero must show the 30d token total');
 assert(heroText.includes('$46.46'), 'hero must show the 30d cost');
 assert(heroText.includes('2 active days'), 'hero must count only days with real usage');
-assert(heroText.includes('2026-09-06'), 'hero must point at the latest active day');
+assert(heroText.includes('06.09.2026'), 'hero must point at the latest active day in day.month.year order');
 
 renderHistory(PAYLOAD);
 const history = registry.get('history');
@@ -264,20 +276,22 @@ const rects = all(history).filter((e) => e.tagName === 'RECT');
 assertEqual(rects.length, 3, 'chart must draw one bar per day in the window, preserving the time axis');
 const zeroBar = rects.find((r) => {
   const title = all(r).find((c) => c.tagName === 'TITLE');
-  return title && title.textContent.includes('2026-09-05');
+  return title && title.textContent.includes('05.09.2026');
 });
 assert(zeroBar, 'a zero-usage day must still occupy its slot');
 assertEqual(zeroBar.getAttribute('height'), '0', 'a zero-usage day must render at height 0, not a fake bar');
 const realBar = rects.find((r) => {
   const title = all(r).find((c) => c.tagName === 'TITLE');
-  return title && title.textContent.includes('2026-09-06');
+  return title && title.textContent.includes('06.09.2026');
 });
 assert(parseFloat(realBar.getAttribute('height')) > 0, 'a day with usage must render a visible bar');
 assert(history.textContent.includes('peak 250.0M'), 'chart legend must report the real peak');
 const titled = rects.map((r) => all(r).find((c) => c.tagName === 'TITLE')).filter(Boolean);
 assertEqual(titled.length, 3, 'each bar must carry a tooltip with its real value');
-assert(titled.some((t) => t.textContent.includes('2026-09-06') && t.textContent.includes('250,000,000')),
+assert(titled.some((t) => t.textContent.includes('06.09.2026') && t.textContent.includes('250,000,000')),
   'bar tooltip must expose the real token count');
+assert(all(history).filter((e) => e.tagName === 'TEXT').some((e) => e.textContent === '06.09'),
+  'chart axis uses day.month labels');
 
 renderHistory({ daily: [{ date: '2026-10-03', total_tokens: 0, cost_usd: 0 }] });
 assert(registry.get('history').textContent.includes('No historical usage data available'),
@@ -292,7 +306,14 @@ assertEqual(rows.length, 3, 'model table must render one row per model');
 assert(rows[0].textContent.includes('z-ai/glm-5.3'), 'rows must be sorted by cost descending');
 assert(rows[0].textContent.includes('$7.82'), 'top row must show its real cost');
 assert(rows[2].textContent.includes('—'), 'a model with no reported cost must show — not $0');
-assert(registry.get('model-stamp').textContent.includes('2026-09-27'), 'model stamp must show the window');
+assert(registry.get('model-stamp').textContent.includes('27.09.2026 → 03.10.2026'), 'model stamp must show the window in day.month.year order');
+assert(registry.get('model-stamp').textContent.includes('03.10.2026 03:49 (server time)'),
+  'legacy model snapshot must retain server-time label and 24-hour format');
+renderModels({ ...MODELS, meta: { ...MODELS.meta, generated_at_utc: '2026-10-09T09:23:00Z' } });
+assert(registry.get('model-stamp').textContent.includes(time('2026-10-09T09:23:00Z')),
+  'offset-aware model snapshot uses viewer-local 24-hour time');
+assert(!registry.get('model-stamp').textContent.includes('server time'),
+  'offset-aware model snapshot must not be labelled server time');
 
 renderModels({ models: [] });
 assert(registry.get('models').textContent.includes('No model data available'),
@@ -346,6 +367,12 @@ const legacy = snapshotLabel(null, '2026-10-03T12:51:45');
 assert(legacy.text.includes('server time'),
   'a legacy naive timestamp must be labelled as server time, not local time');
 assertEqual(legacy.stale, true, 'a legacy naive timestamp must not be presented as current');
+assert(legacy.text.includes('03.10.2026 12:51'), 'legacy snapshot uses day.month.year and 24-hour clock');
+process.env.TZ = 'Asia/Tbilisi';
+const fixedSnapshot = snapshotLabel('2026-10-09T09:23:00Z', null);
+assert(fixedSnapshot.text.includes('09.10.2026 13:23'), 'header snapshot follows local 24-hour convention');
+if (originalZone === undefined) delete process.env.TZ;
+else process.env.TZ = originalZone;
 assertEqual(relativeAge(Date.now() - 7 * 60000), '7m ago', 'relativeAge reports minutes');
 assertEqual(relativeAge(Date.now()), 'just now', 'relativeAge reports a fresh timestamp');
 

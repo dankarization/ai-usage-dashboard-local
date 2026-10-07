@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.8,<4",
     "requests>=2.31,<3",
     "uvicorn>=0.29,<1",
+    "websockets>=10.4,<14",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +39,7 @@ py-modules = [
     "eink_simulator",
     "firmware_logic",
     "local_display_service",
+    "grok_usage",
     "opencode_token_analyzer",
     "pricing_config",
 ]

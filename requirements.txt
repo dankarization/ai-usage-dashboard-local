@@ -5,3 +5,4 @@ bleak
 fastapi
 uvicorn
 httpx
+websockets>=10.4,<14

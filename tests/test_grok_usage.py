@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import struct
 
+import pytest
+
 from grok_usage import (
+    _read_grok_bot_usage,
     filter_quotas_for_eink,
+    parse_grok_bot_usage,
     parse_grok_credits_response,
 )
 
@@ -108,4 +114,69 @@ def test_filter_quotas_for_eink_keeps_antigravity_gemini_only():
         ('glm', '5h'),
         ('antigravity', 'Gemini 5h'),
         ('grok', 'Weekly'),
+    ]
+
+
+def test_parse_grok_bot_usage_is_separate_and_offset_aware():
+    quota = parse_grok_bot_usage({
+        'jsonrpc': '2.0', 'id': 1,
+        'result': {'usagePercent': 100.0, 'nextResetAtMs': 1_791_537_783_029},
+    })
+    assert quota == {
+        'provider': 'grok_bot', 'label': 'Weekly Grok Bot Limit', 'percentage': 100,
+        'next_reset_time_ms': 1_791_537_783_029,
+        'next_reset_iso': '2026-10-09T09:23:03.029+00:00',
+    }
+
+
+@pytest.mark.parametrize('result', [
+    {'usagePercent': None, 'nextResetAtMs': 1_791_537_783_029},
+    {'usagePercent': float('nan'), 'nextResetAtMs': 1_791_537_783_029},
+    {'usagePercent': 101, 'nextResetAtMs': 1_791_537_783_029},
+    {'usagePercent': 0, 'nextResetAtMs': None},
+])
+def test_parse_grok_bot_usage_rejects_incomplete_results(result):
+    with pytest.raises(ValueError):
+        parse_grok_bot_usage({'jsonrpc': '2.0', 'id': 1, 'result': result})
+
+
+def test_grok_bot_transport_sends_only_usage_read(monkeypatch):
+    class Socket:
+        def __init__(self):
+            self.sent = []
+            self.replies = [
+                {'connection_id': 'fixture'},
+                {'jsonrpc': '2.0', 'id': 1, 'result': {
+                    'usagePercent': 42.5, 'nextResetAtMs': 1_791_537_783_029,
+                }},
+            ]
+
+        async def send(self, value):
+            self.sent.append(json.loads(value))
+
+        async def recv(self):
+            return json.dumps(self.replies.pop(0))
+
+    class Connection:
+        async def __aenter__(self):
+            return socket
+
+        async def __aexit__(self, *_):
+            return False
+
+    socket = Socket()
+    connection = {}
+    import websockets
+    def connect(url, **kwargs):
+        connection.update(url=url, **kwargs)
+        return Connection()
+    monkeypatch.setattr(websockets, 'connect', connect)
+    quota = asyncio.run(_read_grok_bot_usage('fixture-cookie', 1))
+    assert quota['provider'] == 'grok_bot'
+    assert quota['percentage'] == 42
+    assert connection['extra_headers']['Cookie'] == 'fixture-cookie'
+    assert connection['origin'] == 'https://grok.com'
+    assert socket.sent == [
+        {'protocol_version': '1.0.0', 'kind': 'bot_client'},
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'bot.usage', 'params': {}},
     ]

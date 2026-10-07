@@ -267,10 +267,25 @@ function node(tag, text, parent) {
   if (parent) parent.append(element);
   return element;
 }
+function two(value) { return String(value).padStart(2, '0'); }
+/* ISO daily buckets are calendar dates, not instants: never timezone-shift them. */
+function dateOnly(value) {
+  var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  return match ? match[3] + '.' + match[2] + '.' + match[1] : '—';
+}
+function localDateTime(date) {
+  return two(date.getDate()) + '.' + two(date.getMonth() + 1) + '.' + date.getFullYear() +
+    ' ' + two(date.getHours()) + ':' + two(date.getMinutes());
+}
 function time(value) {
   if (value === null || value === undefined || value === '') return '—';
   var date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? '—' : localDateTime(date);
+}
+/* A legacy naive server timestamp has no timezone; show its wall time as such. */
+function serverTime(value) {
+  var match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(value || ''));
+  return match ? match[3] + '.' + match[2] + '.' + match[1] + ' ' + match[4] + ':' + match[5] : '—';
 }
 function countdown(ms) {
   if (!number(ms)) return null;
@@ -304,13 +319,13 @@ var STALE_AFTER_MS = 15 * 60 * 1000;
 function snapshotLabel(utc, fallback) {
   var ms = utc ? new Date(utc).getTime() : NaN;
   if (Number.isNaN(ms)) {
-    return { text: 'snapshot ' + (fallback || 'unknown') + ' (server time)', stale: true };
+    return { text: 'snapshot ' + serverTime(fallback) + ' (server time)', stale: true };
   }
   var zone = '';
   try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (error) { zone = ''; }
   var age = relativeAge(ms);
   return {
-    text: 'snapshot ' + new Date(ms).toLocaleString() + (zone ? ' · ' + zone : '') + (age ? ' · ' + age : ''),
+    text: 'snapshot ' + time(ms) + (zone ? ' · ' + zone : '') + (age ? ' · ' + age : ''),
     stale: Date.now() - ms > STALE_AFTER_MS,
   };
 }
@@ -524,7 +539,7 @@ function renderHero(payload) {
   stripItem(root, 'Tokens · 30d', number(summary.total_tokens) ? tokens(summary.total_tokens) : '—',
     active.length + ' active day' + (active.length === 1 ? '' : 's'), !number(summary.total_tokens));
   stripItem(root, 'Cost · 30d', usd(summary.total_cost_usd), 'reported spend + estimates', !number(summary.total_cost_usd));
-  stripItem(root, 'Latest active day', latest ? latest.date : '—',
+  stripItem(root, 'Latest active day', latest ? dateOnly(latest.date) : '—',
     latest ? tokens(latest.total_tokens) + ' · ' + usd(latest.cost_usd) : 'no usage recorded', !latest);
   stripItem(root, 'AI active time · 30d', number(summary.total_ai_hours) ? summary.total_ai_hours.toFixed(2) + ' h' : '—',
     'from local session timing', !number(summary.total_ai_hours));
@@ -618,10 +633,10 @@ function renderHistory(payload) {
     var rect = svgEl('rect', {
       x: x, y: padT + plotH - barH, width: barW, height: barH, rx: 1.5, fill: '#7aa2f7', opacity: 0.9,
     }, svg);
-    svgEl('title', {}, rect).textContent = day.date + ' · ' + day.total_tokens.toLocaleString() + ' tokens · ' + usd(day.cost_usd);
+    svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + day.total_tokens.toLocaleString() + ' tokens · ' + usd(day.cost_usd);
     if (index === 0 || index === series.length - 1 || index % Math.ceil(series.length / 6) === 0) {
       var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
-      xl.textContent = day.date.slice(5);
+      xl.textContent = dateOnly(day.date).slice(0, 5);
     }
   });
   var legend = node('div', undefined, root); legend.className = 'legend';
@@ -635,8 +650,9 @@ function renderHistory(payload) {
 /* ---------- model table ---------- */
 function renderModels(data) {
   var meta = data.meta || {};
-  $('model-stamp').textContent = 'snapshot ' + time(meta.generated_at_utc || meta.generated_at) +
-    (meta.start_date && meta.end_date ? ' · ' + meta.start_date + ' → ' + meta.end_date : '');
+  $('model-stamp').textContent = 'snapshot ' +
+    (meta.generated_at_utc ? time(meta.generated_at_utc) : serverTime(meta.generated_at) + ' (server time)') +
+    (meta.start_date && meta.end_date ? ' · ' + dateOnly(meta.start_date) + ' → ' + dateOnly(meta.end_date) : '');
   var body = $('models');
   body.replaceChildren();
   var models = (data.models || []).slice().sort(function (a, b) {

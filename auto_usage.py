@@ -2375,11 +2375,15 @@ def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, ski
             print(f"Failed to fetch Cursor quota: {e}")
         cursor_quota = load_cursor_quota()
     nordrouter = _nordrouter_usage.collect(days)
-    # Grok Bot has a separate weekly limit in grok.com, but its authenticated
-    # read endpoint is not established. Never reuse the SuperGrok pool percent.
     grok_bot_quota: list[QuotaSnapshot] = [{
         'provider': 'grok_bot', 'label': 'Weekly Grok Bot Limit', 'status': 'unavailable',
     }]
+    if grok_cookie:
+        print("Loading separate Grok Bot weekly limit from grok.com...")
+        try:
+            grok_bot_quota = cast(list[QuotaSnapshot], _grok_usage.export_grok_bot_quota(grok_cookie))
+        except Exception as e:
+            print(f"Failed to fetch Grok Bot quota: {type(e).__name__}")
     quotas = glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + grok_bot_quota + cursor_quota
     if nordrouter:
         quotas.append(_nordrouter_usage.quota(nordrouter))
