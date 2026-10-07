@@ -366,7 +366,9 @@ function statusText(status) {
 /* ---------- limit rows ---------- */
 function windowRow(container, window) {
   var row = node('div', undefined, container); row.className = 'win';
-  node('span', window.label || 'Quota', row).className = 'win-label';
+  row.setAttribute('data-provider', window.provider || 'unknown');
+  var label = window.provider === 'grok_bot' ? 'Grok Bot' : (window.label || 'Quota');
+  node('span', label, row).className = 'win-label';
 
   if (number(window.used_percentage)) {
     var track = node('div', undefined, row);
@@ -375,7 +377,7 @@ function windowRow(container, window) {
     track.setAttribute('aria-valuemin', '0');
     track.setAttribute('aria-valuemax', '100');
     track.setAttribute('aria-valuenow', String(Math.round(window.used_percentage)));
-    track.setAttribute('aria-label', (window.label || 'Quota') + ' used');
+    track.setAttribute('aria-label', label + ' used');
     var fill = node('div', undefined, track);
     fill.className = 'fill ' + severity(window.used_percentage);
     fill.style.width = Math.max(0, Math.min(100, window.used_percentage)) + '%';
@@ -429,7 +431,8 @@ function effectiveStatus(group) {
 function groupQuotas(rows) {
   var groups = new Map();
   rows.forEach(function (row) {
-    var provider = row.provider || 'unknown';
+    // The Bot relay is an independent window under the same Grok provider.
+    var provider = row.provider === 'grok_bot' ? 'grok' : (row.provider || 'unknown');
     var account = row.account || '';
     var key = provider + '::' + account;
     if (!groups.has(key)) {
@@ -442,13 +445,19 @@ function groupQuotas(rows) {
     else if (row.status === 'ok' && !group.status) group.status = row.status;
     group.windows.push(row);
   });
+  // A failed Bot read must not make a live weekly Grok pool appear unavailable.
+  groups.forEach(function (group) {
+    if (group.provider === 'grok' && group.windows.some(function (window) {
+      return window.status === 'ok' || (!window.status && number(window.used_percentage));
+    })) group.status = 'ok';
+  });
   return Array.from(groups.values());
 }
 
 /* Quota section order the user asked for: Codex accounts first (account 1,
    then account 2, each showing configured or unconfigured state), then Grok,
    then any remaining providers. NordRouter renders in its own section. */
-var QUOTA_ORDER = ['codex', 'grok', 'grok_bot'];
+var QUOTA_ORDER = ['codex', 'grok'];
 function orderGroups(groups) {
   return groups.slice().sort(function (a, b) {
     var ia = QUOTA_ORDER.indexOf(a.provider);

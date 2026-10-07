@@ -57,7 +57,7 @@ def test_page_orders_quotas_codex_then_grok_then_rest():
     order = [DASHBOARD_HTML.index(marker) for marker in
              ('id="hero"', 'id="codex"', 'id="quotas"', 'id="h-nord"', 'id="history"')]
     assert order == sorted(order), 'sections must be stats, Codex, Grok, NordRouter, history'
-    assert "var QUOTA_ORDER = ['codex', 'grok', 'grok_bot']" in DASHBOARD_HTML
+    assert "var QUOTA_ORDER = ['codex', 'grok']" in DASHBOARD_HTML
 
 
 def test_page_marks_brand_and_colors_by_remaining_capacity():

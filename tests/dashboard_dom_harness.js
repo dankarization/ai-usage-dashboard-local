@@ -227,7 +227,7 @@ assert(unconfigured.textContent.includes('No second Codex login on this machine 
 const grokCard = cardFor(quotaRoot, 'Grok')[0];
 assert(grokCard, 'Grok card missing from the quota grid');
 const grokBars = withRole(grokCard, 'progressbar');
-assertEqual(grokBars.length, 1, 'Grok must render one bar');
+assertEqual(grokBars.length, 2, 'Grok and Grok Bot must have separate bars in one provider group');
 const grokFill = all(grokBars[0]).find((e) => e.classList.contains('fill'));
 assert(grokFill.classList.contains('danger'), 'Grok at 100% must be colour-coded danger');
 assertEqual(grokFill.style.width, '100%', 'Grok fill width');
@@ -237,6 +237,26 @@ assert(grokCard.textContent.includes('0% left'), 'Grok must show 0% left');
 // it must read as Active, not as Unknown.
 assert(grokCard.textContent.includes('Active'), 'a window with a real percentage must read as Active');
 assert(!grokCard.textContent.includes('Unknown'), 'a live window must not be labelled Unknown');
+assertEqual(all(grokCard).filter((e) => e.classList.contains('brandtile')).length, 1,
+  'the Grok group must have one icon');
+assertEqual(all(grokCard).filter((e) => e.classList.contains('pname')).map((e) => e.textContent).join(','), 'Grok',
+  'the Grok group must have one provider title');
+assertEqual(all(grokCard).filter((e) => e.classList.contains('chip')).length, 1,
+  'the Grok group must have one status badge');
+const grokWindows = all(grokCard).filter((e) => e.classList.contains('win'));
+assertEqual(grokWindows.length, 2, 'Grok must contain two quota rows');
+assertEqual(grokWindows.map((e) => e.getAttribute('data-provider')).join(','), 'grok,grok_bot',
+  'each row must retain its independent API provider identity');
+assertEqual(grokWindows.map((e) => all(e).find((child) => child.classList.contains('win-label')).textContent).join(','),
+  'Weekly,Grok Bot', 'quota row labels must distinguish the weekly pool and Bot relay');
+assertEqual(grokWindows.map((e) => withRole(e, 'progressbar').length).join(','), '1,1',
+  'each Grok row must have one independent bar');
+assert(grokWindows[0].textContent.includes('resets ' + time(1791064244000)),
+  'weekly Grok reset must remain on its row');
+assert(grokWindows[1].textContent.includes('resets ' + time(1791537783029)),
+  'Grok Bot reset must remain on its row');
+assert(!grokWindows[0].textContent.includes(time(1791537783029)),
+  'weekly Grok row must not inherit the Bot reset');
 assertEqual(effectiveStatus({ windows: [{ used_percentage: 42 }] }), 'ok',
   'effectiveStatus falls back to ok when a percentage exists');
 assertEqual(effectiveStatus({ windows: [{ used_percentage: null }] }), 'unknown',
@@ -245,13 +265,15 @@ assertEqual(effectiveStatus({ status: 'not_configured', windows: [{ used_percent
   'an explicit status wins over the percentage fallback');
 
 assert(!quotaRoot.textContent.includes('NordRouter'), 'NordRouter must not appear in the quota grid');
-assertEqual(all(quotaRoot).filter((e) => e.classList.contains('limit-group')).length, 2,
-  'the quota list must hold separate Grok and Grok Bot rows');
-const botCard = cardFor(quotaRoot, 'Grok Bot')[0];
-assert(botCard && botCard.textContent.includes('100% used'), 'Grok Bot must show its independent percentage');
-assertEqual(withRole(botCard, 'progressbar').length, 1, 'Grok Bot must have its own quota bar');
-assert(botCard.textContent.includes('resets ' + time(1791537783029)), 'Grok Bot reset must use its independent instant');
-assert(!grokCard.textContent.includes(time(1791537783029)), 'Grok weekly pool must not inherit the Bot reset');
+assertEqual(all(quotaRoot).filter((e) => e.classList.contains('limit-group')).length, 1,
+  'the quota list must hold one shared Grok provider group');
+assert(grokWindows[1].textContent.includes('100% used'), 'Grok Bot must show its independent percentage');
+const degradedGrok = groupQuotas([
+  { provider: 'grok', label: 'Weekly', used_percentage: 42 },
+  { provider: 'grok_bot', label: 'Weekly Grok Bot Limit', status: 'unavailable', used_percentage: null },
+]);
+assertEqual(degradedGrok.length, 1, 'a failed Bot read must remain in the Grok group');
+assertEqual(effectiveStatus(degradedGrok[0]), 'ok', 'a failed Bot read must not hide a live weekly pool');
 assertEqual(orderGroups([{ provider: 'glm', account: '' }, { provider: 'grok', account: '' }, { provider: 'codex', account: 'codex_2' }, { provider: 'codex', account: 'codex_1' }])
   .map((g) => g.provider + (g.account || '')).join(','),
   'codexcodex_1,codexcodex_2,grok,glm',
