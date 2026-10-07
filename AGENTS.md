@@ -4,7 +4,7 @@
 
 This project aggregates local AI usage data from Codex, Cursor, GLM/Z.ai, Claude Code, OpenCode, and DeepSeek Harness (DSH). It can print daily token/cost tables, generate a desktop chart, and serve a web dashboard and JSON API through a local FastAPI service. The FastAPI service exposes typed Pydantic response models (`dashboard_models.py`) so `/openapi.json` is self-describing for AI agents.
 
-This repository is private. Keep credentials, raw exports, and unredacted screenshots out of Git.
+This repository is public. Keep credentials, raw exports, and unredacted screenshots out of Git.
 
 ## Working Environment
 

@@ -1,6 +1,6 @@
 # AI Usage Dashboard (local web edition)
 
-A private, self-hosted web dashboard for AI usage, quota windows, model breakdowns, and estimated cost. **This local edition is based on [grapeot/ai_usage_dashboard](https://github.com/grapeot/ai_usage_dashboard)**; that upstream project supplied the original aggregation and charting foundation. This repository adds the locally deployed FastAPI web UI and integrations described below. It is not affiliated with the providers whose data it reads.
+A self-hosted web dashboard for AI usage, quota windows, model breakdowns, and estimated cost. **This local edition is based on [grapeot/ai_usage_dashboard](https://github.com/grapeot/ai_usage_dashboard)**; that upstream project supplied the original aggregation and charting foundation. This repository adds the locally deployed FastAPI web UI and integrations described below. It is not affiliated with the providers whose data it reads.
 
 ![AI Usage Dashboard with account email addresses redacted](assets/dashboard-redacted.png)
 
@@ -64,6 +64,6 @@ The page shares a 7d/30d selector across overview, history, and model usage. Quo
 curl -fsS http://127.0.0.1:7995/health
 ```
 
-`.env`, local source exports, dashboard payloads, charts, caches, logs, and temporary files are ignored. The committed screenshot contains no account email addresses or image metadata. The unredacted original is not part of this repository. The historical `eink/` firmware and simulator from upstream are not used by this web deployment and have been removed from the current tree; the cache/API names remain for compatibility with the live UI.
+This source repository is public. Keep credentials and local usage data out of Git: `.env`, local source exports, dashboard payloads, charts, caches, logs, and temporary files are ignored. The committed screenshot contains no account email addresses or image metadata. The unredacted original is not part of this repository. The historical `eink/` firmware and simulator from upstream are not used by this web deployment and have been removed from the current tree; the cache/API names remain for compatibility with the live UI.
 
-See [docs/test.md](docs/test.md) for focused service checks and [skills/skill_ai_usage_dashboard.md](skills/skill_ai_usage_dashboard.md) for local agent operations.
+See [docs/test.md](docs/test.md) for focused service checks.
