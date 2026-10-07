@@ -51,6 +51,15 @@ def test_page_calls_the_live_endpoints():
         assert endpoint in DASHBOARD_HTML, f'dashboard must call {endpoint}'
 
 
+def test_section_notes_do_not_repeat_period_selection():
+    assert 'id="history-note"' not in DASHBOARD_HTML
+    for note_id in ('overview-note', 'models-note', 'costs-note'):
+        note = re.search(rf'<p class="note" id="{note_id}">(.*?)</p>', DASHBOARD_HTML)
+        assert note is not None
+        assert not re.search(r'\bselected\s+(?:7|30)d\b', note.group(1), re.I)
+    assert 'OpenClaw non-NordRouter + direct NordRouter daily tokens' not in DASHBOARD_HTML
+
+
 def test_page_orders_quotas_codex_then_grok_then_rest():
     # The requested hierarchy is overall statistics, then Codex accounts, then
     # Grok, then NordRouter. The page markup must place the sections in order.

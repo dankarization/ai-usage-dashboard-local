@@ -70,9 +70,15 @@ class Element {
 const registry = new Map();
 ['hero', 'quotas', 'history', 'codex', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
- 'period-30', 'period-7', 'overview-note', 'history-note', 'models-note', 'costs-note', 'cost-models'].forEach((id) => {
+ 'period-30', 'period-7', 'overview-note', 'models-note', 'costs-note', 'cost-models'].forEach((id) => {
   registry.set(id, new Element('div'));
 });
+const sectionNotes = {
+  'overview-note': 'Canonical direct NordRouter + non-NordRouter OpenClaw',
+  'models-note': 'NordRouter-route rows excluded from Overview and history totals to avoid double-counting',
+  'costs-note': 'Direct billed model totals; model rows may differ from account window total',
+};
+Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
   ['model-sort-', 'model-sort-head-', 'model-sort-mark-'].forEach((prefix) => {
     registry.set(prefix + key, new Element(prefix === 'model-sort-head-' ? 'th' : 'span'));
@@ -299,6 +305,9 @@ assert(registry.get('today').textContent.includes('z-ai/glm-5.3'), 'top models t
 
 /* ---------------- period, totals, history, and source tables ---------------- */
 renderPeriod(MODELS, QUOTAS);
+Object.entries(sectionNotes).forEach(([id, value]) => {
+  assertEqual(registry.get(id).textContent, value, '30d ' + id + ' note stays static');
+});
 let heroText = registry.get('hero').textContent;
 assert(heroText.includes('Total tokens · 30d') && heroText.includes('30'), 'default overview uses canonical 30d total');
 let heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
@@ -341,8 +350,9 @@ assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw tabl
 assert(chart.textContent.includes('total 9 tokens'), '7d history');
 assert(registry.get('metrics').textContent.includes('Billed spend · 7d'), 'NordRouter metric follows selection');
 assert(registry.get('selected-top-label').textContent.includes('7d'), 'top-model period follows selection');
-assert(registry.get('history-note').textContent.includes('7d') && registry.get('models-note').textContent.includes('7d'),
-  'period labels follow selection');
+Object.entries(sectionNotes).forEach(([id, value]) => {
+  assertEqual(registry.get(id).textContent, value, '7d ' + id + ' note stays static');
+});
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,

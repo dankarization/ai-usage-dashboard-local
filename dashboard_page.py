@@ -209,7 +209,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   <p id="error" role="status" aria-live="polite"></p>
 
   <section aria-labelledby="h-hero">
-    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note" id="overview-note">Selected 30d · canonical direct NordRouter + non-NordRouter OpenClaw</p></div>
+    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note" id="overview-note">Canonical direct NordRouter + non-NordRouter OpenClaw</p></div>
     <div id="hero" class="strip"></div>
   </section>
 
@@ -235,12 +235,12 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-history">
-    <div class="sec-head"><h2 id="h-history">Usage history</h2><p class="note" id="history-note">Selected 30d · OpenClaw non-NordRouter + direct NordRouter daily tokens</p></div>
+    <div class="sec-head"><h2 id="h-history">Usage history</h2></div>
     <div id="history" class="panel chart-wrap"></div>
   </section>
 
   <section aria-labelledby="h-costs">
-    <div class="sec-head"><h2 id="h-costs">NordRouter model costs</h2><p class="note" id="costs-note">Direct billed model totals · selected 30d; model rows may differ from account window total</p></div>
+    <div class="sec-head"><h2 id="h-costs">NordRouter model costs</h2><p class="note" id="costs-note">Direct billed model totals; model rows may differ from account window total</p></div>
     <div class="panel"><div class="scroll"><table>
       <thead><tr><th>Model</th><th class="num">Tokens</th><th class="num">Billed USD</th></tr></thead>
       <tbody id="cost-models"></tbody>
@@ -248,7 +248,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">Selected 30d · NordRouter-route rows excluded from Overview and history totals to avoid double-counting</p></div>
+    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">NordRouter-route rows excluded from Overview and history totals to avoid double-counting</p></div>
     <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
@@ -595,7 +595,6 @@ function renderHero(payload) {
     node('span', 'direct NordRouter ' + tokens(direct.tokens), pills).className = 'pill';
     node('span', 'other OpenClaw ' + tokens(gateway.tokens), pills).className = 'pill';
   }
-  $('overview-note').textContent = 'Selected ' + selectedDays + 'd · canonical direct NordRouter + non-NordRouter OpenClaw';
 }
 
 /* ---------- history chart ---------- */
@@ -753,8 +752,6 @@ function renderCosts(data) {
     node('td', tokens(row.totals.total), tr).className = 'num';
     node('td', usd(row.cost_usd), tr).className = 'num';
   });
-  $('costs-note').textContent = 'Direct billed model totals · selected ' + selectedDays +
-    'd; model rows may differ from account window total';
 }
 
 /* ---------- loading ---------- */
@@ -786,9 +783,6 @@ function renderPeriod(models, quotas) {
   renderHistory(models);
   renderCosts(models);
   renderModels(models);
-  $('history-note').textContent = 'Selected ' + selectedDays + 'd · OpenClaw non-NordRouter + direct NordRouter daily tokens';
-  $('models-note').textContent = 'Selected ' + selectedDays +
-    'd · NordRouter-route rows excluded from Overview and history totals to avoid double-counting';
 }
 function reload(force, nextDays) {
   if (busy) return;
