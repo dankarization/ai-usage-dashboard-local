@@ -836,8 +836,9 @@ function renderModels(data) {
       node('i', undefined, mini).style.width = Math.max(2, Math.round((total / top) * 100)) + '%';
     }
     var costCell = node('td', row.source === 'nordrouter' && number(row.cost_usd)
-      ? '$' + row.cost_usd.toFixed(6)
-      : String(row.provider).toLowerCase() === 'nordrouter' ? '—' : usd(row.cost_usd), tr);
+      ? '$' + row.cost_usd.toFixed(2)
+      : String(row.provider).toLowerCase() === 'nordrouter' ? '—' :
+        number(row.cost_usd) ? '$' + row.cost_usd.toFixed(2) : '—', tr);
     costCell.className = 'num';
     node('span', row.source === 'nordrouter' ? 'billed' :
       String(row.provider).toLowerCase() === 'nordrouter' ? 'no direct match' : 'estimated', costCell).className = 'cost-kind';

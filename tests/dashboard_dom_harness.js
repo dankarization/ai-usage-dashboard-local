@@ -438,7 +438,7 @@ selectedDays = 30;
 /* ---------------- unified model rows and sorting ---------------- */
 const mergedFixture = { ...MODELS, models: [
   { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3',
-    totals: { total: 1234567 }, cost_usd: 1.234567, daily: [] },
+    totals: { total: 1234567 }, cost_usd: 2.185573, daily: [] },
   { source: 'openclaw', provider: 'nordrouter', model: 'z-ai/glm-5.3',
     totals: { total: 765432, input: 70 }, cost_usd: 9, daily: [] },
   { source: 'nordrouter', provider: 'nordrouter', model: 'google/gemini-3.6-flash',
@@ -446,7 +446,7 @@ const mergedFixture = { ...MODELS, models: [
   { source: 'openclaw', provider: 'nordrouter', model: 'unmatched-route',
     totals: { total: 11 }, cost_usd: 3, daily: [] },
   { source: 'openclaw', provider: 'xai', model: 'other',
-    totals: { total: 8 }, cost_usd: 0.2, daily: [] },
+    totals: { total: 8 }, cost_usd: 0.555496, daily: [] },
 ] };
 const originalRows = JSON.stringify(mergedFixture.models);
 renderModels(mergedFixture);
@@ -459,13 +459,16 @@ assert(matchedRow.children[6].textContent.endsWith('1.2M'), 'direct tokens use c
 assert(all(matchedRow.children[6]).find((e) => e.tagName === 'S').title.includes('765,432') &&
   all(matchedRow.children[6]).find((e) => e.classList.contains('direct')).title.includes('1,234,567'),
   'exact underlying totals remain accessible in titles');
-assert(matchedRow.children[7].textContent.includes('$1.234567') &&
-  !matchedRow.children[7].textContent.includes('$9'), 'billed USD replaces route estimate');
+assertEqual(matchedRow.children[7].textContent, '$2.19billed',
+  'billed USD rounds to two decimals and replaces route estimate');
 assertEqual(matchedRow.children[2].textContent, '70', 'comparison token categories retain provenance');
 const directOnly = rowFor('google/gemini-3.6-flash');
 assertEqual(all(directOnly.children[6]).filter((e) => e.tagName === 'S').length, 0,
   'direct-only model has no invented OpenClaw comparison');
-assert(directOnly.children[7].textContent.includes('$0.000012'), 'small billed cost keeps six decimals');
+assertEqual(directOnly.children[7].textContent, '$0.00billed',
+  'small billed cost still displays exactly two decimals');
+assertEqual(rowFor('other').children[7].textContent, '$0.56estimated',
+  'estimated USD also rounds to exactly two decimals');
 assert(rowFor('unmatched-route').children[7].textContent.includes('no direct match') &&
   !rowFor('unmatched-route').children[7].textContent.includes('$3'),
   'unmatched route estimate is not presented as a bill');
