@@ -3,9 +3,10 @@ from zoneinfo import ZoneInfo
 import json
 from pathlib import Path
 import threading
+import time
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 
 from dashboard_page import DASHBOARD_HTML
@@ -30,6 +31,8 @@ app = FastAPI(
 _cached_payload: dict[str, Any] | None = None
 _payload_path = Path(__file__).resolve().parent / "token_usage_eink.json"
 _refresh_lock = threading.Lock()
+_last_successful_refresh = 0.0
+AUTO_REFRESH_MIN_SECONDS = 4 * 60
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -127,7 +130,7 @@ def quotas() -> dict[str, Any]:
     for item in payload.get("quotas") or []:
         used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
         quota_items.append({
-            **{k: item[k] for k in ("account", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis") if k in item},
+            **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis") if k in item},
             "provider": item.get("provider", "unknown"),
             "label": item.get("label", "unknown"),
             "used_percentage": used_percentage,
@@ -164,13 +167,20 @@ def model_breakdown(days: int = 30, daily: bool = True) -> dict[str, Any]:
     summary="Force a dashboard refresh and return the fresh payload",
     description="Triggers a full recompute of the dashboard payload (exporting from local logs and the Z.ai API when configured) and returns the fresh payload. Falls back to the cached payload or the on-disk token_usage_eink.json if the refresh fails.",
 )
-def display_update(request: UpdateRequest) -> dict[str, Any]:
-    global _cached_payload
+def display_update(request: UpdateRequest, response: Response) -> dict[str, Any]:
+    global _cached_payload, _last_successful_refresh
     # Collection writes shared cache files, so refreshes must not overlap.
     with _refresh_lock:
+        if (request.reason == "auto_refresh" and _cached_payload is not None
+                and time.monotonic() - _last_successful_refresh < AUTO_REFRESH_MIN_SECONDS):
+            response.headers["X-Dashboard-Refresh"] = "cached"
+            return _cached_payload
         try:
             _cached_payload = generate_latest_payload()
+            _last_successful_refresh = time.monotonic()
+            response.headers["X-Dashboard-Refresh"] = "fresh"
         except Exception:
+            response.headers["X-Dashboard-Refresh"] = "stale"
             if _cached_payload is not None:
                 return _cached_payload
             disk_payload = _read_payload_from_disk()

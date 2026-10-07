@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
+from fastapi import Response
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -283,9 +284,9 @@ def test_post_update_serializes_concurrent_refreshes(monkeypatch):
     )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        first = executor.submit(local_display_service.display_update, request)
+        first = executor.submit(local_display_service.display_update, request, Response())
         assert first_started.wait(timeout=2)
-        second = executor.submit(local_display_service.display_update, request)
+        second = executor.submit(local_display_service.display_update, request, Response())
         time.sleep(0.05)
         with state_lock:
             assert call_count == 1
@@ -335,9 +336,32 @@ def test_post_update_returns_cached_payload_when_refresh_fails(monkeypatch):
     )
 
     assert response.status_code == 200
+    assert response.headers["X-Dashboard-Refresh"] == "stale"
     body = response.json()
     assert body["summary"]["total_tokens"] == 7
     assert body["daily"] == []
+
+
+def test_auto_refresh_coalesces_clients_but_manual_refresh_is_forced(monkeypatch):
+    calls = []
+    def generate():
+        calls.append(len(calls) + 1)
+        return {"meta": {"generated_at_utc": "2026-10-07T12:00:00+00:00"},
+                "summary": {"total_tokens": calls[-1]}, "daily": []}
+    monkeypatch.setattr(local_display_service, "_cached_payload", None)
+    monkeypatch.setattr(local_display_service, "_last_successful_refresh", 0.0)
+    monkeypatch.setattr(local_display_service, "generate_latest_payload", generate)
+    client = TestClient(local_display_service.app)
+    body = {"reason": "auto_refresh", "view": "7d", "device_id": "web_dashboard"}
+    first = client.post("/api/v1/display/update", json=body)
+    second = client.post("/api/v1/display/update", json=body)
+    assert first.headers["X-Dashboard-Refresh"] == "fresh"
+    assert second.headers["X-Dashboard-Refresh"] == "cached"
+    assert second.json()["summary"]["total_tokens"] == 1
+    assert calls == [1]
+    manual = client.post("/api/v1/display/update", json={**body, "reason": "force_button"})
+    assert manual.headers["X-Dashboard-Refresh"] == "fresh"
+    assert manual.json()["summary"]["total_tokens"] == 2
 
 
 def test_post_antigravity_ingest_accepts_entries(monkeypatch, tmp_path):

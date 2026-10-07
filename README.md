@@ -25,6 +25,7 @@ You do not need every platform connected on day one. The tool enables each sourc
 - **OpenCode**: If you use OpenCode, the tool reads the main local OpenCode SQLite database by default. If you also use `opencode_skill` for archive querying, set `AI_USAGE_OPENCODE_SKILL_PATH` in `.env`.
 - **Cursor**: To include Cursor dashboard exports, set `CURSOR_COOKIE` in `.env`. This browser cookie must stay private. With the cookie present, the dashboard also fetches `GET /api/usage-summary` and adds the two monthly quota windows shown on the Cursor spending page to the unified `quotas` array: `Cursor Models` (the "Cursor models" bar = Composer + Cursor's own models, `autoPercentUsed`) and `Cursor Other` (the "Other models" bar = other named/frontier models, `apiPercentUsed`), both resetting at the billing-cycle end. An expired cookie returns a non-JSON login page, which is rejected so the last good cached snapshot (`cursor_usage_summary.json`) is preserved.
 - **Grok**: To include SuperGrok / X Premium weekly usage pool, set `GROK_COOKIE` in `.env` (browser cookie from grok.com while logged in). This cookie must stay private. A 0% week omits the float field in the grpc-web response (proto3 default); the parser maps that to 0% so the quota bar still appears. Token category `grok` is filled from local OpenCode usage independently of the cookie.
+  Grok Bot has a separate weekly limit. Its authenticated read API has not been confirmed, so the dashboard shows a distinct **unavailable** Grok Bot row with no percentage or reset time; it never copies the SuperGrok weekly pool value.
 - **GLM/Z.ai**: To include the GLM/Z.ai usage API, set `GLM_BEARER_TOKEN` in `.env`. This bearer token must stay private.
 
 A minimal `.env` can be empty. The tool will still use local sources it can discover automatically; sources without credentials are skipped or read from existing local caches.
@@ -141,8 +142,10 @@ Default endpoints:
 
 `GET /api/v1/quotas` is the compact automation endpoint. It returns each
 provider window's used and remaining percentages plus reset timestamps, without
-forcing a provider refresh. Call `POST /api/v1/display/update` first when fresh
-provider data is required.
+forcing a provider refresh. The web page triggers a provider refresh on opening
+and every five minutes while open. Multiple automatic clients share a recent
+snapshot; the manual Refresh button always forces a new collection. Other API
+clients can call `POST /api/v1/display/update` when fresh data is required.
 
 `GET /api/v1/model-breakdown` returns per-model token usage (input, output,
 cache_read, cache_write, total) across all data sources, sorted by total tokens

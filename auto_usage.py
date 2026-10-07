@@ -4,6 +4,7 @@ Export and aggregate token usage from Codex, Cursor, GLM, and OpenCode.
 Supports API-equivalent USD cost estimation. See docs/rfc.md.
 """
 import json
+import base64
 import hashlib
 import csv
 import importlib
@@ -487,6 +488,20 @@ def _export_codex_profile(start_date, home):
         print(f"First 500 stdout characters: {raw[:500]!r}", file=sys.stderr)
         return None
     return data
+
+
+def codex_profile_display_name(home: Path | None, fallback: str) -> str:
+    """Use only the email claim of the local Codex login for display."""
+    if home is None:
+        return fallback
+    try:
+        auth = json.loads((home / 'auth.json').read_text())
+        encoded = auth.get('tokens', {}).get('id_token', '').split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+        email = claims.get('email') or (claims.get('https://api.openai.com/profile') or {}).get('email')
+        return email if isinstance(email, str) and '@' in email else fallback
+    except (OSError, ValueError, IndexError, TypeError, AttributeError):
+        return fallback
 
 
 def codex_profiles():
@@ -1098,14 +1113,16 @@ def load_all_codex_quotas():
     result = []
     seen = set()
     for account, label, home in codex_profiles():
+        display_name = codex_profile_display_name(home, label)
         snapshots = load_codex_quota(home=home) if home is not None and home not in seen else []
         if home is not None:
             seen.add(home)
         if not snapshots:
-            result.append({'provider': 'codex', 'account': account, 'label': label,
+            result.append({'provider': 'codex', 'account': account, 'account_label': display_name, 'label': label,
                            'status': 'unavailable' if home else 'not_configured'})
         for snapshot in snapshots:
-            result.append({**snapshot, 'account': account, 'label': f"{label} {snapshot['label']}", 'status': 'ok'})
+            result.append({**snapshot, 'account': account, 'account_label': display_name,
+                           'label': snapshot['label'], 'status': 'ok'})
     return result
 
 
@@ -2358,7 +2375,12 @@ def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, ski
             print(f"Failed to fetch Cursor quota: {e}")
         cursor_quota = load_cursor_quota()
     nordrouter = _nordrouter_usage.collect(days)
-    quotas = glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + cursor_quota
+    # Grok Bot has a separate weekly limit in grok.com, but its authenticated
+    # read endpoint is not established. Never reuse the SuperGrok pool percent.
+    grok_bot_quota: list[QuotaSnapshot] = [{
+        'provider': 'grok_bot', 'label': 'Weekly Grok Bot Limit', 'status': 'unavailable',
+    }]
+    quotas = glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + grok_bot_quota + cursor_quota
     if nordrouter:
         quotas.append(_nordrouter_usage.quota(nordrouter))
 

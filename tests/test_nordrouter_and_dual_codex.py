@@ -149,10 +149,22 @@ def test_dual_auth_headers_labels_and_resets(monkeypatch, tmp_path):
     result = usage.load_all_codex_quotas()
     assert [x["account"] for x in result] == ["codex_1", "codex_2"]
     assert [x["percentage"] for x in result] == [10, 20]
-    assert result[1]["label"] == "Work 5h"
+    assert result[1]["label"] == "5h"
+    assert result[1]["account_label"] == "Work"
     assert result[1]["next_reset_time_ms"] == 1800000000000
     assert [x["Authorization"] for x in seen] == ["Bearer fake-1", "Bearer fake-2"]
     assert [x["ChatGPT-Account-Id"] for x in seen] == ["acct-1", "acct-2"]
+
+
+def test_codex_profile_display_name_reads_only_email_claim(tmp_path):
+    import base64
+    home = tmp_path / "codex"
+    home.mkdir()
+    payload = base64.urlsafe_b64encode(json.dumps({"email": "person@example.test"}).encode()).decode().rstrip("=")
+    (home / "auth.json").write_text(json.dumps({"tokens": {"id_token": f"header.{payload}.signature"}}))
+    assert usage.codex_profile_display_name(home, "Fallback") == "person@example.test"
+    (home / "auth.json").write_text(json.dumps({"tokens": {"id_token": "malformed"}}))
+    assert usage.codex_profile_display_name(home, "Fallback") == "Fallback"
 
 
 def test_missing_secondary_is_unknown_not_zero(monkeypatch, tmp_path):

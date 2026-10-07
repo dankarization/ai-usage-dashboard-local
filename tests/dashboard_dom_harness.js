@@ -80,7 +80,8 @@ global.document = {
   createElementNS: (ns, tag) => new Element(tag, ns),
 };
 global.window = { addEventListener: () => {} };
-global.setInterval = () => 0;
+let autoRefreshTick;
+global.setInterval = (fn) => { autoRefreshTick = fn; return 0; };
 global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
 
 /* ---------------- run the real dashboard script ---------------- */
@@ -95,14 +96,16 @@ vm.runInThisContext(code, { filename: jsPath });
 const QUOTAS = {
   generated_at: '2026-10-03T03:37:51',
   quotas: [
-    { account: 'codex_1', status: 'ok', provider: 'codex', label: 'Codex Primary 7d',
+    { account: 'codex_1', account_label: 'first@example.test', status: 'ok', provider: 'codex', label: '7d',
       used_percentage: 10, remaining_percentage: 90, next_reset_time_ms: 1791580259000,
       next_reset_iso: '2026-10-10T01:10:59', usage: null, remaining: null },
-    { account: 'codex_2', status: 'not_configured', provider: 'codex', label: 'Codex Secondary',
+    { account: 'codex_2', account_label: 'second@example.test', status: 'not_configured', provider: 'codex', label: 'Codex Secondary',
       used_percentage: null, remaining_percentage: null, next_reset_time_ms: null,
       next_reset_iso: null, usage: null, remaining: null },
     { provider: 'grok', label: 'Weekly', used_percentage: 100, remaining_percentage: 0,
       next_reset_time_ms: 1791064244000, next_reset_iso: '2026-10-04T01:50:44', usage: null, remaining: null },
+    { provider: 'grok_bot', label: 'Weekly Grok Bot Limit', status: 'unavailable',
+      used_percentage: null, remaining_percentage: null },
     { status: 'ok', balance_usd: 17.075988, spend_today_usd: 0.0, spend_7d_usd: 15.006731,
       spend_30d_usd: 46.459125, provider: 'nordrouter', label: 'NordRouter USD',
       used_percentage: null, remaining_percentage: null,
@@ -178,8 +181,10 @@ const quotaRoot = registry.get('quotas');
 const codexRows = all(codexRoot).filter((e) => e.classList.contains('limit-group'));
 assert(codexRows.length === 2, 'expected two Codex account rows, got ' + codexRows.length);
 // Account order must follow the quota payload: codex_1 before codex_2.
-assert(codexRows[0].textContent.includes('codex_1'), 'codex_1 must render before codex_2');
-assert(codexRows[1].textContent.includes('codex_2'), 'codex_2 must be the second Codex row');
+assert(codexRows[0].textContent.includes('first@example.test'), 'first account display name must render');
+assert(codexRows[1].textContent.includes('second@example.test'), 'second account display name must render');
+assert(!codexRoot.textContent.includes('codex_1') && !codexRoot.textContent.includes('codex_2'),
+  'internal account IDs must not be shown when display names are available');
 // Each row carries a brand mark.
 assertEqual(all(codexRows[0]).filter((e) => e.classList.contains('brandtile'))[0].textContent, 'OI',
   'Codex rows must carry the OI brand mark');
@@ -187,7 +192,7 @@ assertEqual(all(codexRows[0]).filter((e) => e.classList.contains('brandtile'))[0
 assert(codexRows[1].classList.contains('subdued'),
   'an unconfigured account must render as a subdued row');
 
-const configured = cardFor(codexRoot, 'codex_1')[0];
+const configured = cardFor(codexRoot, 'first@example.test')[0];
 assert(configured, 'codex_1 row missing');
 const configuredBars = withRole(configured, 'progressbar');
 assert(configuredBars.length === 1, 'configured codex window must render exactly one bar');
@@ -198,7 +203,7 @@ assertEqual(configuredFill.style.width, '10%', 'codex_1 fill width');
 assert(configured.textContent.includes('10% used'), 'codex_1 must show its real percentage');
 assert(configured.textContent.includes('90% left'), 'codex_1 must show its remaining percentage');
 
-const unconfigured = cardFor(codexRoot, 'codex_2')[0];
+const unconfigured = cardFor(codexRoot, 'second@example.test')[0];
 assert(unconfigured, 'codex_2 row missing');
 assert(withRole(unconfigured, 'progressbar').length === 0,
   'an unconfigured window must not render a percentage bar');
@@ -230,8 +235,11 @@ assertEqual(effectiveStatus({ status: 'not_configured', windows: [{ used_percent
   'an explicit status wins over the percentage fallback');
 
 assert(!quotaRoot.textContent.includes('NordRouter'), 'NordRouter must not appear in the quota grid');
-assertEqual(all(quotaRoot).filter((e) => e.classList.contains('limit-group')).length, 1,
-  'the quota list must hold exactly the Grok row when only Grok is present');
+assertEqual(all(quotaRoot).filter((e) => e.classList.contains('limit-group')).length, 2,
+  'the quota list must hold separate Grok and Grok Bot rows');
+const botCard = cardFor(quotaRoot, 'Grok Bot')[0];
+assert(botCard && botCard.textContent.includes('Unavailable'), 'Grok Bot must be honestly unavailable');
+assert(withRole(botCard, 'progressbar').length === 0, 'Grok Bot must never copy the weekly pool percentage');
 assertEqual(orderGroups([{ provider: 'glm', account: '' }, { provider: 'grok', account: '' }, { provider: 'codex', account: 'codex_2' }, { provider: 'codex', account: 'codex_1' }])
   .map((g) => g.provider + (g.account || '')).join(','),
   'codexcodex_1,codexcodex_2,grok,glm',
@@ -347,3 +355,43 @@ assert(!code.includes('insertAdjacentHTML'), 'dashboard script must not use inse
 assert(!code.includes('document.write'), 'dashboard script must not use document.write');
 
 console.log('OK: dashboard DOM contract holds');
+
+/* An accelerated timer tick must request a provider refresh and repaint from
+   a changed backend snapshot without invoking the Refresh button. */
+async function waitForReload() {
+  for (let n = 0; n < 20; n++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (!busy) return;
+  }
+  fail('reload did not finish');
+}
+
+(async () => {
+  await waitForReload();
+  let updates = 0;
+  let used = 11;
+  global.fetch = (url, options) => {
+    if (url === '/api/v1/display/update') {
+      updates++;
+      assertEqual(JSON.parse(options.body).reason, 'auto_refresh', 'timer must refresh providers');
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(PAYLOAD) });
+    }
+    if (url === '/api/v1/quotas') {
+      const rows = { ...QUOTAS, generated_at_utc: new Date().toISOString(),
+        quotas: QUOTAS.quotas.map((row) => row.provider === 'codex' && row.account === 'codex_1'
+          ? { ...row, used_percentage: used, remaining_percentage: 100 - used } : row) };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(rows) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(url.includes('model-breakdown') ? MODELS : PAYLOAD) });
+  };
+  assert(typeof autoRefreshTick === 'function', 'automatic timer must be installed');
+  autoRefreshTick();
+  await waitForReload();
+  assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('11% used'), 'first automatic snapshot rendered');
+  used = 44;
+  autoRefreshTick();
+  await waitForReload();
+  assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('44% used'), 'changed quota rendered without button');
+  assertEqual(updates, 2, 'each automatic tick must issue one provider refresh');
+  console.log('OK: accelerated auto-refresh repainted changed provider data');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

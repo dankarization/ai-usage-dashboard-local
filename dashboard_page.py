@@ -200,17 +200,17 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-codex">
-    <div class="sec-head"><h2 id="h-codex">Codex accounts</h2><p class="note">ChatGPT plan · 5-hour and weekly windows shown separately</p></div>
+    <div class="sec-head"><h2 id="h-codex">Codex accounts</h2></div>
     <div class="panel flat"><div id="codex"></div></div>
   </section>
 
   <section aria-labelledby="h-grok">
-    <div class="sec-head"><h2 id="h-grok">Grok</h2><p class="note">SuperGrok / X Premium weekly pool</p></div>
+    <div class="sec-head"><h2 id="h-grok">Grok</h2></div>
     <div class="panel flat"><div id="quotas"></div></div>
   </section>
 
   <section aria-labelledby="h-nord">
-    <div class="sec-head"><h2 id="h-nord">NordRouter</h2><p id="nr-status" class="note"></p></div>
+    <div class="sec-head"><h2 id="h-nord">NordRouter</h2></div>
     <div class="panel">
       <div id="metrics" class="nr-grid"></div>
       <div class="two-col">
@@ -238,7 +238,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
   </section>
 
-  <p class="foot">Auto-refresh every 60s · data never leaves this machine</p>
+  <p class="foot">Auto-refresh every 5m · data never leaves this machine</p>
 </main>
 
 <script>
@@ -313,7 +313,7 @@ function snapshotLabel(utc, fallback) {
 }
 function providerName(provider) {
   var key = String(provider || 'unknown');
-  var known = { codex: 'Codex', grok: 'Grok', glm: 'GLM', ollama: 'Ollama', claude: 'Claude',
+  var known = { codex: 'Codex', grok: 'Grok', grok_bot: 'Grok Bot', glm: 'GLM', ollama: 'Ollama', claude: 'Claude',
                 antigravity: 'Antigravity', cursor: 'Cursor', nordrouter: 'NordRouter' };
   if (known[key]) return known[key];
   return key.charAt(0).toUpperCase() + key.slice(1);
@@ -321,7 +321,7 @@ function providerName(provider) {
 /* Compact brand mark. Inline text so the page stays asset-free. */
 function brandMark(provider) {
   var key = String(provider || '').toLowerCase();
-  var marks = { codex: 'OI', grok: 'xAI', nordrouter: 'NR', glm: 'Z', ollama: 'OL',
+  var marks = { codex: 'OI', grok: 'xAI', grok_bot: 'xAI', nordrouter: 'NR', glm: 'Z', ollama: 'OL',
                 claude: 'CC', antigravity: 'AG', cursor: 'CU' };
   return marks[key] || key.slice(0, 2).toUpperCase();
 }
@@ -374,7 +374,7 @@ function windowRow(container, window) {
     var resetIso = window.next_reset_iso;
     if (resetMs || resetIso) {
       var when = countdown(resetMs);
-      node('span', 'resets ' + time(resetIso || resetMs) + (when ? ' (' + when + ')' : ''), row).className = 'win-reset';
+      node('span', 'resets ' + time(resetMs || resetIso) + (when ? ' (' + when + ')' : ''), row).className = 'win-reset';
     }
   } else {
     var emptyTrack = node('div', undefined, row); emptyTrack.className = 'track';
@@ -391,7 +391,7 @@ function limitGroup(group, root) {
   var head = node('div', undefined, card); head.className = 'limit-head';
   node('span', brandMark(group.provider), head).className = 'brandtile';
   node('span', providerName(group.provider), head).className = 'pname';
-  if (group.account) node('span', group.account, head).className = 'acct';
+  if (group.account) node('span', group.account_label || group.account, head).className = 'acct';
   var chip = node('span', statusText(status), head);
   chip.className = 'chip ' + statusClass(status);
   group.windows.forEach(function (window) { windowRow(card, window); });
@@ -415,7 +415,7 @@ function groupQuotas(rows) {
     var account = row.account || '';
     var key = provider + '::' + account;
     if (!groups.has(key)) {
-      groups.set(key, { provider: provider, account: account, status: row.status, windows: [] });
+      groups.set(key, { provider: provider, account: account, account_label: row.account_label, status: row.status, windows: [] });
     }
     var group = groups.get(key);
     // An explicit non-ok status (stale, not_configured, unavailable) wins; a
@@ -430,7 +430,7 @@ function groupQuotas(rows) {
 /* Quota section order the user asked for: Codex accounts first (account 1,
    then account 2, each showing configured or unconfigured state), then Grok,
    then any remaining providers. NordRouter renders in its own section. */
-var QUOTA_ORDER = ['codex', 'grok'];
+var QUOTA_ORDER = ['codex', 'grok', 'grok_bot'];
 function orderGroups(groups) {
   return groups.slice().sort(function (a, b) {
     var ia = QUOTA_ORDER.indexOf(a.provider);
@@ -465,10 +465,10 @@ function renderQuotas(data) {
 
   var nr = rows.find(function (row) { return row.provider === 'nordrouter'; }) || {};
   var nrStatus = $('nr-status');
-  var text = nr.status ? 'status: ' + statusText(nr.status) : 'no snapshot available — press Refresh';
-  if (nr.today_complete === false) text += ' · today model list incomplete; spend may use a fallback';
-  if (nr.today_basis) text += ' · ' + nr.today_basis;
-  nrStatus.textContent = text;
+  if (nrStatus) {
+    var text = nr.today_complete === false ? 'Today model list incomplete; spend may use a fallback' : '';
+    nrStatus.textContent = text;
+  }
 
   $('metrics').replaceChildren();
   [['Balance', 'balance_usd'], ['Spend today', 'spend_today_usd'], ['Spend 7d', 'spend_7d_usd'], ['Spend 30d', 'spend_30d_usd']]
@@ -674,6 +674,8 @@ function json(url, options) {
   return fetch(url, Object.assign({ cache: 'no-store', signal: controller.signal }, options || {}))
     .then(function (response) {
       if (!response.ok) throw new Error('HTTP ' + response.status);
+      if (response.headers && response.headers.get('X-Dashboard-Refresh') === 'stale')
+        throw new Error('provider refresh failed; cached snapshot retained');
       return response.json();
     })
     .finally(function () { clearTimeout(timer); });
@@ -687,13 +689,11 @@ function reload(force) {
   button.disabled = true; button.classList.add('busy');
   $('error').textContent = '';
   var errors = [];
-  var prefix = force
-    ? json('/api/v1/display/update', {
+  var prefix = json('/api/v1/display/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'force_button', view: '7d', device_id: 'web_dashboard' }),
+        body: JSON.stringify({ reason: force ? 'force_button' : 'auto_refresh', view: '7d', device_id: 'web_dashboard' }),
       }).catch(function (error) { errors.push('Refresh failed: ' + error.message + '.'); })
-    : Promise.resolve();
 
   prefix.then(function () {
     return Promise.all([
@@ -722,7 +722,7 @@ window.addEventListener('resize', function () {
   json('/token_usage.json').then(renderHistory).catch(function () {});
 });
 reload(false);
-setInterval(function () { reload(false); }, 60000);
+setInterval(function () { reload(false); }, 5 * 60000);
 </script>
 </body>
 </html>'''

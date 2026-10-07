@@ -265,6 +265,8 @@ def filter_quotas_for_eink(quotas: list[dict[str, Any]]) -> list[dict[str, Any]]
     for quota in quotas:
         provider = str(quota.get('provider', '')).lower()
         label = str(quota.get('label', '')).lower()
+        if provider == 'grok_bot' and quota.get('percentage') is None:
+            continue
         if provider == 'antigravity' and 'gemini' not in label:
             continue
         filtered.append(quota)

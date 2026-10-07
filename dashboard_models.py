@@ -87,6 +87,7 @@ class GlmQuotaSnapshot(BaseModel):
 
 class AccountMetrics(BaseModel):
     account: Optional[str] = Field(default=None, description='Stable Codex profile identity: codex_1 or codex_2.')
+    account_label: Optional[str] = Field(default=None, description='Display name of the local Codex profile, when available.')
     status: Optional[str] = Field(default=None, description='ok, stale, unavailable, or not_configured.')
     balance_usd: Optional[float] = Field(default=None, description='NordRouter prepaid balance in USD.')
     spend_today_usd: Optional[float] = Field(default=None, description='Today spend; see today_basis and today_complete.')
