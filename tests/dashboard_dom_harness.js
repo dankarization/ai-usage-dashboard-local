@@ -310,8 +310,11 @@ assert(heroText.includes('OpenClaw estimated cost · 30d') && heroText.includes(
 assert(heroText.includes('comparison') && heroText.includes('21'), 'comparison duplicate shown but excluded');
 assert(registry.get('cost-models').textContent.includes('z-ai/glm-5.3'), 'direct model costs restored');
 assert(!registry.get('cost-models').textContent.includes('nr-route'), 'comparison route is not billed table');
-assert(registry.get('models').textContent.includes('nr-route') && registry.get('models').textContent.includes('comparison only'),
-  'OpenClaw NordRouter route visible as comparison');
+assertEqual(registry.get('models').children.map((row) => row.children[0].textContent).join(','), 'nordrouter,xai',
+  'OpenClaw table displays only route names');
+assert(!registry.get('models-note').textContent.includes('comparison only') &&
+  registry.get('models-note').textContent.includes('excluded from Overview and history totals'),
+  'table note explains exclusion without comparison-only wording');
 assert(!registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct rows are not mixed into OpenClaw table');
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
@@ -363,6 +366,13 @@ assert(['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'tota
 renderModels(SORT_MODELS);
 assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'base order is total tokens descending, not cost');
 assertEqual(registry.get('model-sort-head-total').getAttribute('aria-sort'), 'descending', 'default total header state');
+sortClick('source');
+assertEqual(modelOrder(), 'Alpha,Beta,Zulu', 'route descending uses displayed route name');
+assertEqual(registry.get('model-sort-head-source').getAttribute('aria-sort'), 'descending', 'route sort announced');
+sortClick('source');
+assertEqual(modelOrder(), 'Zulu,Alpha,Beta', 'route ascending uses displayed route name');
+sortClick('source');
+assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'route third click resets to total descending');
 sortClick('input');
 assertEqual(modelOrder(), 'Beta,Alpha,Zulu', 'numeric input descending');
 assertEqual(registry.get('model-sort-head-input').getAttribute('aria-sort'), 'descending', 'input sort announced');

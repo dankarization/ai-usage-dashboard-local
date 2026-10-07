@@ -248,13 +248,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">Selected 30d · NordRouter-route rows shown for comparison only, excluded from Overview and history · account unknown means unverified</p></div>
+    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">Selected 30d · NordRouter-route rows excluded from Overview and history totals to avoid double-counting · account unknown means unverified</p></div>
     <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
         <table id="model-table">
           <thead><tr>
-            <th id="model-sort-head-source"><button id="model-sort-source" class="sort-btn" type="button">Source / route<span id="model-sort-mark-source" class="sort-mark" aria-hidden="true">↕</span></button></th>
+            <th id="model-sort-head-source"><button id="model-sort-source" class="sort-btn" type="button">Route<span id="model-sort-mark-source" class="sort-mark" aria-hidden="true">↕</span></button></th>
             <th id="model-sort-head-model"><button id="model-sort-model" class="sort-btn" type="button">Model / day<span id="model-sort-mark-model" class="sort-mark" aria-hidden="true">↕</span></button></th>
             <th id="model-sort-head-input" class="num"><button id="model-sort-input" class="sort-btn" type="button">Input<span id="model-sort-mark-input" class="sort-mark" aria-hidden="true">↕</span></button></th>
             <th id="model-sort-head-output" class="num"><button id="model-sort-output" class="sort-btn" type="button">Output<span id="model-sort-mark-output" class="sort-mark" aria-hidden="true">↕</span></button></th>
@@ -669,7 +669,7 @@ var modelSortColumns = ['source', 'model', 'input', 'output', 'cache_read', 'cac
 var modelSort = { key: 'total', direction: 'default' };
 var lastModelsData = null;
 function modelSortValue(row, key) {
-  if (key === 'source') return row.source && row.provider ? row.source + ' / ' + row.provider : null;
+  if (key === 'source') return row.provider || null;
   if (key === 'model') return row.model || null;
   var value = key === 'usd' ? row.cost_usd : row.totals && row.totals[key];
   return number(value) ? value : null;
@@ -717,9 +717,7 @@ function renderModels(data) {
   models.forEach(function (row) {
     var tr = node('tr', undefined, body);
     var srcCell = node('td', undefined, tr);
-    var comparison = String(row.provider).toLowerCase() === 'nordrouter';
-    node('span', (row.source || '—') + ' / ' + (row.provider || 'unknown') +
-      (comparison ? ' · comparison only' : ''), srcCell).className = 'src';
+    node('span', row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
     node('span', row.model || '—', modelCell);
     if (row.account) node('div', 'account: ' + row.account, modelCell).className = 'src';
@@ -791,7 +789,7 @@ function renderPeriod(models, quotas) {
   renderModels(models);
   $('history-note').textContent = 'Selected ' + selectedDays + 'd · OpenClaw non-NordRouter + direct NordRouter daily tokens';
   $('models-note').textContent = 'Selected ' + selectedDays +
-    'd · NordRouter-route rows shown for comparison only, excluded from Overview and history · account unknown means unverified';
+    'd · NordRouter-route rows excluded from Overview and history totals to avoid double-counting · account unknown means unverified';
 }
 function reload(force, nextDays) {
   if (busy) return;
