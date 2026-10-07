@@ -308,13 +308,21 @@ Object.entries(sectionNotes).forEach(([id, value]) => {
   assertEqual(registry.get(id).textContent, value, '30d ' + id + ' note stays static');
 });
 let heroText = registry.get('hero').textContent;
-assert(heroText.includes('Total tokens · 30d') && heroText.includes('30'), 'default overview uses canonical 30d total');
+assert(registry.get('codex').textContent.includes('Weekly') &&
+  !/(?:7|30)d/.test(registry.get('codex').textContent),
+  'provider quota period abbreviations are not rendered outside selector buttons');
+assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('strip-item'))
+  .map((e) => e.children[0].textContent).join(','),
+  'Total tokens,OpenClaw NordRouter comparison,NordRouter billed cost,OpenClaw estimated cost',
+  'token cards precede price cards in responsive DOM order');
+assert(!/(?:7|30)d/.test(heroText), 'overview headings contain no period suffix');
+assert(heroText.includes('Total tokens') && heroText.includes('30'), 'default overview uses canonical 30d total');
 let heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
 assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 20,other OpenClaw 10',
   '30d overview shows separate source chips with their canonical values');
 assert(heroPills.every((e) => e.className === 'pill'), 'source chips keep the pill visual hook');
-assert(heroText.includes('NordRouter billed cost · 30d') && heroText.includes('$0.4000'), 'direct billed cost shown');
-assert(heroText.includes('OpenClaw estimated cost · 30d') && heroText.includes('$0.2000'), 'estimate shown separately');
+assert(heroText.includes('NordRouter billed cost') && heroText.includes('$0.4000'), 'direct billed cost shown');
+assert(heroText.includes('OpenClaw estimated cost') && heroText.includes('$0.2000'), 'estimate shown separately');
 assert(heroText.includes('comparison') && heroText.includes('21'), 'comparison duplicate shown but excluded');
 assert(registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct model appears in unified table');
 assertEqual(registry.get('models').children.map((row) => row.children[0].textContent).join(','),
@@ -336,7 +344,7 @@ assertEqual(all(chart).filter((e) => e.tagName === 'TEXT' && e.textContent === '
   'end', 'last date label stays inside the chart');
 let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, 'history has one summary line');
-assertEqual(summary[0].textContent, 'daily tokens · 1 days · peak 30', 'summary excludes total and estimate note');
+assertEqual(summary[0].textContent, 'visual weight relative to tallest day · raw token peak 30', 'summary excludes total and estimate note');
 windowListeners.resize();
 assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize keeps model segments');
 assert(chart.textContent.includes('day total 30'), 'resize keeps deduplicated history');
@@ -350,7 +358,7 @@ renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 
     { source: 'openclaw', provider: 'xai', model: 'grok-7d', cost_usd: 0.05, totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] },
     { source: 'openclaw', provider: 'nordrouter', model: 'nr-7d', cost_usd: 0.2, totals: { total: 7 }, daily: [{ date: '2026-10-03', total: 7 }] },
   ], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } }, QUOTAS);
-assert(registry.get('hero').textContent.includes('Total tokens · 7d') && registry.get('hero').textContent.includes('9'), '7d overview');
+assert(registry.get('hero').textContent.includes('Total tokens') && registry.get('hero').textContent.includes('9'), '7d overview');
 heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
 assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,other OpenClaw 5',
   '7d overview updates both source chips');
@@ -363,9 +371,9 @@ assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, '7d mo
 assert(chart.textContent.includes('nr-7d · 4 tokens'), '7d NordRouter segment reconciles to direct source');
 summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, '7d has one summary line');
-assertEqual(summary[0].textContent, 'daily tokens · 1 days · peak 9', '7d summary excludes total and estimate note');
-assert(registry.get('metrics').textContent.includes('Billed spend · 7d'), 'NordRouter metric follows selection');
-assert(registry.get('selected-top-label').textContent.includes('7d'), 'top-model period follows selection');
+assertEqual(summary[0].textContent, 'visual weight relative to tallest day · raw token peak 9', '7d summary excludes total and estimate note');
+assert(registry.get('metrics').textContent.includes('Billed spend'), 'NordRouter metric follows selection');
+assert(!registry.get('selected-top-label').textContent.includes('7d'), 'top-model label has no period suffix');
 Object.entries(sectionNotes).forEach(([id, value]) => {
   assertEqual(registry.get(id).textContent, value, '7d ' + id + ' note stays static');
 });
@@ -395,26 +403,27 @@ assert(chart.textContent.includes('Shared · 11 tokens') && chart.textContent.in
   'combined model includes direct-allocated NordRouter and both other providers exactly once');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
   'one colour is assigned per distinct model');
-const linearShared = segments.find((e) => e.children[0].textContent.includes('Shared · 11 tokens'));
-const linearOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
-const linearOtherHeight = Number(linearOther.getAttribute('height'));
-const linearColors = new Map(segments.map((e) => [e.children[0].textContent.split(' · ')[1], e.getAttribute('fill')]));
-assertEqual(historyScale, 'linear', 'linear is the default history scale');
+const balancedOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
+const balancedOtherHeight = Number(balancedOther.getAttribute('height'));
+const balancedColors = new Map(segments.map((e) => [e.children[0].textContent.split(' · ')[1], e.getAttribute('fill')]));
+assertEqual(historyScale, 'balanced', 'balanced is the default history scale');
+assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('not a token axis'),
+  'balanced axis cannot be mistaken for token counts');
+assertEqual(all(chart).filter((e) => e.tagName === 'TEXT').slice(0, 3).map((e) => e.textContent).join(','),
+  '100%,50%,0%', 'weighted axis is labelled as relative visual weight');
 registry.get('history-scale').listeners.click[0]();
-assertEqual(historyScale, 'log', 'scale button enables logarithmic view');
-assertEqual(registry.get('history-scale').textContent, 'Scale: log', 'button visibly names logarithmic state');
-assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'true', 'log button exposes pressed state');
+assertEqual(historyScale, 'linear', 'scale button exposes raw-token view');
+assertEqual(registry.get('history-scale').textContent, 'Scale: linear', 'button names raw-token state');
+assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'false', 'linear button clears pressed state');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
-const logOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
-assert(Number(logOther.getAttribute('height')) > linearOtherHeight,
-  'log scale makes the small model segment more legible');
-assertEqual(segments.length, 2, 'log mode keeps one segment per model/day');
+const linearOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
+assert(balancedOtherHeight > Number(linearOther.getAttribute('height')),
+  'balanced scale makes the small model segment more legible');
+assertEqual(segments.length, 2, 'linear mode keeps one segment per model/day');
 assertEqual(new Map(segments.map((e) => [e.children[0].textContent.split(' · ')[1], e.getAttribute('fill')])).get('Shared'),
-  linearColors.get('Shared'), 'log mode preserves model colour');
+  balancedColors.get('Shared'), 'scale toggle preserves model colour');
 assert(chart.textContent.includes('Shared · 11 tokens') && chart.textContent.includes('day total 12'),
-  'log view preserves actual model and day totals');
-assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('logarithmic token scale'),
-  'logarithmic axis is named accessibly');
+  'both views preserve actual model and day totals');
 renderHistory({ models: [
   { source: 'openclaw', provider: 'local', model: 'Tiny', daily: [
     { date: '2026-10-02', total: 0 }, { date: '2026-10-03', total: 1 }] },
@@ -422,13 +431,23 @@ renderHistory({ models: [
 segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 1, 'zero day draws no false segment');
 assert(Number.isFinite(Number(segments[0].getAttribute('height'))) && Number(segments[0].getAttribute('height')) > 0,
-  'log1p scale handles a one-token day');
+  'linear scale handles a one-token day');
 assertEqual(all(chart).filter((e) => e.tagName === 'TEXT').slice(0, 3).map((e) => e.textContent).join(','),
-  '1,0.4,0', 'one-token log axis has meaningful token tick labels');
+  '1,1,0', 'one-token linear axis has token tick labels');
 registry.get('history-scale').listeners.click[0]();
-assertEqual(historyScale, 'linear', 'scale button restores linear view');
-assertEqual(registry.get('history-scale').textContent, 'Scale: linear', 'button visibly names linear state');
-assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'false', 'linear button clears pressed state');
+assertEqual(historyScale, 'balanced', 'scale button restores balanced view');
+assertEqual(registry.get('history-scale').textContent, 'Scale: balanced', 'button visibly names weighted state');
+assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'true', 'balanced button exposes pressed state');
+renderHistory({ models: [
+  { source: 'openclaw', provider: 'local', model: 'Huge', daily: [{ date: '2026-10-03', total: 1000000 }] },
+  { source: 'openclaw', provider: 'local', model: 'Small', daily: [{ date: '2026-10-03', total: 1000 }] },
+], source_daily: { nordrouter: [] } });
+segments = all(chart).filter((e) => e.tagName === 'RECT');
+const big = segments.find((e) => e.children[0].textContent.includes('Huge · 1,000,000 tokens'));
+const small = segments.find((e) => e.children[0].textContent.includes('Small · 1,000 tokens'));
+assert(Number(small.getAttribute('height')) / Number(big.getAttribute('height')) > 0.15,
+  'fourth-root composition keeps a thousand-token model visible beside a million-token model');
+assert(chart.textContent.includes('day total 1,001,000'), 'visual weighting never changes raw totals');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,
@@ -615,7 +634,7 @@ async function waitForReload() {
   assertEqual(selectedDays, 7, 'toggle commits selected period after both sources load');
   assert(calls.some((url) => url.includes('days=7&daily=true')), 'toggle requests seven-day model data');
   assert(!calls.includes('/api/v1/display/update'), 'period switch does not force unrelated provider collection');
-  assert(registry.get('hero').textContent.includes('Total tokens · 7d'), 'toggle repaints overview');
+  assert(registry.get('hero').textContent.includes('Total tokens'), 'toggle repaints overview');
   assert(registry.get('history').textContent.includes('day total 9'), 'toggle repaints history');
   assert(registry.get('models').textContent.includes('direct-7d'), 'toggle repaints direct model row');
   assert(registry.get('models').textContent.includes('grok-7d'), 'toggle repaints OpenClaw model usage');

@@ -82,13 +82,22 @@ def test_page_marks_brand_and_colors_by_remaining_capacity():
 def test_page_labels_list_price_estimate_and_never_fakes_it():
     assert 'OpenClaw estimated cost' in DASHBOARD_HTML
     assert 'NordRouter billed cost' in DASHBOARD_HTML
-    assert 'excludes NordRouter route' in DASHBOARD_HTML
+    assert 'excludes NordRouter route' not in DASHBOARD_HTML
+    assert 'actual direct account window' not in DASHBOARD_HTML
+    assert 'excluded from canonical total and cost' not in DASHBOARD_HTML
     assert 'id="period-30"' in DASHBOARD_HTML
     assert 'id="period-7"' in DASHBOARD_HTML
     assert 'id="h-models">Model Usage' in DASHBOARD_HTML
     assert 'id="h-costs"' not in DASHBOARD_HTML
     assert 'id="cost-models"' not in DASHBOARD_HTML
     assert 'NordRouter model costs' not in DASHBOARD_HTML
+
+
+def test_period_words_only_appear_on_selector_buttons():
+    visible_literals = re.findall(r">([^<>]+)<", DASHBOARD_HTML.split('<script>')[0])
+    assert [value for value in visible_literals if re.search(r'\b(?:7|30)(?:d| days)\b', value)] == ['30d', '7d']
+    assert "'Total tokens · ' + selectedDays" not in DASHBOARD_HTML
+    assert "'Billed spend · ' + selectedDays" not in DASHBOARD_HTML
 
 
 def test_history_chart_is_tall_on_desktop_and_mobile():

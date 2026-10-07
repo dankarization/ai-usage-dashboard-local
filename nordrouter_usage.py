@@ -6,6 +6,7 @@ Analytics windows are server-defined; today is selected by Tbilisi calendar date
 import hashlib
 import json
 import os
+import re
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -18,6 +19,12 @@ import requests
 BASE_URL = "https://nordrouter.com/v1/account"
 CACHE_DIR = Path(__file__).resolve().parent / "data" / "nordrouter"
 TZ = ZoneInfo("Asia/Tbilisi")
+CACHE_RETENTION_SECONDS = 2 * 24 * 60 * 60
+CACHE_VARIANT_LIMIT = 64
+_CACHE_NAME = re.compile(r"(?:analytics|balance|usage)-[A-Za-z0-9_-]+\.(?:json|tmp)\Z")
+_PINNED = {"analytics-days_7.json", "analytics-days_30.json",
+           "analytics-days_90.json", "balance-.json",
+           "analytics-budget.json", "usage-budget.json"}
 
 
 def _sanitize(endpoint, body):
@@ -49,11 +56,19 @@ class Client:
 
     def get(self, endpoint, **params):
         """At most one attempt per TTL, including failures. Return stale on errors."""
+        allowed = {"balance": set(), "analytics": {"days"},
+                   "usage": {"days", "limit", "page"}}
+        if (endpoint not in allowed or not set(params) <= allowed[endpoint]
+                or any(type(value) is not int or value < 0 for value in params.values())):
+            raise ValueError("Invalid cache query")
         ttl = 300 if endpoint == "usage" else 720
+        if self.root.parent.is_symlink() or self.root.is_symlink():
+            raise ValueError("Cache directory must not be a symlink")
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         path = self.root / (endpoint + "-" + "-".join(f"{k}_{v}" for k, v in sorted(params.items())) + ".json")
         with (self.root / "lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            self._prune_cache(time.time(), path.name)
             try:
                 cache = json.loads(path.read_text())
             except (OSError, ValueError):
@@ -85,6 +100,27 @@ class Client:
                 temp.write_text(json.dumps(cache))
                 temp.replace(path)
             return cache.get("data"), bool(cache.get("failed") or not cache.get("data"))
+
+    def _prune_cache(self, now, current_name):
+        """Bound disposable query variants while retaining quota/billing snapshots.
+
+        Called under the credential-scoped lock; unknown files, directories,
+        symlinks, current query, and canonical analytics/balance are untouched.
+        """
+        variants = []
+        with os.scandir(self.root) as entries:
+            for entry in entries:
+                if (entry.name == current_name or entry.name in _PINNED
+                        or not _CACHE_NAME.fullmatch(entry.name)
+                        or not entry.is_file(follow_symlinks=False)):
+                    continue
+                stamp = entry.stat(follow_symlinks=False).st_mtime
+                if now - stamp > CACHE_RETENTION_SECONDS:
+                    os.unlink(entry.path)
+                elif entry.name.endswith(".json"):
+                    variants.append((stamp, entry.path))
+        for _, path in sorted(variants, reverse=True)[CACHE_VARIANT_LIMIT:]:
+            os.unlink(path)
 
 
 def collect(days=30, *, key=None, cache_dir=None, now=None):

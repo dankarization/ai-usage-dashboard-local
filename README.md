@@ -46,6 +46,18 @@ including failed attempts. Cross-process locks and per-endpoint budgets limit
 bursts. API errors preserve stale data with `status=stale`. Private caches live in
 `data/nordrouter/`, scoped by a hash of the key; keys, IPs and client metadata are
 not stored. Model-breakdown requests use the same analytics cache and budget.
+On each cache access, disposable NordRouter query variants older than 48 hours
+are removed and at most 64 recent variants are retained per credential. The
+current query and canonical 7/30/90-day analytics and balance snapshots remain
+available for stale-error fallback; budget files, unknown files and symlinks are
+not pruned. Interrupted cache-write temporary files are eligible after 48 hours.
+
+Antigravity's dashboard-owned entry cache retains the latest 90 calendar days
+(including today, plus one day of clock-skew tolerance). Older or undated entries
+are dropped on ingest/refresh; the 7/30-day views and their cost calculations
+remain within that horizon. Abandoned Antigravity atomic-write temporaries are
+removed after 24 hours. Source-system logs/databases, current dashboard payloads,
+and developer files under `tmp/` are not cleaned by the service.
 
 Analytics totals do not necessarily equal their calendar daily buckets. Today
 uses timestamped usage rows converted to **Asia/Tbilisi**, scanning newest-first

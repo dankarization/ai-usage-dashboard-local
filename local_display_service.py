@@ -198,7 +198,9 @@ def display_update(request: UpdateRequest, response: Response) -> dict[str, Any]
     description="Receives Antigravity usage entries from a satellite machine (e.g. a laptop over Tailscale), deduplicates by response_id against the local cache, and persists the merged set. Intended for cross-machine aggregation: the dashboard host runs this endpoint, and the satellite uses scripts/push-antigravity to POST its entries.",
 )
 def antigravity_ingest(request: AntigravityIngestRequest) -> dict[str, Any]:
-    result = ingest_antigravity_entries(request.entries)
+    # Serialize with full refreshes, which also rewrite the retained entry cache.
+    with _refresh_lock:
+        result = ingest_antigravity_entries(request.entries)
     if request.source:
         print(f"Antigravity ingest from {request.source}: received={result['received']} new={result['new']} dup={result['duplicate']} total={result['total_cache']}")
     return result

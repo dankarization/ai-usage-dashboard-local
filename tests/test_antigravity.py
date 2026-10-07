@@ -396,7 +396,7 @@ class TestLoadAntigravity:
     def test_cache_provides_data_when_ls_offline(self):
         """When no LS is running, cached entries should still provide token data."""
         cached = [
-            {"model": "gemini-3-flash-a", "timestamp": 1711447200000,
+            {"model": "gemini-3-flash-a", "timestamp": int(datetime.now().timestamp() * 1000),
              "input": 5000, "output": 500, "cache_read": 10000,
              "cache_write": 0, "thinking": 100, "response_id": "cached-1",
              "session_id": "old-session"},

@@ -236,13 +236,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
       <div id="metrics" class="nr-grid"></div>
       <div class="two-col">
         <div><h3>Top-5 models today</h3><div id="today"></div></div>
-        <div><h3 id="selected-top-label">Top-5 models · 30d</h3><div id="week"></div></div>
+        <div><h3 id="selected-top-label">Top-5 models</h3><div id="week"></div></div>
       </div>
     </div>
   </section>
 
   <section aria-labelledby="h-history">
-    <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button></div>
+    <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="true">Scale: balanced</button></div>
     <div id="history" class="panel chart-wrap"></div>
   </section>
 
@@ -395,6 +395,9 @@ function windowRow(container, window) {
   var row = node('div', undefined, container); row.className = 'win';
   row.setAttribute('data-provider', window.provider || 'unknown');
   var label = window.provider === 'grok_bot' ? 'Grok Bot' : (window.label || 'Quota');
+  // Provider quota windows are independent of the selected dashboard period.
+  if (label === '7d') label = 'Weekly';
+  if (label === '30d') label = 'Monthly';
   node('span', label, row).className = 'win-label';
 
   if (number(window.used_percentage)) {
@@ -532,7 +535,7 @@ function renderQuotas(data, models) {
 
   $('metrics').replaceChildren();
   [['Balance · current', 'balance_usd'], ['Spend today · current day', 'spend_today_usd'],
-   ['Billed spend · ' + selectedDays + 'd', selectedDays === 30 ? 'spend_30d_usd' : 'spend_7d_usd']]
+   ['Billed spend', selectedDays === 30 ? 'spend_30d_usd' : 'spend_7d_usd']]
     .forEach(function (pair) {
       var box = node('div', undefined, $('metrics')); box.className = 'nr-cell';
       node('div', pair[0], box).className = 'k';
@@ -540,7 +543,6 @@ function renderQuotas(data, models) {
       value.className = 'v' + (number(nr[pair[1]]) ? '' : ' unknown');
     });
   topModels('today', nr.top_models_today);
-  $('selected-top-label').textContent = 'Top-5 models · ' + selectedDays + 'd';
   topModels('week', (models.models || []).filter(function (row) { return row.source === 'nordrouter'; })
     .map(function (row) { return { id: row.model, tokens: row.totals.total, amount_usd: row.cost_usd }; }));
 
@@ -580,15 +582,15 @@ function renderHero(payload) {
   var root = $('hero');
   root.replaceChildren();
   var full = direct.complete && gateway.complete;
-  stripItem(root, 'Total tokens · ' + selectedDays + 'd', full ? tokens(payload.totals.total) : '—',
+  stripItem(root, 'Total tokens', full ? tokens(payload.totals.total) : '—',
     full ? null : 'incomplete source · total unavailable', !full);
-  stripItem(root, 'NordRouter billed cost · ' + selectedDays + 'd', usd(direct.billed_cost_usd),
-    'actual direct account window', !number(direct.billed_cost_usd));
-  stripItem(root, 'OpenClaw estimated cost · ' + selectedDays + 'd', usd(gateway.estimated_cost_usd),
-    'model-price estimate' + (gateway.unpriced_models ? ' · partial: ' + gateway.unpriced_models + ' unpriced models' : '') +
-    ' · excludes NordRouter route', !number(gateway.estimated_cost_usd));
-  stripItem(root, 'OpenClaw NordRouter comparison · ' + selectedDays + 'd',
-    tokens(sources.openclaw_nordrouter_comparison_tokens), 'excluded from canonical total and cost', false);
+  stripItem(root, 'OpenClaw NordRouter comparison',
+    tokens(sources.openclaw_nordrouter_comparison_tokens), null, false);
+  stripItem(root, 'NordRouter billed cost', usd(direct.billed_cost_usd),
+    null, !number(direct.billed_cost_usd));
+  stripItem(root, 'OpenClaw estimated cost', usd(gateway.estimated_cost_usd),
+    gateway.unpriced_models ? 'partial: ' + gateway.unpriced_models + ' unpriced models' : null,
+    !number(gateway.estimated_cost_usd));
   if (full) {
     var pills = node('div', undefined, root); pills.className = 'pillrow';
     node('span', 'direct NordRouter ' + tokens(direct.tokens), pills).className = 'pill';
@@ -598,7 +600,7 @@ function renderHero(payload) {
 
 /* ---------- history chart ---------- */
 var lastHistoryData = null;
-var historyScale = 'linear';
+var historyScale = 'balanced';
 var SVG_NS = 'http://www.w3.org/2000/svg';
 function svgEl(tag, attrs, parent) {
   var element = document.createElementNS(SVG_NS, tag);
@@ -679,18 +681,25 @@ function renderHistory(payload) {
   var height = root.clientWidth && root.clientWidth <= 640 ? 260 : 300;
   var padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
-  var logScale = historyScale === 'log';
-  var scale = function (value) { return logScale ? Math.log1p(value) : value; };
-  var scaleMax = scale(peak);
+  var balanced = historyScale === 'balanced';
+  // Fourth-root *per model* lifts small segments; cumulative-log compressed
+  // later segments according to stack position and obscured them.
+  var visualWeight = function (value) { return balanced ? Math.pow(value, 0.25) : value; };
+  var scaleMax = balanced ? series.reduce(function (max, day) {
+    return Math.max(max, Array.from(day.buckets.values()).reduce(function (sum, value) { return sum + visualWeight(value); }, 0));
+  }, 0) : peak;
   var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img',
-    'aria-label': 'Daily token usage stacked by model; ' + (logScale ? 'logarithmic' : 'linear') + ' token scale' }, root);
-  svgEl('title', {}, svg).textContent = 'Daily token usage by model for the last ' + series.length + ' days (' + historyScale + ' scale)';
+    'aria-label': balanced ? 'Daily model usage; fourth-root visual weighting per model, not a token axis' :
+      'Daily token usage stacked by model; linear token axis' }, root);
+  svgEl('title', {}, svg).textContent = balanced ?
+    'Balanced view: fourth-root visual weighting per model; hover segments for raw tokens' :
+    'Linear view: segment heights proportional to raw tokens';
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
     svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);
     var label = svgEl('text', { x: padL - 6, y: y + 3, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'end' }, svg);
-    var tick = logScale ? Math.expm1(scaleMax * (1 - g / 2)) : peak * (1 - g / 2);
-    label.textContent = tick > 0 && tick < 10 ? String(Number(tick.toFixed(1))) : tokens(Math.round(tick));
+    var tick = balanced ? Math.round((1 - g / 2) * 100) + '%' : peak * (1 - g / 2);
+    label.textContent = balanced ? tick : tokens(Math.round(tick));
   }
   var slot = plotW / series.length;
   var barW = Math.max(2, Math.min(22, slot * 0.6));
@@ -702,16 +711,16 @@ function renderHistory(payload) {
     stackOrder.forEach(function (category) {
       var amount = day.buckets.get(category.key) || 0;
       if (amount <= 0) return;
-      var bottom = scale(stacked), top = scale(stacked + amount);
-      var barH = plotH * (top - bottom) / scaleMax;
+      var weight = visualWeight(amount);
+      stacked += weight;
+      var barH = plotH * weight / scaleMax;
       var rect = svgEl('rect', {
-        x: x, y: padT + plotH * (1 - top / scaleMax), width: barW, height: barH,
+        x: x, y: padT + plotH * (1 - stacked / scaleMax), width: barW, height: barH,
         fill: category.color,
       }, svg);
       svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + category.label + ' · ' +
         amount.toLocaleString() + ' tokens' +
         ' (day total ' + day.total_tokens.toLocaleString() + ')';
-      stacked += amount;
     });
     if (index === 0 || index === series.length - 1 || index % labelEvery === 0) {
       var last = index === series.length - 1;
@@ -720,7 +729,7 @@ function renderHistory(payload) {
       xl.textContent = dateOnly(day.date);
     }
   });
-  node('div', 'daily tokens · ' + series.length + ' days · peak ' + tokens(peak), root).className = 'chart-summary';
+  node('div', (balanced ? 'visual weight relative to tallest day · raw token peak ' : 'daily tokens · peak ') + tokens(peak), root).className = 'chart-summary';
   var legend = node('div', undefined, root); legend.className = 'legend';
   stackOrder.forEach(function (category) {
     var item = node('span', undefined, legend); item.className = 'legend-item';
@@ -907,9 +916,9 @@ function reload(force, nextDays) {
 
 $('refresh').addEventListener('click', function () { reload(true); });
 $('history-scale').addEventListener('click', function () {
-  historyScale = historyScale === 'linear' ? 'log' : 'linear';
+  historyScale = historyScale === 'balanced' ? 'linear' : 'balanced';
   $('history-scale').textContent = 'Scale: ' + historyScale;
-  $('history-scale').setAttribute('aria-pressed', String(historyScale === 'log'));
+  $('history-scale').setAttribute('aria-pressed', String(historyScale === 'balanced'));
   if (lastHistoryData) renderHistory(lastHistoryData);
 });
 modelSortColumns.forEach(function (key) {

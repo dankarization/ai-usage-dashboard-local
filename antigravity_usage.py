@@ -12,8 +12,10 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import tempfile
+import time
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Callable, TypedDict
 
 from pricing_config import calc_cost, get_pricing
@@ -427,22 +429,61 @@ def load_cache(path: str) -> list[dict]:
 
 
 def save_cache(path: str, entries: list[dict]) -> None:
-    """Write usage entries to the cache, deduplicated by response ID."""
+    """Write only the 90 calendar days supported by dashboard/model views."""
     deduped: list[dict] = []
     seen: set[str] = set()
-    for entry in entries:
+    for entry in retained_entries(entries):
         response_id = entry.get('response_id')
         if response_id:
             if response_id in seen:
                 continue
             seen.add(response_id)
         deduped.append(entry)
-    with open(path, 'w', encoding='utf-8') as stream:
-        json.dump({
-            'version': 1,
-            'updated_at': datetime.now().isoformat(),
-            'entries': deduped,
-        }, stream, indent=2)
+    # Atomic replacement cannot follow an existing target symlink. Remove only
+    # our own abandoned temporary files, never generic tmp/verification files.
+    directory = os.path.dirname(path) or '.'
+    if os.path.islink(directory):
+        raise ValueError('Cache directory must not be a symlink')
+    cutoff = time.time() - 24 * 60 * 60
+    with os.scandir(directory) as files:
+        for file in files:
+            if (file.name.startswith('.antigravity-cache-')
+                    and file.is_file(follow_symlinks=False)
+                    and file.stat(follow_symlinks=False).st_mtime < cutoff):
+                os.unlink(file.path)
+    fd, temporary = tempfile.mkstemp(prefix='.antigravity-cache-', dir=directory)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump({
+                'version': 1,
+                'updated_at': datetime.now().isoformat(),
+                'entries': deduped,
+            }, stream, indent=2)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+RETENTION_DAYS = 90
+
+
+def retained_entries(entries: list[dict], *, today: date | None = None) -> list[dict]:
+    """Use aggregation's date conversion so pruning keeps displayed buckets."""
+    today = today or date.today()
+    oldest = today - timedelta(days=RETENTION_DAYS - 1)
+    newest = today + timedelta(days=1)  # tolerate timezone/clock skew
+    kept = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            day = entry_to_date(entry)
+        except (OverflowError, OSError, ValueError, TypeError):
+            continue
+        if day is not None and oldest <= day <= newest:
+            kept.append(entry)
+    return kept
 
 
 def entry_to_date(entry: dict) -> date | None:
@@ -475,7 +516,7 @@ def ingest_entries(
     load_cached: Callable[[], list[dict]],
     save_cached: Callable[[list[dict]], None],
 ) -> IngestResult:
-    cached = load_cached()
+    cached = retained_entries(load_cached())
     seen = {
         entry.get('response_id')
         for entry in cached
@@ -484,7 +525,7 @@ def ingest_entries(
     merged = list(cached)
     new_count = 0
     duplicate_count = 0
-    for entry in new_entries:
+    for entry in retained_entries(new_entries):
         response_id = entry.get('response_id')
         if response_id and response_id in seen:
             duplicate_count += 1
@@ -555,7 +596,8 @@ def load_usage(
     conversation_dirs: list[str],
 ) -> dict[str, DailyTokens]:
     """Load usage from cache and the live Language Server."""
-    cached = load_cached()
+    raw_cached = load_cached()
+    cached = retained_entries(raw_cached)
     all_entries = list(cached)
     seen_response_ids = {
         entry.get('response_id')
@@ -617,7 +659,7 @@ def load_usage(
                     sync_metadata_updated = True
                 break
 
-    if all_entries:
+    if all_entries or len(raw_cached) != len(cached):
         save_cached(all_entries)
     if sync_metadata_updated:
         save_sync(sync_metadata)
@@ -656,7 +698,7 @@ def load_detailed(
             }
         )
     )
-    for entry in load_cached():
+    for entry in retained_entries(load_cached()):
         entry_date = get_entry_date(entry)
         if not entry_date:
             continue

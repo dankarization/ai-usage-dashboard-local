@@ -370,7 +370,7 @@ def test_post_antigravity_ingest_accepts_entries(monkeypatch, tmp_path):
 
     client = TestClient(local_display_service.app)
     entries = [
-        {"model": "gemini-3-flash-a", "timestamp": 1711447200000,
+        {"model": "gemini-3-flash-a", "timestamp": int(datetime.now().timestamp() * 1000),
          "input": 1000, "output": 200, "cache_read": 5000,
          "cache_write": 0, "thinking": 50, "response_id": "r1",
          "session_id": "s1"},
@@ -393,7 +393,7 @@ def test_post_antigravity_ingest_deduplicates_existing_entries(monkeypatch, tmp_
 
     client = TestClient(local_display_service.app)
     entries = [
-        {"model": "gemini-3-flash-a", "timestamp": 1711447200000,
+        {"model": "gemini-3-flash-a", "timestamp": int(datetime.now().timestamp() * 1000),
          "input": 1000, "response_id": "dup-1", "session_id": "s1"},
     ]
     # First push
