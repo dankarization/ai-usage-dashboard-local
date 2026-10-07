@@ -139,7 +139,7 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums;white-space:now
 .chart-wrap{width:100%;overflow:hidden}
 .history-head{align-items:center}
 .history-scale{margin-left:auto;font-size:11px;padding:5px 9px}
-svg.chart{display:block;width:100%;height:150px}
+svg.chart{display:block;width:100%;height:300px}
 .chart-summary{color:var(--faint);font-size:11px;padding:6px 0 0}
 .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:5px var(--s3);color:var(--muted);font-size:11px;padding:8px 0 0}
 .legend-item{display:flex;align-items:flex-start;gap:5px;min-width:0;overflow-wrap:anywhere}
@@ -159,6 +159,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .sort-mark{display:inline-block;min-width:12px;margin-left:3px;color:var(--accent)}
 .bar-mini{height:3px;border-radius:var(--pill);background:#171717;overflow:hidden;margin-top:4px;max-width:180px;border:1px solid var(--line-soft)}
 .bar-mini i{display:block;height:100%;background:var(--accent)}
+.token-compare{display:flex;align-items:baseline;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+.token-compare s{color:var(--faint)}
+.token-compare .direct{color:var(--text);font-weight:600}
+.cost-kind{display:block;color:var(--faint);font-size:10px;font-weight:400}
 
 /* ---------- misc ---------- */
 #error{color:#f0a8a2;font-size:12px;margin:var(--s3) 0 0}
@@ -183,7 +187,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   .win{grid-template-columns:1fr;gap:2px;padding:5px 0}
   .win-reset{grid-column:1}
   .win-val{order:2}
-  svg.chart{height:130px}
+  svg.chart{height:260px}
   .btn{padding:8px 12px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -242,16 +246,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div id="history" class="panel chart-wrap"></div>
   </section>
 
-  <section aria-labelledby="h-costs">
-    <div class="sec-head"><h2 id="h-costs">NordRouter model costs</h2><p class="note" id="costs-note">Direct billed model totals; model rows may differ from account window total</p></div>
-    <div class="panel"><div class="scroll"><table>
-      <thead><tr><th>Model</th><th class="num">Tokens</th><th class="num">Billed USD</th></tr></thead>
-      <tbody id="cost-models"></tbody>
-    </table></div></div>
-  </section>
-
   <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">NordRouter-route rows excluded from Overview and history totals to avoid double-counting</p></div>
+    <div class="sec-head"><h2 id="h-models">Model Usage</h2><p class="note" id="models-note">NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. Input/output/cache are OpenClaw comparisons, not direct token types. Unmatched routes have no direct bill; model rows are not account totals.</p></div>
     <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
@@ -263,7 +259,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
             <th id="model-sort-head-output" class="num"><button id="model-sort-output" class="sort-btn" type="button">Output<span id="model-sort-mark-output" class="sort-mark" aria-hidden="true">↕</span></button></th>
             <th id="model-sort-head-cache_read" class="num"><button id="model-sort-cache_read" class="sort-btn" type="button">Cache read<span id="model-sort-mark-cache_read" class="sort-mark" aria-hidden="true">↕</span></button></th>
             <th id="model-sort-head-cache_write" class="num"><button id="model-sort-cache_write" class="sort-btn" type="button">Cache write<span id="model-sort-mark-cache_write" class="sort-mark" aria-hidden="true">↕</span></button></th>
-            <th id="model-sort-head-total" class="num" aria-sort="descending"><button id="model-sort-total" class="sort-btn" type="button">Total<span id="model-sort-mark-total" class="sort-mark" aria-hidden="true">↓</span></button></th>
+            <th id="model-sort-head-total" class="num" aria-sort="descending"><button id="model-sort-total" class="sort-btn" type="button">Tokens<span id="model-sort-mark-total" class="sort-mark" aria-hidden="true">↓</span></button></th>
             <th id="model-sort-head-usd" class="num"><button id="model-sort-usd" class="sort-btn" type="button">USD<span id="model-sort-mark-usd" class="sort-mark" aria-hidden="true">↕</span></button></th>
           </tr></thead>
           <tbody id="models"></tbody>
@@ -680,7 +676,8 @@ function renderHistory(payload) {
   if (unattributed && unattributed.total > 0) unattributed.color = '#8491a3';
   var stackOrder = unattributed && unattributed.total > 0 ? [unattributed].concat(modelCategories) : modelCategories;
   var width = Math.max(320, root.clientWidth || 900);
-  var height = 150, padL = 44, padR = 8, padT = 10, padB = 22;
+  var height = root.clientWidth && root.clientWidth <= 640 ? 260 : 300;
+  var padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
   var logScale = historyScale === 'log';
   var scale = function (value) { return logScale ? Math.log1p(value) : value; };
@@ -717,7 +714,9 @@ function renderHistory(payload) {
       stacked += amount;
     });
     if (index === 0 || index === series.length - 1 || index % labelEvery === 0) {
-      var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
+      var last = index === series.length - 1;
+      var xl = svgEl('text', { x: last ? width - padR : padL + slot * index + slot / 2,
+        y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': last ? 'end' : 'middle' }, svg);
       xl.textContent = dateOnly(day.date);
     }
   });
@@ -734,10 +733,29 @@ function renderHistory(payload) {
 var modelSortColumns = ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'];
 var modelSort = { key: 'total', direction: 'default' };
 var lastModelsData = null;
+function tableModels(data) {
+  var direct = new Map();
+  (data.models || []).forEach(function (row) {
+    if (row.source === 'nordrouter') direct.set(row.model, row);
+  });
+  var comparisons = new Map();
+  (data.models || []).forEach(function (row) {
+    if (row.source === 'openclaw' && String(row.provider).toLowerCase() === 'nordrouter')
+      comparisons.set(row.model, row);
+  });
+  return (data.models || []).filter(function (row) {
+    return row.source === 'nordrouter' ||
+      (row.source === 'openclaw' &&
+       !(String(row.provider).toLowerCase() === 'nordrouter' && direct.has(row.model)));
+  }).map(function (row) {
+    return row.source === 'nordrouter' ? Object.assign({}, row, { comparison: comparisons.get(row.model) }) : row;
+  });
+}
 function modelSortValue(row, key) {
-  if (key === 'source') return row.provider || null;
+  if (key === 'source') return row.source === 'nordrouter' ? 'NordRouter billed' : row.provider || null;
   if (key === 'model') return row.model || null;
-  var value = key === 'usd' ? row.cost_usd : row.totals && row.totals[key];
+  var detail = row.source === 'nordrouter' && key !== 'total' && key !== 'usd' ? row.comparison : row;
+  var value = key === 'usd' ? row.cost_usd : detail && detail.totals && detail.totals[key];
   return number(value) ? value : null;
 }
 function sortedModels(rows) {
@@ -769,7 +787,7 @@ function renderModels(data) {
     ' · OpenClaw ' + (meta.openclaw_status || 'unknown') + ' · NordRouter ' + (meta.nordrouter_status || 'unknown');
   var body = $('models');
   body.replaceChildren();
-  var models = sortedModels((data.models || []).filter(function (row) { return row.source === 'openclaw'; }));
+  var models = sortedModels(tableModels(data));
   if (!models.length) {
     var emptyRow = node('tr', undefined, body);
     var emptyCell = node('td', 'No model data available.', emptyRow);
@@ -783,7 +801,7 @@ function renderModels(data) {
   models.forEach(function (row) {
     var tr = node('tr', undefined, body);
     var srcCell = node('td', undefined, tr);
-    node('span', row.provider || 'unknown', srcCell).className = 'src';
+    node('span', row.source === 'nordrouter' ? 'NordRouter billed' : row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
     node('span', row.model || '—', modelCell);
     if (row.daily && row.daily.length) {
@@ -794,30 +812,35 @@ function renderModels(data) {
       });
     }
     ['input', 'output', 'cache_read', 'cache_write'].forEach(function (field) {
-      var cell = node('td', tokens(row.totals && row.totals[field]), tr); cell.className = 'num';
+      var compared = row.source === 'nordrouter' ? row.comparison : row;
+      var cell = node('td', tokens(compared && compared.totals && compared.totals[field]), tr);
+      cell.className = 'num';
+      if (row.source === 'nordrouter' && row.comparison) cell.title = 'OpenClaw route comparison; not direct NordRouter token categories';
     });
     var total = row.totals && number(row.totals.total) ? row.totals.total : null;
-    var tokCell = node('td', tokens(total), tr); tokCell.className = 'num';
+    var tokCell = node('td', undefined, tr); tokCell.className = 'num';
+    if (row.source === 'nordrouter') {
+      var pair = node('span', undefined, tokCell); pair.className = 'token-compare';
+      if (row.comparison && row.comparison.totals && number(row.comparison.totals.total)) {
+        var old = node('s', tokens(row.comparison.totals.total), pair);
+        old.title = 'OpenClaw route comparison: ' + row.comparison.totals.total.toLocaleString() + ' tokens';
+      }
+      var actual = node('span', tokens(total), pair);
+      actual.className = 'direct';
+      actual.title = number(total) ? 'Direct NordRouter reported: ' + total.toLocaleString() + ' tokens' : 'Direct NordRouter tokens unavailable';
+    } else {
+      node('span', tokens(total), tokCell);
+    }
     if (total && top > 0) {
       var mini = node('div', undefined, tokCell); mini.className = 'bar-mini';
       node('i', undefined, mini).style.width = Math.max(2, Math.round((total / top) * 100)) + '%';
     }
-    var costCell = node('td', usd(row.cost_usd), tr); costCell.className = 'num';
-  });
-}
-
-function renderCosts(data) {
-  var body = $('cost-models'); body.replaceChildren();
-  var rows = (data.models || []).filter(function (row) { return row.source === 'nordrouter'; });
-  rows.sort(function (a, b) { return (b.cost_usd || 0) - (a.cost_usd || 0); });
-  if (!rows.length) {
-    var empty = node('tr', undefined, body); node('td', 'No direct NordRouter model data available.', empty).colSpan = 3;
-  }
-  rows.forEach(function (row) {
-    var tr = node('tr', undefined, body);
-    node('td', row.model, tr);
-    node('td', tokens(row.totals.total), tr).className = 'num';
-    node('td', usd(row.cost_usd), tr).className = 'num';
+    var costCell = node('td', row.source === 'nordrouter' && number(row.cost_usd)
+      ? '$' + row.cost_usd.toFixed(6)
+      : String(row.provider).toLowerCase() === 'nordrouter' ? '—' : usd(row.cost_usd), tr);
+    costCell.className = 'num';
+    node('span', row.source === 'nordrouter' ? 'billed' :
+      String(row.provider).toLowerCase() === 'nordrouter' ? 'no direct match' : 'estimated', costCell).className = 'cost-kind';
   });
 }
 
@@ -848,7 +871,6 @@ function renderPeriod(models, quotas) {
   renderHero(models);
   renderQuotas(quotas, models);
   renderHistory(models);
-  renderCosts(models);
   renderModels(models);
 }
 function reload(force, nextDays) {

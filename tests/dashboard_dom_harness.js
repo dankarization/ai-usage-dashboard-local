@@ -70,13 +70,12 @@ class Element {
 const registry = new Map();
 ['hero', 'quotas', 'history', 'history-scale', 'codex', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
- 'period-30', 'period-7', 'overview-note', 'models-note', 'costs-note', 'cost-models'].forEach((id) => {
+ 'period-30', 'period-7', 'overview-note', 'models-note'].forEach((id) => {
   registry.set(id, new Element('div'));
 });
 const sectionNotes = {
   'overview-note': 'Canonical direct NordRouter + non-NordRouter OpenClaw',
-  'models-note': 'NordRouter-route rows excluded from Overview and history totals to avoid double-counting',
-  'costs-note': 'Direct billed model totals; model rows may differ from account window total',
+  'models-note': 'NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. Input/output/cache are OpenClaw comparisons, not direct token types. Unmatched routes have no direct bill; model rows are not account totals.',
 };
 Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
@@ -100,7 +99,7 @@ global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({})
 const code = fs.readFileSync(jsPath, 'utf8');
 vm.runInThisContext(code, { filename: jsPath });
 
-['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'renderCosts', 'renderPeriod', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'snapshotLabel', 'relativeAge', 'time', 'dateOnly', 'serverTime']
+['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'tableModels', 'renderPeriod', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'snapshotLabel', 'relativeAge', 'time', 'dateOnly', 'serverTime']
   .forEach((name) => assert(typeof global[name] === 'function' || typeof eval(name) === 'function',
     'dashboard script did not expose ' + name));
 
@@ -317,14 +316,10 @@ assert(heroPills.every((e) => e.className === 'pill'), 'source chips keep the pi
 assert(heroText.includes('NordRouter billed cost · 30d') && heroText.includes('$0.4000'), 'direct billed cost shown');
 assert(heroText.includes('OpenClaw estimated cost · 30d') && heroText.includes('$0.2000'), 'estimate shown separately');
 assert(heroText.includes('comparison') && heroText.includes('21'), 'comparison duplicate shown but excluded');
-assert(registry.get('cost-models').textContent.includes('z-ai/glm-5.3'), 'direct model costs restored');
-assert(!registry.get('cost-models').textContent.includes('nr-route'), 'comparison route is not billed table');
-assertEqual(registry.get('models').children.map((row) => row.children[0].textContent).join(','), 'nordrouter,xai',
-  'OpenClaw table displays only route names');
-assert(!registry.get('models-note').textContent.includes('comparison only') &&
-  registry.get('models-note').textContent.includes('excluded from Overview and history totals'),
-  'table note explains exclusion without comparison-only wording');
-assert(!registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct rows are not mixed into OpenClaw table');
+assert(registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct model appears in unified table');
+assertEqual(registry.get('models').children.map((row) => row.children[0].textContent).join(','),
+  'nordrouter,NordRouter billed,xai', 'unmatched route and billed model are distinct');
+assert(registry.get('models-note').textContent.includes('billed USD'), 'table note explains cost provenance');
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
@@ -337,6 +332,8 @@ assert(!chart.textContent.includes('all models; daily split unavailable'), 'Nord
 assert(chart.textContent.includes('nr-route · 20 tokens') && !chart.textContent.includes('nr-route · 21 tokens'),
   'direct NordRouter daily total replaces comparison-only route total');
 assert(chart.textContent.includes('day total 30'), 'history excludes the 21-token duplicate');
+assertEqual(all(chart).filter((e) => e.tagName === 'TEXT' && e.textContent === '03.10.2026').at(-1).getAttribute('text-anchor'),
+  'end', 'last date label stays inside the chart');
 let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, 'history has one summary line');
 assertEqual(summary[0].textContent, 'daily tokens · 1 days · peak 30', 'summary excludes total and estimate note');
@@ -357,7 +354,7 @@ assert(registry.get('hero').textContent.includes('Total tokens · 7d') && regist
 heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
 assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,other OpenClaw 5',
   '7d overview updates both source chips');
-assert(registry.get('cost-models').textContent.includes('direct-7d'), '7d direct cost table');
+assert(registry.get('models').textContent.includes('direct-7d'), '7d direct model row');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
 assert(chart.textContent.includes('day total 9'), '7d history');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
@@ -438,7 +435,42 @@ assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')
   'incomplete overview must not show numeric source chips');
 selectedDays = 30;
 
-/* ---------------- OpenClaw table sorting ---------------- */
+/* ---------------- unified model rows and sorting ---------------- */
+const mergedFixture = { ...MODELS, models: [
+  { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3',
+    totals: { total: 1234567 }, cost_usd: 1.234567, daily: [] },
+  { source: 'openclaw', provider: 'nordrouter', model: 'z-ai/glm-5.3',
+    totals: { total: 765432, input: 70 }, cost_usd: 9, daily: [] },
+  { source: 'nordrouter', provider: 'nordrouter', model: 'google/gemini-3.6-flash',
+    totals: { total: 42 }, cost_usd: 0.000012, daily: [] },
+  { source: 'openclaw', provider: 'nordrouter', model: 'unmatched-route',
+    totals: { total: 11 }, cost_usd: 3, daily: [] },
+  { source: 'openclaw', provider: 'xai', model: 'other',
+    totals: { total: 8 }, cost_usd: 0.2, daily: [] },
+] };
+const originalRows = JSON.stringify(mergedFixture.models);
+renderModels(mergedFixture);
+assertEqual(registry.get('models').children.length, 4, 'matched route becomes one billed row');
+const rowFor = (name) => registry.get('models').children.find((row) => row.children[1].textContent === name);
+const matchedRow = rowFor('z-ai/glm-5.3');
+assertEqual(all(matchedRow.children[6]).find((e) => e.tagName === 'S').textContent, '765.4K',
+  'OpenClaw tokens use compact formatting and are crossed out before direct tokens');
+assert(matchedRow.children[6].textContent.endsWith('1.2M'), 'direct tokens use compact formatting');
+assert(all(matchedRow.children[6]).find((e) => e.tagName === 'S').title.includes('765,432') &&
+  all(matchedRow.children[6]).find((e) => e.classList.contains('direct')).title.includes('1,234,567'),
+  'exact underlying totals remain accessible in titles');
+assert(matchedRow.children[7].textContent.includes('$1.234567') &&
+  !matchedRow.children[7].textContent.includes('$9'), 'billed USD replaces route estimate');
+assertEqual(matchedRow.children[2].textContent, '70', 'comparison token categories retain provenance');
+const directOnly = rowFor('google/gemini-3.6-flash');
+assertEqual(all(directOnly.children[6]).filter((e) => e.tagName === 'S').length, 0,
+  'direct-only model has no invented OpenClaw comparison');
+assert(directOnly.children[7].textContent.includes('$0.000012'), 'small billed cost keeps six decimals');
+assert(rowFor('unmatched-route').children[7].textContent.includes('no direct match') &&
+  !rowFor('unmatched-route').children[7].textContent.includes('$3'),
+  'unmatched route estimate is not presented as a bill');
+assertEqual(JSON.stringify(mergedFixture.models), originalRows, 'table merge never mutates API models');
+
 const SORT_MODELS = { ...MODELS, models: [
   { source: 'openclaw', provider: 'xai', model: 'Alpha', account: 'unknown', cost_usd: 1,
     totals: { total: 10, input: 8, output: 1, cache_read: 1, cache_write: 0 }, daily: [] },
@@ -451,7 +483,7 @@ const modelOrder = () => registry.get('models').children.map((row) => row.childr
 const sortClick = (key) => registry.get('model-sort-' + key).listeners.click[0]();
 assert(['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd']
   .every((key) => registry.get('model-sort-' + key).listeners.click.length === 1),
-  'every OpenClaw model table header must be clickable');
+  'every model table header must be clickable');
 renderModels(SORT_MODELS);
 assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'base order is total tokens descending, not cost');
 assert(!registry.get('models').textContent.includes('account:'), 'model table must ignore a legacy invented account');
@@ -579,7 +611,7 @@ async function waitForReload() {
   assert(!calls.includes('/api/v1/display/update'), 'period switch does not force unrelated provider collection');
   assert(registry.get('hero').textContent.includes('Total tokens · 7d'), 'toggle repaints overview');
   assert(registry.get('history').textContent.includes('day total 9'), 'toggle repaints history');
-  assert(registry.get('cost-models').textContent.includes('direct-7d'), 'toggle repaints direct model costs');
+  assert(registry.get('models').textContent.includes('direct-7d'), 'toggle repaints direct model row');
   assert(registry.get('models').textContent.includes('grok-7d'), 'toggle repaints OpenClaw model usage');
   assertEqual(registry.get('period-7').getAttribute('aria-pressed'), 'true', 'toggle updates pressed state');
   console.log('OK: accelerated auto-refresh repainted changed provider data');

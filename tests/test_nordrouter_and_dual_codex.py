@@ -271,14 +271,25 @@ def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypa
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
-    monkeypatch.setattr(nr.Client, 'get', lambda *a, **kw: (analytics(), False))
+    start, end, _, _ = usage.get_date_range(7)
+    matched = analytics(7)
+    matched['daily'] = [{'date': day.isoformat(), 'tokens': 123 if day.isoformat() == end else 0,
+                         'amount_usd': 2 if day.isoformat() == end else 0}
+                        for day in usage.list_dates_in_range(start, end)]
+    monkeypatch.setattr(nr.Client, 'get', lambda *a, **kw: (matched, False))
     result = usage.build_model_breakdown(7)
     entry = result['models'][0]
     assert entry['source'] == 'nordrouter'
     assert entry['totals']['total'] == 123
     assert entry['cost_usd'] == 2
     assert entry['daily'] == []
-    # Fixture has a 30d window for a 7d request and no complete 7d daily
-    # coverage; a model aggregate cannot stand in for canonical account total.
-    assert result['totals']['total'] is None
-    assert result['sources']['nordrouter']['complete'] is False
+    assert result['totals']['total'] == 123
+    assert result['sources']['nordrouter']['complete'] is True
+
+    # A server aggregate from another window must never appear as this
+    # period's direct model tokens or billed USD.
+    monkeypatch.setattr(nr.Client, 'get', lambda *a, **kw: (analytics(30), False))
+    mismatched = usage.build_model_breakdown(7)
+    assert mismatched['models'] == []
+    assert mismatched['totals']['total'] is None
+    assert mismatched['sources']['nordrouter']['complete'] is False

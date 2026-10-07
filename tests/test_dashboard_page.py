@@ -53,7 +53,7 @@ def test_page_calls_the_live_endpoints():
 
 def test_section_notes_do_not_repeat_period_selection():
     assert 'id="history-note"' not in DASHBOARD_HTML
-    for note_id in ('overview-note', 'models-note', 'costs-note'):
+    for note_id in ('overview-note', 'models-note'):
         note = re.search(rf'<p class="note" id="{note_id}">(.*?)</p>', DASHBOARD_HTML)
         assert note is not None
         assert not re.search(r'\bselected\s+(?:7|30)d\b', note.group(1), re.I)
@@ -85,7 +85,15 @@ def test_page_labels_list_price_estimate_and_never_fakes_it():
     assert 'excludes NordRouter route' in DASHBOARD_HTML
     assert 'id="period-30"' in DASHBOARD_HTML
     assert 'id="period-7"' in DASHBOARD_HTML
-    assert 'id="cost-models"' in DASHBOARD_HTML
+    assert 'id="h-models">Model Usage' in DASHBOARD_HTML
+    assert 'id="h-costs"' not in DASHBOARD_HTML
+    assert 'id="cost-models"' not in DASHBOARD_HTML
+    assert 'NordRouter model costs' not in DASHBOARD_HTML
+
+
+def test_history_chart_is_tall_on_desktop_and_mobile():
+    assert 'svg.chart{display:block;width:100%;height:300px}' in DASHBOARD_HTML
+    assert 'svg.chart{height:260px}' in DASHBOARD_HTML
 
 
 def test_page_shows_configured_and_unconfigured_account_states():

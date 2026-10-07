@@ -2731,6 +2731,8 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
     nr_daily = []
     nr_window_cost = None
     nr_window_days = None
+    expected_dates = {d.isoformat() for d in list_dates_in_range(start_str, end_str)}
+    nr_complete = False
     nr_key = os.environ.get('NORDROUTER_API_KEY', '')
     if nr_key:
         nr, stale = _nordrouter_usage.Client(nr_key).get('analytics', days=max(1, min(days, 90)))
@@ -2739,7 +2741,10 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
             nr_daily = [dict(row) for row in nr.get('daily', [])]
             nr_window_cost = (nr.get('totals') or {}).get('amount_usd')
             nr_window_days = nr.get('window_days')
-            for model in nr.get('top_models', []):
+            nr_complete = nr_window_days == days and {row['date'] for row in nr_daily} == expected_dates
+            # A model aggregate has no own dates. Show it only when its server
+            # window and account-day coverage match the requested period.
+            for model in nr.get('top_models', []) if nr_complete else []:
                 tokens = int(model['tokens'])
                 models.append({
                     'source': 'nordrouter', 'provider': 'nordrouter',
@@ -2757,8 +2762,6 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
         return sum(t.get(field) or 0 for t in detailed)
     total_input, total_output = amount('input'), amount('output')
     cache_read = amount('cache_read')
-    expected_dates = {d.isoformat() for d in list_dates_in_range(start_str, end_str)}
-    nr_complete = nr_window_days == days and {row['date'] for row in nr_daily} == expected_dates
     return {
         'meta': {
             'generated_at': datetime.now(ZoneInfo('America/Los_Angeles')).replace(tzinfo=None).isoformat(timespec='seconds'),
