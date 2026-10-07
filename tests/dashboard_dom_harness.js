@@ -68,7 +68,7 @@ class Element {
 }
 
 const registry = new Map();
-['hero', 'quotas', 'history', 'codex', 'metrics', 'today', 'week', 'selected-top-label',
+['hero', 'quotas', 'history', 'history-scale', 'codex', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
  'period-30', 'period-7', 'overview-note', 'models-note', 'costs-note', 'cost-models'].forEach((id) => {
   registry.set(id, new Element('div'));
@@ -398,6 +398,40 @@ assert(chart.textContent.includes('Shared · 11 tokens') && chart.textContent.in
   'combined model includes direct-allocated NordRouter and both other providers exactly once');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
   'one colour is assigned per distinct model');
+const linearShared = segments.find((e) => e.children[0].textContent.includes('Shared · 11 tokens'));
+const linearOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
+const linearOtherHeight = Number(linearOther.getAttribute('height'));
+const linearColors = new Map(segments.map((e) => [e.children[0].textContent.split(' · ')[1], e.getAttribute('fill')]));
+assertEqual(historyScale, 'linear', 'linear is the default history scale');
+registry.get('history-scale').listeners.click[0]();
+assertEqual(historyScale, 'log', 'scale button enables logarithmic view');
+assertEqual(registry.get('history-scale').textContent, 'Scale: log', 'button visibly names logarithmic state');
+assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'true', 'log button exposes pressed state');
+segments = all(chart).filter((e) => e.tagName === 'RECT');
+const logOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
+assert(Number(logOther.getAttribute('height')) > linearOtherHeight,
+  'log scale makes the small model segment more legible');
+assertEqual(segments.length, 2, 'log mode keeps one segment per model/day');
+assertEqual(new Map(segments.map((e) => [e.children[0].textContent.split(' · ')[1], e.getAttribute('fill')])).get('Shared'),
+  linearColors.get('Shared'), 'log mode preserves model colour');
+assert(chart.textContent.includes('Shared · 11 tokens') && chart.textContent.includes('day total 12'),
+  'log view preserves actual model and day totals');
+assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('logarithmic token scale'),
+  'logarithmic axis is named accessibly');
+renderHistory({ models: [
+  { source: 'openclaw', provider: 'local', model: 'Tiny', daily: [
+    { date: '2026-10-02', total: 0 }, { date: '2026-10-03', total: 1 }] },
+], source_daily: { nordrouter: [] } });
+segments = all(chart).filter((e) => e.tagName === 'RECT');
+assertEqual(segments.length, 1, 'zero day draws no false segment');
+assert(Number.isFinite(Number(segments[0].getAttribute('height'))) && Number(segments[0].getAttribute('height')) > 0,
+  'log1p scale handles a one-token day');
+assertEqual(all(chart).filter((e) => e.tagName === 'TEXT').slice(0, 3).map((e) => e.textContent).join(','),
+  '1,0.4,0', 'one-token log axis has meaningful token tick labels');
+registry.get('history-scale').listeners.click[0]();
+assertEqual(historyScale, 'linear', 'scale button restores linear view');
+assertEqual(registry.get('history-scale').textContent, 'Scale: linear', 'button visibly names linear state');
+assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'false', 'linear button clears pressed state');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,

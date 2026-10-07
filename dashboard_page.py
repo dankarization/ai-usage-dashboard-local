@@ -137,6 +137,8 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums;white-space:now
 
 /* ---------- chart ---------- */
 .chart-wrap{width:100%;overflow:hidden}
+.history-head{align-items:center}
+.history-scale{margin-left:auto;font-size:11px;padding:5px 9px}
 svg.chart{display:block;width:100%;height:150px}
 .chart-summary{color:var(--faint);font-size:11px;padding:6px 0 0}
 .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:5px var(--s3);color:var(--muted);font-size:11px;padding:8px 0 0}
@@ -236,7 +238,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-history">
-    <div class="sec-head"><h2 id="h-history">Usage history</h2></div>
+    <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button></div>
     <div id="history" class="panel chart-wrap"></div>
   </section>
 
@@ -600,6 +602,7 @@ function renderHero(payload) {
 
 /* ---------- history chart ---------- */
 var lastHistoryData = null;
+var historyScale = 'linear';
 var SVG_NS = 'http://www.w3.org/2000/svg';
 function svgEl(tag, attrs, parent) {
   var element = document.createElementNS(SVG_NS, tag);
@@ -679,13 +682,18 @@ function renderHistory(payload) {
   var width = Math.max(320, root.clientWidth || 900);
   var height = 150, padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
-  var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Daily token usage stacked by model' }, root);
-  svgEl('title', {}, svg).textContent = 'Daily token usage by model for the last ' + series.length + ' days';
+  var logScale = historyScale === 'log';
+  var scale = function (value) { return logScale ? Math.log1p(value) : value; };
+  var scaleMax = scale(peak);
+  var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img',
+    'aria-label': 'Daily token usage stacked by model; ' + (logScale ? 'logarithmic' : 'linear') + ' token scale' }, root);
+  svgEl('title', {}, svg).textContent = 'Daily token usage by model for the last ' + series.length + ' days (' + historyScale + ' scale)';
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
     svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);
     var label = svgEl('text', { x: padL - 6, y: y + 3, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'end' }, svg);
-    label.textContent = tokens(peak * (1 - g / 2));
+    var tick = logScale ? Math.expm1(scaleMax * (1 - g / 2)) : peak * (1 - g / 2);
+    label.textContent = tick > 0 && tick < 10 ? String(Number(tick.toFixed(1))) : tokens(Math.round(tick));
   }
   var slot = plotW / series.length;
   var barW = Math.max(2, Math.min(22, slot * 0.6));
@@ -697,15 +705,16 @@ function renderHistory(payload) {
     stackOrder.forEach(function (category) {
       var amount = day.buckets.get(category.key) || 0;
       if (amount <= 0) return;
-      var barH = plotH * amount / peak;
+      var bottom = scale(stacked), top = scale(stacked + amount);
+      var barH = plotH * (top - bottom) / scaleMax;
       var rect = svgEl('rect', {
-        x: x, y: padT + plotH - stacked - barH, width: barW, height: barH,
+        x: x, y: padT + plotH * (1 - top / scaleMax), width: barW, height: barH,
         fill: category.color,
       }, svg);
       svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + category.label + ' · ' +
         amount.toLocaleString() + ' tokens' +
         ' (day total ' + day.total_tokens.toLocaleString() + ')';
-      stacked += barH;
+      stacked += amount;
     });
     if (index === 0 || index === series.length - 1 || index % labelEvery === 0) {
       var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
@@ -874,6 +883,12 @@ function reload(force, nextDays) {
 }
 
 $('refresh').addEventListener('click', function () { reload(true); });
+$('history-scale').addEventListener('click', function () {
+  historyScale = historyScale === 'linear' ? 'log' : 'linear';
+  $('history-scale').textContent = 'Scale: ' + historyScale;
+  $('history-scale').setAttribute('aria-pressed', String(historyScale === 'log'));
+  if (lastHistoryData) renderHistory(lastHistoryData);
+});
 modelSortColumns.forEach(function (key) {
   $('model-sort-' + key).addEventListener('click', function () {
     modelSort = key !== modelSort.key || modelSort.direction === 'default' ? { key: key, direction: 'descending' }
