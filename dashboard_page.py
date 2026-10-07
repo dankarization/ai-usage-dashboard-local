@@ -158,7 +158,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 
 @media (max-width:640px){
   .wrap{padding:0 var(--s3)}
-  .topbar-in{padding:8px var(--s3);gap:var(--s2)}
+  .topbar-in{padding:8px var(--s3);gap:var(--s2);flex-wrap:wrap}
+  .brand{flex:1 1 auto}
+  .spacer{display:none}
+  .stamp{order:3;flex:1 0 100%;white-space:normal}
   h1{font-size:13px}
   .stamp{font-size:10px}
   .strip-item{flex:1 1 44%;padding:9px var(--s3);border-top:1px solid var(--line)}
