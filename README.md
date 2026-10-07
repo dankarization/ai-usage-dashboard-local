@@ -4,8 +4,6 @@ A private, self-hosted web dashboard for AI usage, quota windows, model breakdow
 
 ![AI Usage Dashboard with account email addresses redacted](assets/dashboard-redacted.png)
 
-The screenshot above is from the running local web dashboard. Only the two account email labels were covered with opaque masks; the rest of the original screenshot is unchanged.
-
 ## What it shows
 
 - Overview: token totals, direct NordRouter tokens, OpenClaw tokens, and estimated/billed cost.
