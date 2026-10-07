@@ -327,9 +327,17 @@ assert(!registry.get('models-note').textContent.includes('comparison only') &&
 assert(!registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct rows are not mixed into OpenClaw table');
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
-assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 1, 'one real daily bucket drawn');
+let segments = all(chart).filter((e) => e.tagName === 'RECT');
+assertEqual(segments.length, 2, '30d draws separate OpenClaw and NordRouter model segments');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, 'models have distinct colours');
+assert(chart.textContent.includes('NordRouter / nr-route') && chart.textContent.includes('xai / grok-test'),
+  'legend identifies each model route');
+assert(!chart.textContent.includes('all models; daily split unavailable'), 'NordRouter route uses model-day data');
+assert(chart.textContent.includes('20 allocated tokens') && !chart.textContent.includes('21 allocated tokens'),
+  'direct NordRouter daily total replaces comparison-only route total');
 assert(chart.textContent.includes('total 30 tokens'), 'history excludes the 21-token duplicate');
 windowListeners.resize();
+assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize keeps model segments');
 assert(chart.textContent.includes('total 30 tokens'), 'resize keeps deduplicated history');
 selectedDays = 7;
 renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 },
@@ -348,11 +356,26 @@ assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,
 assert(registry.get('cost-models').textContent.includes('direct-7d'), '7d direct cost table');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
 assert(chart.textContent.includes('total 9 tokens'), '7d history');
+segments = all(chart).filter((e) => e.tagName === 'RECT');
+assertEqual(segments.length, 2, '7d draws both model segments');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, '7d models have distinct colours');
+assert(chart.textContent.includes('4 allocated tokens'), '7d NordRouter segment reconciles to direct source');
 assert(registry.get('metrics').textContent.includes('Billed spend · 7d'), 'NordRouter metric follows selection');
 assert(registry.get('selected-top-label').textContent.includes('7d'), 'top-model period follows selection');
 Object.entries(sectionNotes).forEach(([id, value]) => {
   assertEqual(registry.get(id).textContent, value, '7d ' + id + ' note stays static');
 });
+renderHistory({ models: [
+  { source: 'openclaw', provider: 'nordrouter', model: 'A', daily: [{ date: '2026-10-03', total: 3 }] },
+  { source: 'openclaw', provider: 'nordrouter', model: 'B', daily: [{ date: '2026-10-03', total: 2 }] },
+  { source: 'openclaw', provider: 'xai', model: 'C', daily: [{ date: '2026-10-03', total: 5 }] },
+], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 7 }] } });
+assert(chart.textContent.includes('NordRouter / A · 4 allocated tokens') &&
+  chart.textContent.includes('NordRouter / B · 3 allocated tokens'),
+  'NordRouter model shares use largest-remainder allocation to exact direct total');
+assert(chart.textContent.includes('total 12 tokens'), 'allocated model bars preserve canonical day total');
+assertEqual(new Set(all(chart).filter((e) => e.tagName === 'RECT').map((e) => e.getAttribute('fill'))).size, 3,
+  'three individual models keep distinct colours');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,

@@ -111,7 +111,7 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
 .chip.danger{color:var(--red);border-color:#5c3030;background:#2b1d1d}
 .chip.unknown,.chip.not_configured,.chip.unavailable{color:var(--neutral);border-color:var(--line);background:var(--raised)}
 
-.win{display:grid;grid-template-columns:160px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:3px 0}
+.win{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:3px 0}
 .win-label{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .track{height:4px;border-radius:var(--pill);background:#171717;border:1px solid var(--line-soft);overflow:hidden}
 .fill{height:100%;border-radius:var(--pill);transition:width 400ms ease}
@@ -119,7 +119,7 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
 .fill.unknown{background:repeating-linear-gradient(135deg,#3a3a3a 0 4px,#2c2c2c 4px 8px)}
 .win-val{font-size:12px;font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap}
 .win-val .rem{color:var(--faint);font-size:11px}
-.win-reset{grid-column:2/4;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.win-reset{grid-column:2/4;min-width:0;overflow-wrap:anywhere;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
 .unavailable{margin:2px 0 0;color:var(--faint);font-size:11px;font-style:italic}
 
 /* ---------- nordrouter ---------- */
@@ -138,9 +138,10 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums;white-space:now
 /* ---------- chart ---------- */
 .chart-wrap{width:100%;overflow:hidden}
 svg.chart{display:block;width:100%;height:150px}
-.legend{display:flex;gap:var(--s4);flex-wrap:wrap;color:var(--faint);font-size:11px;padding:6px 0 0}
-.legend span{display:inline-flex;align-items:center;gap:5px}
-.swatch{width:8px;height:8px;border-radius:2px;display:inline-block;background:var(--accent)}
+.chart-summary{color:var(--faint);font-size:11px;padding:6px 0 0}
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:5px var(--s3);color:var(--muted);font-size:11px;padding:8px 0 0}
+.legend-item{display:flex;align-items:flex-start;gap:5px;min-width:0;overflow-wrap:anywhere}
+.swatch{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none;margin-top:2px}
 
 /* ---------- table ---------- */
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -611,27 +612,80 @@ function renderHistory(payload) {
   var root = $('history');
   root.replaceChildren();
   var byDate = new Map();
+  var categories = new Map();
+  var nordByDate = new Map();
   (payload.models || []).forEach(function (model) {
-    if (model.source !== 'openclaw' || String(model.provider).toLowerCase() === 'nordrouter') return;
+    if (model.source !== 'openclaw') return;
+    var nord = String(model.provider).toLowerCase() === 'nordrouter';
+    var key = (nord ? 'nordrouter' : 'openclaw') + '\u0000' + String(model.provider || 'unknown') + '\u0000' + String(model.model || 'unknown');
+    var category = categories.get(key);
+    if (!category) {
+      category = { key: key, label: (nord ? 'NordRouter / ' : String(model.provider || 'unknown') + ' / ') +
+        String(model.model || 'unknown'), total: 0, nord: nord };
+      categories.set(key, category);
+    }
     (model.daily || []).forEach(function (day) {
-      byDate.set(day.date, (byDate.get(day.date) || 0) + day.total);
+      if (!number(day.total) || day.total < 0) return;
+      var dates = nord ? nordByDate : byDate;
+      if (!dates.has(day.date)) dates.set(day.date, new Map());
+      var buckets = dates.get(day.date);
+      buckets.set(key, (buckets.get(key) || 0) + day.total);
     });
   });
+  var directByDate = new Map();
   ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
-    byDate.set(day.date, (byDate.get(day.date) || 0) + day.tokens);
+    if (!number(day.tokens) || day.tokens < 0) return;
+    directByDate.set(day.date, (directByDate.get(day.date) || 0) + day.tokens);
   });
-  var series = Array.from(byDate, function (item) { return { date: item[0], total_tokens: item[1], cost_usd: null }; })
+  var unattributedKey = 'direct-nordrouter-unattributed';
+  directByDate.forEach(function (direct, date) {
+    var proxy = nordByDate.get(date);
+    if (!byDate.has(date)) byDate.set(date, new Map());
+    var buckets = byDate.get(date);
+    var proxyTotal = proxy ? Array.from(proxy.values()).reduce(function (sum, value) { return sum + value; }, 0) : 0;
+    if (!proxyTotal) {
+      if (direct > 0) {
+        buckets.set(unattributedKey, direct);
+        categories.set(unattributedKey, { key: unattributedKey, label: 'NordRouter (model attribution unavailable)', nord: true });
+      }
+      return;
+    }
+    var allocations = Array.from(proxy, function (entry) {
+      var exact = direct * (entry[1] / proxyTotal);
+      return { key: entry[0], amount: Math.floor(exact), fraction: exact - Math.floor(exact) };
+    });
+    var remainder = direct - allocations.reduce(function (sum, item) { return sum + item.amount; }, 0);
+    allocations.sort(function (a, b) { return b.fraction - a.fraction || a.key.localeCompare(b.key); });
+    for (var i = 0; i < remainder; i++) allocations[i].amount++;
+    allocations.forEach(function (item) { buckets.set(item.key, item.amount); });
+  });
+  byDate.forEach(function (buckets) {
+    buckets.forEach(function (amount, key) {
+      categories.get(key).total = (categories.get(key).total || 0) + amount;
+    });
+  });
+  var series = Array.from(byDate, function (item) {
+    return { date: item[0], buckets: item[1], total_tokens: Array.from(item[1].values()).reduce(function (sum, value) { return sum + value; }, 0) };
+  })
     .sort(function (a, b) { return a.date.localeCompare(b.date); });
   var peak = series.reduce(function (max, day) { return Math.max(max, day.total_tokens); }, 0);
   if (!series.length || peak <= 0) {
     node('p', 'No historical usage data available.', root).className = 'empty';
     return;
   }
+  var modelCategories = Array.from(categories.values()).filter(function (category) { return category.key !== unattributedKey && category.total > 0; })
+    .sort(function (a, b) { return a.label.localeCompare(b.label); });
+  modelCategories.forEach(function (category, index) {
+    category.color = 'hsl(' + Math.round((index * 137.508) % 360) + ' 72% 62%)';
+  });
+  var unattributed = categories.get(unattributedKey);
+  if (unattributed && unattributed.total > 0) unattributed.color = '#8491a3';
+  var stackOrder = unattributed && unattributed.total > 0 ? [unattributed].concat(modelCategories) : modelCategories;
   var width = Math.max(320, root.clientWidth || 900);
   var height = 150, padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
-  var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img' }, root);
-  svgEl('title', {}, svg).textContent = 'Daily token usage for the last ' + series.length + ' days';
+  var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Daily token usage stacked by model; NordRouter model shares estimated from OpenClaw, daily total from direct account' }, root);
+  svgEl('title', {}, svg).textContent = 'Daily token usage by model for the last ' + series.length + ' days';
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
     svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);
@@ -643,24 +697,37 @@ function renderHistory(payload) {
   var axisLabels = Math.min(6, Math.max(2, Math.floor(plotW / 90)));
   var labelEvery = Math.ceil(series.length / axisLabels);
   series.forEach(function (day, index) {
-    var ratio = day.total_tokens / peak;
-    var barH = Math.max(ratio > 0 ? 1.5 : 0, plotH * ratio);
     var x = padL + slot * index + (slot - barW) / 2;
-    var rect = svgEl('rect', {
-      x: x, y: padT + plotH - barH, width: barW, height: barH, rx: 1.5, fill: '#7aa2f7', opacity: 0.9,
-    }, svg);
-    svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + day.total_tokens.toLocaleString() + ' tokens';
+    var stacked = 0;
+    stackOrder.forEach(function (category) {
+      var amount = day.buckets.get(category.key) || 0;
+      if (amount <= 0) return;
+      var barH = plotH * amount / peak;
+      var rect = svgEl('rect', {
+        x: x, y: padT + plotH - stacked - barH, width: barW, height: barH,
+        fill: category.color,
+      }, svg);
+      svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + category.label + ' · ' +
+        amount.toLocaleString() + (category.nord ? ' allocated tokens' : ' tokens') +
+        ' (day total ' + day.total_tokens.toLocaleString() + ')';
+      stacked += barH;
+    });
     if (index === 0 || index === series.length - 1 || index % labelEvery === 0) {
       var xl = svgEl('text', { x: padL + slot * index + slot / 2, y: height - 6, fill: '#8a8a8a', 'font-size': 9, 'text-anchor': 'middle' }, svg);
       xl.textContent = dateOnly(day.date);
     }
   });
+  node('div', 'daily tokens · ' + series.length + ' days · peak ' + tokens(peak) + ' · total ' +
+    tokens(series.reduce(function (sum, day) { return sum + day.total_tokens; }, 0)) + ' tokens', root).className = 'chart-summary';
+  if (modelCategories.some(function (category) { return category.nord; })) {
+    node('div', 'NordRouter model shares estimated from OpenClaw; daily totals use direct account data.', root).className = 'chart-summary';
+  }
   var legend = node('div', undefined, root); legend.className = 'legend';
-  var item = node('span', undefined, legend);
-  node('span', undefined, item).className = 'swatch';
-  node('span', 'daily tokens · ' + series.length + ' days · peak ' + tokens(peak), item);
-  node('span', 'total ' + tokens(series.reduce(function (sum, day) { return sum + day.total_tokens; }, 0)) + ' tokens',
-    node('span', undefined, legend));
+  stackOrder.forEach(function (category) {
+    var item = node('span', undefined, legend); item.className = 'legend-item';
+    var swatch = node('span', undefined, item); swatch.className = 'swatch'; swatch.style.background = category.color;
+    node('span', category.label, item);
+  });
 }
 
 /* ---------- model table ---------- */
