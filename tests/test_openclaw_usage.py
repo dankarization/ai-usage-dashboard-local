@@ -56,11 +56,12 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
         def get(self, endpoint, **params):
             assert endpoint == 'analytics'
             return {'window_days': 7, 'totals': {'amount_usd': 0.4},
-                    'daily': [{'date': '2026-10-07', 'tokens': 20,
-                               'amount_usd': 0.4}],
+                    'daily': [{'date': f'2026-10-0{day}', 'tokens': 20 if day == 1 else 0,
+                               'amount_usd': 0.4 if day == 1 else 0} for day in range(1, 8)],
                     'top_models': [{'id': 'nr-model', 'tokens': 20,
                                     'amount_usd': 0.4}]}, False
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture-key')
+    monkeypatch.setattr('auto_usage.get_date_range', lambda days: ('2026-10-01', '2026-10-07', None, None))
     monkeypatch.setattr('auto_usage._nordrouter_usage.Client', DirectClient)
     result = build_model_breakdown(days=7)
     assert [(r['source'], r['provider'], r['totals']['total']) for r in result['models']] == [
@@ -71,4 +72,15 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     assert result['sources']['openclaw']['estimated_cost_usd'] == 0.2
     assert result['sources']['openclaw']['unpriced_models'] == 1
     assert result['sources']['nordrouter']['billed_cost_usd'] == 0.4
+    assert result['sources']['nordrouter']['complete'] is True
     assert result['sources']['openclaw_nordrouter_comparison_tokens'] == 21
+
+    class PartialClient(DirectClient):
+        def get(self, endpoint, **params):
+            data, stale = super().get(endpoint, **params)
+            return {**data, 'daily': data['daily'][:-1]}, stale
+
+    monkeypatch.setattr('auto_usage._nordrouter_usage.Client', PartialClient)
+    partial = build_model_breakdown(days=7)
+    assert partial['sources']['nordrouter']['complete'] is False
+    assert partial['totals']['total'] is None

@@ -2757,6 +2757,8 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
         return sum(t.get(field) or 0 for t in detailed)
     total_input, total_output = amount('input'), amount('output')
     cache_read = amount('cache_read')
+    expected_dates = {d.isoformat() for d in list_dates_in_range(start_str, end_str)}
+    nr_complete = nr_window_days == days and {row['date'] for row in nr_daily} == expected_dates
     return {
         'meta': {
             'generated_at': datetime.now(ZoneInfo('America/Los_Angeles')).replace(tzinfo=None).isoformat(timespec='seconds'),
@@ -2769,7 +2771,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
             'cache_write': amount('cache_write'),
             # Direct daily account buckets, not per-model top-list totals.
             'total': (sum(m['totals']['total'] for m in canonical_openclaw) +
-                      sum(day['tokens'] for day in nr_daily)) if gateway_status != 'unavailable' and nr_daily else None,
+                      sum(day['tokens'] for day in nr_daily)) if gateway_status != 'unavailable' and nr_complete else None,
             'input_output_ratio': round(total_input / total_output, 2) if total_output else None,
             'cache_hit_rate': round(cache_read / (total_input + cache_read), 4) if total_input + cache_read else None,
         },
@@ -2783,7 +2785,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
                          'complete': gateway_status != 'unavailable'},
             'nordrouter': {'tokens': sum(day['tokens'] for day in nr_daily) if nr_daily else None,
                            'billed_cost_usd': nr_window_cost if nr_window_days == days else None,
-                           'window_days': nr_window_days, 'complete': bool(nr_daily) and nr_window_days == days},
+                           'window_days': nr_window_days, 'complete': nr_complete},
             'openclaw_nordrouter_comparison_tokens': sum(m['totals']['total'] for m in models
                 if m['source'] == 'openclaw' and m['provider'].lower() == 'nordrouter'),
         },

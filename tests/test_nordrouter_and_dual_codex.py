@@ -278,4 +278,7 @@ def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypa
     assert entry['totals']['total'] == 123
     assert entry['cost_usd'] == 2
     assert entry['daily'] == []
-    assert result['totals']['total'] == 123
+    # Fixture has a 30d window for a 7d request and no complete 7d daily
+    # coverage; a model aggregate cannot stand in for canonical account total.
+    assert result['totals']['total'] is None
+    assert result['sources']['nordrouter']['complete'] is False
