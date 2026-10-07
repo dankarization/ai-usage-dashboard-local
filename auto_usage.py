@@ -2743,7 +2743,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
                 tokens = int(model['tokens'])
                 models.append({
                     'source': 'nordrouter', 'provider': 'nordrouter',
-                    'account': 'unknown', 'model': model['id'],
+                    'model': model['id'],
                     'totals': {'total': tokens}, 'daily': [],
                     'cost_usd': float(model['amount_usd']),
                 })

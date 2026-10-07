@@ -248,7 +248,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">Selected 30d · NordRouter-route rows excluded from Overview and history totals to avoid double-counting · account unknown means unverified</p></div>
+    <div class="sec-head"><h2 id="h-models">OpenClaw model usage</h2><p class="note" id="models-note">Selected 30d · NordRouter-route rows excluded from Overview and history totals to avoid double-counting</p></div>
     <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
@@ -720,7 +720,6 @@ function renderModels(data) {
     node('span', row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
     node('span', row.model || '—', modelCell);
-    if (row.account) node('div', 'account: ' + row.account, modelCell).className = 'src';
     if (row.daily && row.daily.length) {
       var detail = node('details', undefined, modelCell);
       node('summary', row.daily.length + ' daily rows', detail);
@@ -789,7 +788,7 @@ function renderPeriod(models, quotas) {
   renderModels(models);
   $('history-note').textContent = 'Selected ' + selectedDays + 'd · OpenClaw non-NordRouter + direct NordRouter daily tokens';
   $('models-note').textContent = 'Selected ' + selectedDays +
-    'd · NordRouter-route rows excluded from Overview and history totals to avoid double-counting · account unknown means unverified';
+    'd · NordRouter-route rows excluded from Overview and history totals to avoid double-counting';
 }
 function reload(force, nextDays) {
   if (busy) return;

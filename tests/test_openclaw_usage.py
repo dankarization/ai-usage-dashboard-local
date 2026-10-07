@@ -8,7 +8,7 @@ import openclaw_usage
 from auto_usage import build_model_breakdown
 
 
-def test_openclaw_model_projection_includes_comparison_route_with_unknown_account():
+def test_openclaw_model_projection_includes_comparison_route_without_account():
     response = {'aggregates': {
         'byModel': [
             {'provider': 'openai', 'model': 'gpt-test', 'totals': {
@@ -27,7 +27,7 @@ def test_openclaw_model_projection_includes_comparison_route_with_unknown_accoun
     assert len(rows) == 2
     assert rows[0]['source'] == 'openclaw'
     assert rows[0]['provider'] == 'openai'
-    assert rows[0]['account'] == 'unknown'
+    assert all('account' not in row for row in rows)
     assert rows[0]['totals'] == {'input': 4, 'output': 3, 'cache_read': 2,
                                   'cache_write': 1, 'total': 10}
     assert rows[0]['daily'][0]['input'] is None
@@ -67,6 +67,7 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     assert [(r['source'], r['provider'], r['totals']['total']) for r in result['models']] == [
         ('openclaw', 'nordrouter', 21), ('nordrouter', 'nordrouter', 20),
         ('openclaw', 'xai', 10), ('openclaw', 'local', 2)]
+    assert all('account' not in row for row in result['models'])
     assert result['source_daily']['nordrouter'][0]['tokens'] == 20
     assert result['totals']['total'] == 32
     assert result['sources']['openclaw']['estimated_cost_usd'] == 0.2

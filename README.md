@@ -161,9 +161,9 @@ Gateway's `byModel` rollup supplies token-type window totals, while its
 `modelDaily` rows supply day × provider × model **total** tokens only; daily
 input/output/cache fields are therefore `null`. NordRouter model totals cover
 the window, and `source_daily.nordrouter` holds account-wide daily totals, not
-invented per-model daily splits. `provider` is the reported route; `account`
-stays `unknown` because the Gateway aggregate does not identify the provider
-account (including which Codex login). Source status is in `meta`; `sources`
+invented per-model daily splits. `provider` is the reported route; model rows
+omit account identity because the Gateway aggregate does not identify provider
+accounts (including which Codex login). Source status is in `meta`; `sources`
 gives direct NordRouter daily-bucket tokens and billed window cost alongside
 non-NordRouter Gateway tokens and modeled cost. The OpenClaw cost sums only
 priced models and explicitly labels the estimate partial when models lack

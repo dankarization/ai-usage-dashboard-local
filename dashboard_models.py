@@ -189,7 +189,6 @@ class ModelBreakdownEntry(BaseModel):
 
     source: str = Field(description='Data source: openclaw or direct nordrouter. OpenClaw NordRouter-route rows are comparison-only and excluded from totals.')
     provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')
-    account: Optional[str] = Field(default=None, description='Provider account identity when verified; unknown for Gateway aggregate usage.')
     model: str = Field(description='Model identifier reported by the source; names alone do not prove account identity.')
     totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window.')
     daily: list[ModelDailyEntry] = Field(default_factory=list, description='Per-day token entries for this model, ordered by date. Empty when ?daily=false is passed.')

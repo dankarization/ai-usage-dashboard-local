@@ -50,8 +50,8 @@ def _tokens(row: dict) -> dict:
 def model_entries(response: dict, *, include_daily: bool) -> list[dict]:
     """Project provider/model identity, including comparison-only NordRouter rows.
 
-    Model names alone do not prove a route or a provider account. Unknown
-    account is explicit even for Codex, whose Gateway rollup has no account ID.
+    Model names alone do not prove a route; use the reported provider field.
+    Gateway aggregates do not identify provider accounts.
     """
     aggregate = response['aggregates']
     days: dict[tuple[str, str], list[dict]] = {}
@@ -81,7 +81,7 @@ def model_entries(response: dict, *, include_daily: bool) -> list[dict]:
             modeled_cost = None
         entries.append({
             'source': 'openclaw', 'provider': provider, 'model': model,
-            'account': 'unknown', 'totals': totals,
+            'totals': totals,
             'daily': daily if include_daily else [],
             # Gateway cost is a model-price estimate, not a provider invoice.
             'cost_usd': modeled_cost,

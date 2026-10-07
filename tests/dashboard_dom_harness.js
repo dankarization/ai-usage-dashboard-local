@@ -351,7 +351,7 @@ selectedDays = 30;
 
 /* ---------------- OpenClaw table sorting ---------------- */
 const SORT_MODELS = { ...MODELS, models: [
-  { source: 'openclaw', provider: 'xai', model: 'Alpha', cost_usd: 1,
+  { source: 'openclaw', provider: 'xai', model: 'Alpha', account: 'unknown', cost_usd: 1,
     totals: { total: 10, input: 8, output: 1, cache_read: 1, cache_write: 0 }, daily: [] },
   { source: 'openclaw', provider: 'anthropic', model: 'Zulu', cost_usd: 3,
     totals: { total: 30, input: 4, output: 20, cache_read: 5, cache_write: 1 }, daily: [] },
@@ -365,6 +365,7 @@ assert(['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'tota
   'every OpenClaw model table header must be clickable');
 renderModels(SORT_MODELS);
 assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'base order is total tokens descending, not cost');
+assert(!registry.get('models').textContent.includes('account:'), 'model table must ignore a legacy invented account');
 assertEqual(registry.get('model-sort-head-total').getAttribute('aria-sort'), 'descending', 'default total header state');
 sortClick('source');
 assertEqual(modelOrder(), 'Alpha,Beta,Zulu', 'route descending uses displayed route name');

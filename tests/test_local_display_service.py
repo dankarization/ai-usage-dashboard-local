@@ -472,8 +472,12 @@ def test_model_breakdown_returns_per_model_shape(monkeypatch):
     assert body["totals"]["input_output_ratio"] == 2.0
     assert len(body["models"]) == 1
     assert body["models"][0]["model"] == "gpt-5.6-sol"
+    assert "account" not in body["models"][0]
     assert body["models"][0]["totals"]["input"] == 100000
     assert len(body["models"][0]["daily"]) == 1
+
+    schema = TestClient(local_display_service.app).get("/openapi.json").json()
+    assert "account" not in schema["components"]["schemas"]["ModelBreakdownEntry"]["properties"]
 
 
 def test_model_breakdown_daily_false_omits_daily_entries(monkeypatch):
