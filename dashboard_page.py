@@ -91,7 +91,7 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
 .strip-item .v.unknown{color:var(--faint);font-weight:500}
 .strip-item .s{color:var(--faint);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
 .pillrow{display:flex;gap:6px;flex-wrap:wrap;padding:9px var(--s4);border-top:1px solid var(--line);width:100%}
-.pill{font-size:11px;color:var(--muted);border:1px solid var(--line);background:var(--raised);border-radius:var(--pill);padding:2px 8px;font-variant-numeric:tabular-nums}
+.pill{font-size:11px;color:var(--muted);border:1px solid var(--line);background:var(--raised);border-radius:var(--pill);padding:2px 8px;font-variant-numeric:tabular-nums;max-width:100%;overflow-wrap:anywhere}
 
 /* ---------- unified limit rows ---------- */
 .limit-group{padding:10px 0;border-top:1px solid var(--line-soft)}
@@ -150,6 +150,10 @@ th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04
 tbody tr:last-child td{border-bottom:0}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .src{font-family:var(--font-code);font-size:11px;color:var(--faint)}
+.sort-btn{appearance:none;border:0;background:none;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;padding:2px 0;cursor:pointer;white-space:nowrap}
+.sort-btn:hover{color:var(--text)}
+.sort-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.sort-mark{display:inline-block;min-width:12px;margin-left:3px;color:var(--accent)}
 .bar-mini{height:3px;border-radius:var(--pill);background:#171717;overflow:hidden;margin-top:4px;max-width:180px;border:1px solid var(--line-soft)}
 .bar-mini i{display:block;height:100%;background:var(--accent)}
 
@@ -169,6 +173,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   .strip-item{flex:1 1 44%;padding:9px var(--s3);border-top:1px solid var(--line)}
   .strip-item:nth-child(-n+2){border-top:0}
   .strip-item:nth-child(odd){border-left:0}
+  .strip-item .k{white-space:normal}
   .strip-item .v{font-size:16px}
   .panel{padding:var(--s2) var(--s3)}
   .panel.flat{padding:2px var(--s3)}
@@ -247,8 +252,17 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="panel">
       <p id="model-stamp" class="note"></p>
       <div class="scroll">
-        <table>
-          <thead><tr><th>Source / route</th><th>Model / day</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num">Total</th><th class="num">USD</th></tr></thead>
+        <table id="model-table">
+          <thead><tr>
+            <th id="model-sort-head-source"><button id="model-sort-source" class="sort-btn" type="button">Source / route<span id="model-sort-mark-source" class="sort-mark" aria-hidden="true">↕</span></button></th>
+            <th id="model-sort-head-model"><button id="model-sort-model" class="sort-btn" type="button">Model / day<span id="model-sort-mark-model" class="sort-mark" aria-hidden="true">↕</span></button></th>
+            <th id="model-sort-head-input" class="num"><button id="model-sort-input" class="sort-btn" type="button">Input<span id="model-sort-mark-input" class="sort-mark" aria-hidden="true">↕</span></button></th>
+            <th id="model-sort-head-output" class="num"><button id="model-sort-output" class="sort-btn" type="button">Output<span id="model-sort-mark-output" class="sort-mark" aria-hidden="true">↕</span></button></th>
+            <th id="model-sort-head-cache_read" class="num"><button id="model-sort-cache_read" class="sort-btn" type="button">Cache read<span id="model-sort-mark-cache_read" class="sort-mark" aria-hidden="true">↕</span></button></th>
+            <th id="model-sort-head-cache_write" class="num"><button id="model-sort-cache_write" class="sort-btn" type="button">Cache write<span id="model-sort-mark-cache_write" class="sort-mark" aria-hidden="true">↕</span></button></th>
+            <th id="model-sort-head-total" class="num" aria-sort="descending"><button id="model-sort-total" class="sort-btn" type="button">Total<span id="model-sort-mark-total" class="sort-mark" aria-hidden="true">↓</span></button></th>
+            <th id="model-sort-head-usd" class="num"><button id="model-sort-usd" class="sort-btn" type="button">USD<span id="model-sort-mark-usd" class="sort-mark" aria-hidden="true">↕</span></button></th>
+          </tr></thead>
           <tbody id="models"></tbody>
         </table>
       </div>
@@ -568,8 +582,7 @@ function renderHero(payload) {
   root.replaceChildren();
   var full = direct.complete && gateway.complete;
   stripItem(root, 'Total tokens · ' + selectedDays + 'd', full ? tokens(payload.totals.total) : '—',
-    full ? 'direct NordRouter ' + tokens(direct.tokens) + ' + other OpenClaw ' + tokens(gateway.tokens)
-      : 'incomplete source · total unavailable', !full);
+    full ? null : 'incomplete source · total unavailable', !full);
   stripItem(root, 'NordRouter billed cost · ' + selectedDays + 'd', usd(direct.billed_cost_usd),
     'actual direct account window', !number(direct.billed_cost_usd));
   stripItem(root, 'OpenClaw estimated cost · ' + selectedDays + 'd', usd(gateway.estimated_cost_usd),
@@ -577,6 +590,11 @@ function renderHero(payload) {
     ' · excludes NordRouter route', !number(gateway.estimated_cost_usd));
   stripItem(root, 'OpenClaw NordRouter comparison · ' + selectedDays + 'd',
     tokens(sources.openclaw_nordrouter_comparison_tokens), 'excluded from canonical total and cost', false);
+  if (full) {
+    var pills = node('div', undefined, root); pills.className = 'pillrow';
+    node('span', 'direct NordRouter ' + tokens(direct.tokens), pills).className = 'pill';
+    node('span', 'other OpenClaw ' + tokens(gateway.tokens), pills).className = 'pill';
+  }
   $('overview-note').textContent = 'Selected ' + selectedDays + 'd · canonical direct NordRouter + non-NordRouter OpenClaw';
 }
 
@@ -647,7 +665,37 @@ function renderHistory(payload) {
 }
 
 /* ---------- model table ---------- */
+var modelSortColumns = ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'];
+var modelSort = { key: 'total', direction: 'default' };
+var lastModelsData = null;
+function modelSortValue(row, key) {
+  if (key === 'source') return row.source && row.provider ? row.source + ' / ' + row.provider : null;
+  if (key === 'model') return row.model || null;
+  var value = key === 'usd' ? row.cost_usd : row.totals && row.totals[key];
+  return number(value) ? value : null;
+}
+function sortedModels(rows) {
+  var key = modelSort.direction === 'default' ? 'total' : modelSort.key;
+  var direction = modelSort.direction === 'ascending' ? 1 : -1;
+  return rows.map(function (row, index) { return { row: row, index: index }; }).sort(function (a, b) {
+    var av = modelSortValue(a.row, key), bv = modelSortValue(b.row, key);
+    if (av === null || bv === null) return av === null && bv === null ? a.index - b.index : av === null ? 1 : -1;
+    var comparison = typeof av === 'string' ? av.localeCompare(bv, undefined, { sensitivity: 'base' }) : av - bv;
+    return comparison ? comparison * direction : a.index - b.index;
+  }).map(function (item) { return item.row; });
+}
+function syncModelSortHeaders() {
+  var active = modelSort.direction === 'default' ? 'total' : modelSort.key;
+  modelSortColumns.forEach(function (key) {
+    var direction = key === active ? (modelSort.direction === 'ascending' ? 'ascending' : 'descending') : 'none';
+    $('model-sort-head-' + key).setAttribute('aria-sort', direction);
+    $('model-sort-mark-' + key).textContent = direction === 'none' ? '↕' : direction === 'ascending' ? '↑' : '↓';
+    $('model-sort-' + key).title = key === modelSort.key && modelSort.direction === 'descending' ? 'Sort ascending'
+      : key === modelSort.key && modelSort.direction === 'ascending' ? 'Reset to total tokens descending' : 'Sort descending';
+  });
+}
 function renderModels(data) {
+  lastModelsData = data;
   var meta = data.meta || {};
   $('model-stamp').textContent = 'snapshot ' +
     (meta.generated_at_utc ? time(meta.generated_at_utc) : serverTime(meta.generated_at) + ' (server time)') +
@@ -655,10 +703,7 @@ function renderModels(data) {
     ' · OpenClaw ' + (meta.openclaw_status || 'unknown') + ' · NordRouter ' + (meta.nordrouter_status || 'unknown');
   var body = $('models');
   body.replaceChildren();
-  var models = (data.models || []).filter(function (row) { return row.source === 'openclaw'; }).sort(function (a, b) {
-    return (b.cost_usd === null || b.cost_usd === undefined ? -1 : b.cost_usd) -
-           (a.cost_usd === null || a.cost_usd === undefined ? -1 : a.cost_usd);
-  });
+  var models = sortedModels((data.models || []).filter(function (row) { return row.source === 'openclaw'; }));
   if (!models.length) {
     var emptyRow = node('tr', undefined, body);
     var emptyCell = node('td', 'No model data available.', emptyRow);
@@ -780,6 +825,16 @@ function reload(force, nextDays) {
 }
 
 $('refresh').addEventListener('click', function () { reload(true); });
+modelSortColumns.forEach(function (key) {
+  $('model-sort-' + key).addEventListener('click', function () {
+    modelSort = key !== modelSort.key || modelSort.direction === 'default' ? { key: key, direction: 'descending' }
+      : modelSort.direction === 'descending' ? { key: key, direction: 'ascending' }
+      : { key: 'total', direction: 'default' };
+    syncModelSortHeaders();
+    if (lastModelsData) renderModels(lastModelsData);
+  });
+});
+syncModelSortHeaders();
 ['30', '7'].forEach(function (days) {
   $('period-' + days).addEventListener('click', function () {
     if (Number(days) !== selectedDays) reload(false, Number(days));

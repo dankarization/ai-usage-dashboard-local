@@ -73,6 +73,11 @@ const registry = new Map();
  'period-30', 'period-7', 'overview-note', 'history-note', 'models-note', 'costs-note', 'cost-models'].forEach((id) => {
   registry.set(id, new Element('div'));
 });
+['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
+  ['model-sort-', 'model-sort-head-', 'model-sort-mark-'].forEach((prefix) => {
+    registry.set(prefix + key, new Element(prefix === 'model-sort-head-' ? 'th' : 'span'));
+  });
+});
 
 global.document = {
   getElementById: (id) => registry.get(id) || null,
@@ -296,6 +301,10 @@ assert(registry.get('today').textContent.includes('z-ai/glm-5.3'), 'top models t
 renderPeriod(MODELS, QUOTAS);
 let heroText = registry.get('hero').textContent;
 assert(heroText.includes('Total tokens · 30d') && heroText.includes('30'), 'default overview uses canonical 30d total');
+let heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
+assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 20,other OpenClaw 10',
+  '30d overview shows separate source chips with their canonical values');
+assert(heroPills.every((e) => e.className === 'pill'), 'source chips keep the pill visual hook');
 assert(heroText.includes('NordRouter billed cost · 30d') && heroText.includes('$0.4000'), 'direct billed cost shown');
 assert(heroText.includes('OpenClaw estimated cost · 30d') && heroText.includes('$0.2000'), 'estimate shown separately');
 assert(heroText.includes('comparison') && heroText.includes('21'), 'comparison duplicate shown but excluded');
@@ -321,6 +330,9 @@ renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 
     { source: 'openclaw', provider: 'nordrouter', model: 'nr-7d', cost_usd: 0.2, totals: { total: 7 }, daily: [{ date: '2026-10-03', total: 7 }] },
   ], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } }, QUOTAS);
 assert(registry.get('hero').textContent.includes('Total tokens · 7d') && registry.get('hero').textContent.includes('9'), '7d overview');
+heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
+assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,other OpenClaw 5',
+  '7d overview updates both source chips');
 assert(registry.get('cost-models').textContent.includes('direct-7d'), '7d direct cost table');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
 assert(chart.textContent.includes('total 9 tokens'), '7d history');
@@ -330,7 +342,46 @@ assert(registry.get('history-note').textContent.includes('7d') && registry.get('
   'period labels follow selection');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
+assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,
+  'incomplete overview must not show numeric source chips');
 selectedDays = 30;
+
+/* ---------------- OpenClaw table sorting ---------------- */
+const SORT_MODELS = { ...MODELS, models: [
+  { source: 'openclaw', provider: 'xai', model: 'Alpha', cost_usd: 1,
+    totals: { total: 10, input: 8, output: 1, cache_read: 1, cache_write: 0 }, daily: [] },
+  { source: 'openclaw', provider: 'anthropic', model: 'Zulu', cost_usd: 3,
+    totals: { total: 30, input: 4, output: 20, cache_read: 5, cache_write: 1 }, daily: [] },
+  { source: 'openclaw', provider: 'xai', model: 'Beta', cost_usd: null,
+    totals: { total: 20, input: 12, output: 3, cache_read: 4, cache_write: 1 }, daily: [] },
+] };
+const modelOrder = () => registry.get('models').children.map((row) => row.children[1].textContent).join(',');
+const sortClick = (key) => registry.get('model-sort-' + key).listeners.click[0]();
+assert(['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd']
+  .every((key) => registry.get('model-sort-' + key).listeners.click.length === 1),
+  'every OpenClaw model table header must be clickable');
+renderModels(SORT_MODELS);
+assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'base order is total tokens descending, not cost');
+assertEqual(registry.get('model-sort-head-total').getAttribute('aria-sort'), 'descending', 'default total header state');
+sortClick('input');
+assertEqual(modelOrder(), 'Beta,Alpha,Zulu', 'numeric input descending');
+assertEqual(registry.get('model-sort-head-input').getAttribute('aria-sort'), 'descending', 'input sort announced');
+sortClick('input');
+assertEqual(modelOrder(), 'Zulu,Alpha,Beta', 'second click sorts ascending');
+assertEqual(registry.get('model-sort-head-input').getAttribute('aria-sort'), 'ascending', 'ascending announced');
+sortClick('input');
+assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'third click resets to total descending');
+assertEqual(registry.get('model-sort-head-total').getAttribute('aria-sort'), 'descending', 'reset state announced');
+sortClick('model');
+assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'text model desc uses lexical order');
+sortClick('usd');
+assertEqual(modelOrder(), 'Zulu,Alpha,Beta', 'different column starts descending and missing cost stays last');
+sortClick('usd');
+assertEqual(modelOrder(), 'Alpha,Zulu,Beta', 'missing cost stays last when ascending');
+sortClick('usd');
+assertEqual(modelOrder(), 'Zulu,Beta,Alpha', 'cost third click resets to total descending');
+assert(registry.get('models').textContent.includes('Zulu') && registry.get('models').textContent.includes('Beta'),
+  'sorting preserves row details');
 
 /* ---------------- snapshot time ---------------- */
 // The header must use the offset-aware field and render it in local time with
