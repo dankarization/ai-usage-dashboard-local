@@ -117,6 +117,12 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
 .fill{height:100%;border-radius:var(--pill);transition:width 400ms ease}
 .fill.ok{background:var(--green)} .fill.warn{background:var(--amber)} .fill.danger{background:var(--red)}
 .fill.unknown{background:repeating-linear-gradient(135deg,#3a3a3a 0 4px,#2c2c2c 4px 8px)}
+.track.product-track{height:8px}
+.fill.segmented{display:flex;overflow:hidden;background:none}
+.product-segment{height:100%;flex:none}
+.product-legend{grid-column:2/4;display:flex;flex-wrap:wrap;gap:3px 12px;min-width:0}
+.product-legend-item{display:inline-flex;align-items:baseline;gap:5px;min-width:0;color:var(--faint);font-size:11px;overflow-wrap:anywhere}
+.product-swatch{width:9px;height:9px;border-radius:2px;flex:none;align-self:center}
 .win-val{font-size:12px;font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap}
 .win-val .rem{color:var(--faint);font-size:11px}
 .win-reset{grid-column:2/4;min-width:0;overflow-wrap:anywhere;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
@@ -187,6 +193,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   .panel.flat{padding:2px var(--s3)}
   .win{grid-template-columns:1fr;gap:2px;padding:5px 0}
   .win-reset{grid-column:1}
+  .product-legend{grid-column:1}
   .win-val{order:2}
   svg.chart{height:260px}
   .btn{padding:8px 12px}
@@ -375,6 +382,29 @@ function brandMark(provider) {
 /* Bar colour follows remaining capacity: green when comfortable, amber as the
    window fills, red as it approaches exhaustion. */
 function severity(used) { return used >= 80 ? 'danger' : (used >= 50 ? 'warn' : 'ok'); }
+function grokProducts(window) {
+  var products = window.product_usage;
+  var total = window.used_percentage;
+  if (!Array.isArray(products) || !products.length || !number(total) || total < 0 || total > 100) return null;
+  var sum = 0;
+  for (var i = 0; i < products.length; i++) {
+    if (!products[i] || !number(products[i].usage_percent) || products[i].usage_percent < 0) return null;
+    sum += products[i].usage_percent;
+  }
+  // The breakdown must account for the same shared pool. Do not stretch or
+  // clip product percentages when a snapshot is incomplete or inconsistent.
+  return Math.abs(sum - total) < 0.001 ? products : null;
+}
+function productColor(level, index) {
+  var family = level === 'danger' ? [0, 12] : (level === 'warn' ? [22, 27] : [135, 32]);
+  var hue = family[0] + (index * 17 % family[1]);
+  return 'hsl(' + hue + ' ' + (62 + index * 11 % 19) + '% ' + (43 + index * 13 % 24) + '%)';
+}
+function productLabel(item) {
+  if (typeof item.label === 'string' && item.label.trim()) return item.label.trim();
+  return item.product === null || item.product === undefined ? 'Unknown product' :
+    'Product ' + item.product + ' (unknown)';
+}
 function statusClass(status) {
   var key = String(status || 'unknown').toLowerCase();
   if (key === 'ok') return 'ok';
@@ -410,9 +440,25 @@ function windowRow(container, window) {
     track.setAttribute('aria-valuemax', '100');
     track.setAttribute('aria-valuenow', String(Math.round(window.used_percentage)));
     track.setAttribute('aria-label', label + ' used');
+    var level = severity(window.used_percentage);
+    var products = window.provider === 'grok' ? grokProducts(window) : null;
     var fill = node('div', undefined, track);
-    fill.className = 'fill ' + severity(window.used_percentage);
+    fill.className = 'fill ' + level + (products ? ' segmented' : '');
     fill.style.width = Math.max(0, Math.min(100, window.used_percentage)) + '%';
+    if (products) {
+      track.className += ' product-track';
+      products.forEach(function (item, index) {
+        if (item.usage_percent <= 0) return;
+        var segment = node('span', undefined, fill);
+        segment.className = 'product-segment';
+        segment.style.width = item.usage_percent / window.used_percentage * 100 + '%';
+        segment.style.backgroundColor = productColor(level, index);
+        segment.setAttribute('aria-hidden', 'true');
+      });
+      track.setAttribute('aria-valuetext', window.used_percentage + '% used: ' + products.map(function (item) {
+        return productLabel(item) + ' ' + item.usage_percent + '%';
+      }).join(', '));
+    }
 
     var val = node('span', undefined, row); val.className = 'win-val';
     node('span', window.used_percentage + '% used', val);
@@ -428,11 +474,15 @@ function windowRow(container, window) {
       var when = countdown(resetMs);
       node('span', 'resets ' + time(resetMs || resetIso) + (when ? ' (' + when + ')' : ''), row).className = 'win-reset';
     }
-    if (window.provider === 'grok' && Array.isArray(window.product_usage) && window.product_usage.length) {
-      var productText = window.product_usage.map(function (item) {
-        return (item.label || ('Product ' + item.product + ' (unknown)')) + ': ' + item.usage_percent.toFixed(1) + '%';
-      }).join(' · ');
-      node('span', productText + ' of shared credits (not tokens or separate limits)', row).className = 'win-reset';
+    if (products) {
+      var legend = node('div', undefined, row); legend.className = 'product-legend';
+      products.forEach(function (item, index) {
+        var entry = node('span', undefined, legend); entry.className = 'product-legend-item';
+        var swatch = node('span', undefined, entry); swatch.className = 'product-swatch';
+        swatch.style.backgroundColor = productColor(level, index);
+        swatch.setAttribute('aria-hidden', 'true');
+        node('span', productLabel(item) + ': ' + item.usage_percent + '%', entry);
+      });
     }
   } else {
     var emptyTrack = node('div', undefined, row); emptyTrack.className = 'track';

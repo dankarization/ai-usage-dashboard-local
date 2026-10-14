@@ -259,8 +259,9 @@ const grokFill = all(grokBars[0]).find((e) => e.classList.contains('fill'));
 assert(grokFill.classList.contains('danger'), 'Grok at 100% must be colour-coded danger');
 assertEqual(grokFill.style.width, '100%', 'Grok fill width');
 assert(grokCard.textContent.includes('100% used'), 'Grok must show 100% used');
-assert(grokCard.textContent.includes('Grok Build: 100.0%'), 'Grok must show the verified product name and percentage');
-assert(grokCard.textContent.includes('not tokens or separate limits'), 'product percentage must not be represented as tokens or a separate limit');
+assert(grokCard.textContent.includes('Grok Build: 100%'), 'Grok must show the verified product name and percentage');
+assert(!grokCard.textContent.includes('of shared credits (not tokens or separate limits)'),
+  'the unwanted product suffix must not be displayed');
 assert(grokCard.textContent.includes('0% left'), 'Grok must show 0% left');
 // The live Grok row carries a real percentage but no explicit status field;
 // it must read as Active, not as Unknown.
@@ -286,6 +287,69 @@ assert(grokWindows[1].textContent.includes('resets ' + time(1791537783029)),
   'Grok Bot reset must remain on its row');
 assert(!grokWindows[0].textContent.includes(time(1791537783029)),
   'weekly Grok row must not inherit the Bot reset');
+
+function renderedGrok(total, products) {
+  const root = new Element('div');
+  windowRow(root, { provider: 'grok', label: 'Weekly', used_percentage: total,
+    remaining_percentage: 100 - total, product_usage: products });
+  const bar = withRole(root, 'progressbar')[0];
+  const fill = all(bar).find((e) => e.classList.contains('fill'));
+  return { root, bar, fill, segments: all(fill).filter((e) => e.classList.contains('product-segment')),
+    entries: all(root).filter((e) => e.classList.contains('product-legend-item')) };
+}
+const liveGrok = renderedGrok(3, [
+  { product: 2, label: 'Grok Build', usage_percent: 2 },
+  { product: 4, label: 'Grok Chat', usage_percent: 1 },
+]);
+assertEqual(liveGrok.fill.style.width, '3%', 'live weekly pool uses only 3% of the whole track');
+assertEqual(liveGrok.bar.getAttribute('aria-valuenow'), '3', 'weekly bar reports shared total');
+assertEqual(liveGrok.segments.length, 2, 'live pool has two product segments');
+assertEqual(liveGrok.segments.map((s) => s.style.width).join(','),
+  '66.66666666666666%,33.33333333333333%', '2:1 split is inside the 3% fill');
+assertEqual(liveGrok.entries.map((e) => e.textContent).join(','),
+  'Grok Build: 2%,Grok Chat: 1%', 'legend retains API product names and percentages');
+assertEqual(liveGrok.entries.map((e) => e.children[0].style.backgroundColor).join(','),
+  liveGrok.segments.map((s) => s.style.backgroundColor).join(','),
+  'legend swatches match the bar segment colors');
+assert(liveGrok.segments[0].style.backgroundColor !== liveGrok.segments[1].style.backgroundColor,
+  'products are visually distinguishable');
+assert(!liveGrok.root.textContent.includes('shared credits'), 'unwanted suffix is absent');
+
+for (const [total, level] of [[3, 'ok'], [60, 'warn'], [90, 'danger']]) {
+  const amounts = Array.from({ length: 12 }, () => total / 12);
+  const many = renderedGrok(total, amounts.map((amount, index) =>
+    ({ product: index, label: 'Product ' + index, usage_percent: amount })));
+  assertEqual(many.fill.style.width, total + '%', level + ' total width');
+  assert(many.fill.classList.contains(level), level + ' follows overall severity');
+  assertEqual(many.segments.length, 12, level + ' renders every product');
+  assertEqual(many.entries.length, 12, level + ' legend covers every product');
+  assertEqual(new Set(many.segments.map((s) => s.style.backgroundColor)).size, 12,
+    level + ' products use distinct shades in the same severity family');
+  assert(many.segments.every((s) => s.style.backgroundColor ===
+    many.entries[many.segments.indexOf(s)].children[0].style.backgroundColor),
+  level + ' swatches match the segments');
+}
+const tiny = renderedGrok(0.2, [
+  { product: 2, label: '', usage_percent: 0.1 },
+  { product: null, usage_percent: 0 },
+  { product: 4, label: 'Chat', usage_percent: 0.1 },
+]);
+assertEqual(tiny.fill.style.width, '0.2%', 'tiny total remains tiny');
+assertEqual(tiny.segments.length, 2, 'zero product has no visible width');
+assertEqual(tiny.entries.length, 3, 'zero and unknown labels remain in the legend');
+assert(tiny.root.textContent.includes('Product 2 (unknown): 0.1%') &&
+  tiny.root.textContent.includes('Unknown product: 0%'), 'unknown labels are honest');
+const zero = renderedGrok(0, [{ product: 2, label: 'Build', usage_percent: 0 }]);
+assertEqual(zero.fill.style.width, '0%', 'real zero is not unavailable');
+assertEqual(zero.segments.length, 0, 'real zero creates no visible segment');
+assertEqual(zero.entries.length, 1, 'real zero retains its product label');
+for (const breakdown of [null, [], [{ product: 2, usage_percent: 2 }],
+  [{ product: 2, usage_percent: 4 }], [{ product: 2, usage_percent: NaN }]]) {
+  const fallback = renderedGrok(3, breakdown);
+  assertEqual(fallback.fill.style.width, '3%', 'invalid breakdown keeps only the reported total');
+  assertEqual(fallback.segments.length, 0, 'invalid breakdown must not fabricate segments');
+  assertEqual(fallback.entries.length, 0, 'invalid breakdown must not show a misleading legend');
+}
 assertEqual(effectiveStatus({ windows: [{ used_percentage: 42 }] }), 'ok',
   'effectiveStatus falls back to ok when a percentage exists');
 assertEqual(effectiveStatus({ windows: [{ used_percentage: null }] }), 'unknown',
