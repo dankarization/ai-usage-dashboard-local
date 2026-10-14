@@ -1,5 +1,7 @@
 """Network-free provider and account-isolation regression coverage."""
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -293,3 +295,121 @@ def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypa
     assert mismatched['models'] == []
     assert mismatched['totals']['total'] is None
     assert mismatched['sources']['nordrouter']['complete'] is False
+
+
+def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(monkeypatch):
+    import openclaw_usage
+
+    monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
+    start, end, _, _ = usage.get_date_range(1)
+    assert start == end == datetime.now().date().isoformat()
+    requested = []
+
+    def gateway(first, last):
+        requested.append(('gateway', first, last))
+        return {'aggregates': {'byModel': [
+            {'provider': 'xai', 'model': 'grok', 'totals': {'totalTokens': 5, 'totalCost': 0.01}}],
+            'modelDaily': [{'date': end, 'provider': 'xai', 'model': 'grok', 'tokens': 5}]}}
+
+    def analytics_day(self, endpoint, **params):
+        requested.append((endpoint, params['days']))
+        return {'window_days': 1, 'totals': {'amount_usd': 0.25},
+                'daily': [{'date': end, 'tokens': 10, 'amount_usd': 0.25}],
+                'top_models': [{'id': 'direct', 'tokens': 10, 'amount_usd': 0.25}]}, False
+
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', gateway)
+    monkeypatch.setattr(nr.Client, 'get', analytics_day)
+    result = usage.build_model_breakdown(1)
+    assert requested == [('gateway', end, end), ('analytics', 1)]
+    assert result['meta']['start_date'] == result['meta']['end_date'] == end
+    assert result['meta']['days'] == 1
+    assert result['totals']['total'] == 15
+    assert result['source_daily']['nordrouter'] == [{'date': end, 'tokens': 10, 'amount_usd': 0.25}]
+    assert result['sources']['nordrouter']['billed_cost_usd'] == 0.25
+    assert {entry['model'] for entry in result['models']} == {'grok', 'direct'}
+
+
+def test_source_breakdowns_do_not_collect_the_other_source(monkeypatch):
+    import openclaw_usage
+
+    monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
+    start, end, _, _ = usage.get_date_range(1)
+    calls = []
+
+    def gateway(first, last):
+        calls.append('openclaw')
+        raise TimeoutError('Gateway unavailable')
+
+    def analytics_day(self, endpoint, **params):
+        calls.append('nordrouter')
+        return {'window_days': 1, 'totals': {'amount_usd': 0.25},
+                'daily': [{'date': end, 'tokens': 10, 'amount_usd': 0.25}],
+                'top_models': [{'id': 'direct', 'tokens': 10, 'amount_usd': 0.25}]}, False
+
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', gateway)
+    monkeypatch.setattr(nr.Client, 'get', analytics_day)
+    direct = usage.build_model_breakdown(1, source='nordrouter')
+    assert calls == ['nordrouter']
+    assert [entry['model'] for entry in direct['models']] == ['direct']
+    assert direct['sources']['nordrouter']['complete'] is True
+    assert direct['meta']['openclaw_status'] == 'pending'
+    assert direct['sources']['openclaw']['complete'] is False
+    assert direct['totals']['total'] is None
+
+    calls.clear()
+    gateway_only = usage.build_model_breakdown(1, source='openclaw')
+    assert calls == ['openclaw']
+    assert gateway_only['meta']['openclaw_status'] == 'unavailable'
+    assert gateway_only['models'] == []
+    assert gateway_only['meta']['nordrouter_status'] == 'pending'
+
+
+def test_direct_source_http_finishes_while_gateway_source_is_stalled(monkeypatch):
+    import openclaw_usage
+
+    monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
+    monkeypatch.setattr(service, 'load_env', lambda: None)
+    started = threading.Event()
+    release = threading.Event()
+    end = usage.get_date_range(1)[1]
+
+    def slow_gateway(*args):
+        started.set()
+        assert release.wait(timeout=5)
+        raise TimeoutError('Gateway timed out')
+
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', slow_gateway)
+    monkeypatch.setattr(nr.Client, 'get', lambda *args, **kwargs: ({
+        'window_days': 1, 'totals': {'amount_usd': 0.25},
+        'daily': [{'date': end, 'tokens': 10, 'amount_usd': 0.25}],
+        'top_models': [{'id': 'direct', 'tokens': 10, 'amount_usd': 0.25}],
+    }, False))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        gateway = executor.submit(TestClient(service.app).get,
+                                  '/api/v1/model-breakdown?days=1&source=openclaw')
+        try:
+            assert started.wait(timeout=2)
+            direct = executor.submit(TestClient(service.app).get,
+                                     '/api/v1/model-breakdown?days=1&source=nordrouter')
+            response = direct.result(timeout=2)
+            assert response.status_code == 200
+            assert [row['model'] for row in response.json()['models']] == ['direct']
+            assert not gateway.done()
+        finally:
+            release.set()
+        assert gateway.result(timeout=2).json()['meta']['openclaw_status'] == 'unavailable'
+
+
+def test_one_day_window_rolls_over_at_local_midnight(monkeypatch):
+    class Clock(datetime):
+        current = datetime(2026, 10, 8, 23, 59, 59)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current if tz is None else datetime.now(tz)
+
+    monkeypatch.setattr(usage, 'datetime', Clock)
+    assert usage.get_date_range(1)[:2] == ('2026-10-08', '2026-10-08')
+    Clock.current = datetime(2026, 10, 9, 0, 0, 0)
+    assert usage.get_date_range(1)[:2] == ('2026-10-09', '2026-10-09')

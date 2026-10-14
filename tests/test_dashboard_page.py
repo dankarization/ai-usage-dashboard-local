@@ -87,6 +87,8 @@ def test_page_labels_list_price_estimate_and_never_fakes_it():
     assert 'excluded from canonical total and cost' not in DASHBOARD_HTML
     assert 'id="period-30"' in DASHBOARD_HTML
     assert 'id="period-7"' in DASHBOARD_HTML
+    assert 'id="period-1"' in DASHBOARD_HTML
+    assert 'id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button>' in DASHBOARD_HTML
     assert 'id="h-models">Model Usage' in DASHBOARD_HTML
     assert 'id="h-costs"' not in DASHBOARD_HTML
     assert 'id="cost-models"' not in DASHBOARD_HTML
@@ -95,7 +97,7 @@ def test_page_labels_list_price_estimate_and_never_fakes_it():
 
 def test_period_words_only_appear_on_selector_buttons():
     visible_literals = re.findall(r">([^<>]+)<", DASHBOARD_HTML.split('<script>')[0])
-    assert [value for value in visible_literals if re.search(r'\b(?:7|30)(?:d| days)\b', value)] == ['30d', '7d']
+    assert [value for value in visible_literals if re.search(r'\b(?:1|7|30)(?:d| days)\b', value)] == ['30d', '7d', '1d']
     assert "'Total tokens · ' + selectedDays" not in DASHBOARD_HTML
     assert "'Billed spend · ' + selectedDays" not in DASHBOARD_HTML
 

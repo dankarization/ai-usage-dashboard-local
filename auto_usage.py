@@ -2705,7 +2705,7 @@ def build_legacy_model_breakdown(days: int = 30, *, include_daily: bool = True) 
     }
 
 
-def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict[str, object]:
+def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source: str = 'all') -> dict[str, object]:
     """Gateway rows for comparison; direct NordRouter is canonical for its route.
 
     Local Codex/OpenCode/Claude exports remain available to old CLI reports,
@@ -2716,25 +2716,27 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
 
     start_str, end_str, _, _ = get_date_range(days)
     models = []
-    gateway_status = 'ok'
-    try:
-        gateway = openclaw_usage.fetch_usage(start_str, end_str)
-        models.extend(openclaw_usage.model_entries(gateway, include_daily=include_daily))
-        cache_status = (gateway.get('cacheStatus') or {}).get('status')
-        if cache_status and cache_status != 'fresh':
-            gateway_status = str(cache_status)
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        gateway_status = 'unavailable'
+    gateway_status = 'pending'
+    if source != 'nordrouter':
+        gateway_status = 'ok'
+        try:
+            gateway = openclaw_usage.fetch_usage(start_str, end_str)
+            models.extend(openclaw_usage.model_entries(gateway, include_daily=include_daily))
+            cache_status = (gateway.get('cacheStatus') or {}).get('status')
+            if cache_status and cache_status != 'fresh':
+                gateway_status = str(cache_status)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            gateway_status = 'unavailable'
 
     # Direct NordRouter analytics is the sole NordRouter history authority.
-    nr_status = 'not_configured'
+    nr_status = 'pending' if source == 'openclaw' else 'not_configured'
     nr_daily = []
     nr_window_cost = None
     nr_window_days = None
     expected_dates = {d.isoformat() for d in list_dates_in_range(start_str, end_str)}
     nr_complete = False
     nr_key = os.environ.get('NORDROUTER_API_KEY', '')
-    if nr_key:
+    if nr_key and source != 'openclaw':
         nr, stale = _nordrouter_usage.Client(nr_key).get('analytics', days=max(1, min(days, 90)))
         nr_status = 'stale' if stale else 'ok'
         if nr:
@@ -2774,7 +2776,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
             'cache_write': amount('cache_write'),
             # Direct daily account buckets, not per-model top-list totals.
             'total': (sum(m['totals']['total'] for m in canonical_openclaw) +
-                      sum(day['tokens'] for day in nr_daily)) if gateway_status != 'unavailable' and nr_complete else None,
+                      sum(day['tokens'] for day in nr_daily)) if source == 'all' and gateway_status != 'unavailable' and nr_complete else None,
             'input_output_ratio': round(total_input / total_output, 2) if total_output else None,
             'cache_hit_rate': round(cache_read / (total_input + cache_read), 4) if total_input + cache_read else None,
         },
@@ -2785,7 +2787,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True) -> dict
                          if priced_openclaw else None,
                          'priced_models': len(priced_openclaw),
                          'unpriced_models': len(canonical_openclaw) - len(priced_openclaw),
-                         'complete': gateway_status != 'unavailable'},
+                         'complete': gateway_status not in ('unavailable', 'pending')},
             'nordrouter': {'tokens': sum(day['tokens'] for day in nr_daily) if nr_daily else None,
                            'billed_cost_usd': nr_window_cost if nr_window_days == days else None,
                            'window_days': nr_window_days, 'complete': nr_complete},

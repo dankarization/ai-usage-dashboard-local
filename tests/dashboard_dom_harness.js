@@ -65,12 +65,15 @@ class Element {
   append(child) { this.children.push(child); return child; }
   replaceChildren(...kids) { this.children = kids.slice(); this._text = ''; }
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+  get offsetWidth() { return 180; }
+  get offsetHeight() { return 42; }
+  getBoundingClientRect() { return { left: 20, top: 20, width: 20, height: 20 }; }
 }
 
 const registry = new Map();
 ['hero', 'quotas', 'history', 'history-scale', 'codex', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
- 'period-30', 'period-7', 'overview-note', 'models-note'].forEach((id) => {
+ 'period-30', 'period-7', 'period-1', 'overview-note', 'models-note'].forEach((id) => {
   registry.set(id, new Element('div'));
 });
 const sectionNotes = {
@@ -90,14 +93,20 @@ global.document = {
   createElementNS: (ns, tag) => new Element(tag, ns),
 };
 const windowListeners = {};
-global.window = { addEventListener: (type, fn) => { windowListeners[type] = fn; } };
+global.window = { innerWidth: 390, innerHeight: 844,
+  addEventListener: (type, fn) => { windowListeners[type] = fn; } };
 let autoRefreshTick;
 global.setInterval = (fn) => { autoRefreshTick = fn; return 0; };
-global.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+const pendingFetches = [];
+global.fetch = (url, options) => new Promise((resolve, reject) => {
+  pendingFetches.push({ url, options, resolve, reject });
+});
 
 /* ---------------- run the real dashboard script ---------------- */
 const code = fs.readFileSync(jsPath, 'utf8');
 vm.runInThisContext(code, { filename: jsPath });
+const initialSelectedDays = selectedDays;
+const initialPressed = [7, 30].map((days) => registry.get('period-' + days).getAttribute('aria-pressed'));
 
 ['renderQuotas', 'renderHero', 'renderHistory', 'renderModels', 'tableModels', 'renderPeriod', 'severity', 'statusClass', 'providerName', 'tokens', 'usd', 'countdown', 'groupQuotas', 'effectiveStatus', 'brandMark', 'orderGroups', 'snapshotLabel', 'relativeAge', 'time', 'dateOnly', 'serverTime']
   .forEach((name) => assert(typeof global[name] === 'function' || typeof eval(name) === 'function',
@@ -165,6 +174,8 @@ function findByText(root, needle) { return all(root).filter((e) => e.textContent
 function cardFor(root, needle) {
   return all(root).filter((e) => e.classList.contains('limit-group') && e.textContent.includes(needle));
 }
+function segmentLabel(segment) { return segment.getAttribute('aria-label'); }
+function tooltipText(root) { return all(root).find((e) => e.classList.contains('history-tooltip')).textContent; }
 
 /* ---------------- pure helpers ---------------- */
 assertEqual(severity(10), 'ok', 'severity(10)');
@@ -337,17 +348,19 @@ let legend = all(chart).filter((e) => e.classList.contains('legend-item'));
 assertEqual(legend.map((e) => e.textContent).join(','), 'grok-test,nr-route',
   'legend identifies models without provider prefixes');
 assert(!chart.textContent.includes('all models; daily split unavailable'), 'NordRouter route uses model-day data');
-assert(chart.textContent.includes('nr-route · 20 tokens') && !chart.textContent.includes('nr-route · 21 tokens'),
+assert(segments.some((e) => segmentLabel(e).includes('nr-route · 20 tokens')) &&
+  !segments.some((e) => segmentLabel(e).includes('nr-route · 21 tokens')),
   'direct NordRouter daily total replaces comparison-only route total');
-assert(chart.textContent.includes('day total 30'), 'history excludes the 21-token duplicate');
+assert(segments.every((e) => segmentLabel(e).includes('day total 30')), 'history excludes the 21-token duplicate');
 assertEqual(all(chart).filter((e) => e.tagName === 'TEXT' && e.textContent === '03.10.2026').at(-1).getAttribute('text-anchor'),
   'end', 'last date label stays inside the chart');
 let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, 'history has one summary line');
-assertEqual(summary[0].textContent, 'visual weight relative to tallest day · raw token peak 30', 'summary excludes total and estimate note');
+assertEqual(summary[0].textContent, 'daily tokens · peak 30', 'linear summary excludes total and estimate note');
 windowListeners.resize();
 assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize keeps model segments');
-assert(chart.textContent.includes('day total 30'), 'resize keeps deduplicated history');
+assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day total 30')),
+  'resize keeps deduplicated history');
 selectedDays = 7;
 renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 },
   sources: { nordrouter: { tokens: 4, billed_cost_usd: 0.1, complete: true },
@@ -364,14 +377,14 @@ assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,
   '7d overview updates both source chips');
 assert(registry.get('models').textContent.includes('direct-7d'), '7d direct model row');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
-assert(chart.textContent.includes('day total 9'), '7d history');
+assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 9')), '7d history');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 2, '7d draws both model segments');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, '7d models have distinct colours');
-assert(chart.textContent.includes('nr-7d · 4 tokens'), '7d NordRouter segment reconciles to direct source');
+assert(segments.some((e) => segmentLabel(e).includes('nr-7d · 4 tokens')), '7d NordRouter segment reconciles to direct source');
 summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, '7d has one summary line');
-assertEqual(summary[0].textContent, 'visual weight relative to tallest day · raw token peak 9', '7d summary excludes total and estimate note');
+assertEqual(summary[0].textContent, 'daily tokens · peak 9', '7d linear summary excludes total and estimate note');
 assert(registry.get('metrics').textContent.includes('Billed spend'), 'NordRouter metric follows selection');
 assert(!registry.get('selected-top-label').textContent.includes('7d'), 'top-model label has no period suffix');
 Object.entries(sectionNotes).forEach(([id, value]) => {
@@ -382,10 +395,11 @@ renderHistory({ models: [
   { source: 'openclaw', provider: 'nordrouter', model: 'B', daily: [{ date: '2026-10-03', total: 2 }] },
   { source: 'openclaw', provider: 'xai', model: 'C', daily: [{ date: '2026-10-03', total: 5 }] },
 ], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 7 }] } });
-assert(chart.textContent.includes('A · 4 tokens') &&
-  chart.textContent.includes('B · 3 tokens'),
+assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('A · 4 tokens')) &&
+  all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('B · 3 tokens')),
   'NordRouter model shares use largest-remainder allocation to exact direct total');
-assert(chart.textContent.includes('day total 12'), 'allocated model bars preserve canonical day total');
+assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 12')),
+  'allocated model bars preserve canonical day total');
 assertEqual(new Set(all(chart).filter((e) => e.tagName === 'RECT').map((e) => e.getAttribute('fill'))).size, 3,
   'three individual models keep distinct colours');
 renderHistory({ models: [
@@ -399,31 +413,41 @@ assertEqual(legend.map((e) => e.textContent).join(','), 'Other,Shared',
   'the same model across providers has one legend entry');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 2, 'same model draws one combined segment per day');
-assert(chart.textContent.includes('Shared · 11 tokens') && chart.textContent.includes('day total 12'),
+assert(segments.some((e) => segmentLabel(e).includes('Shared · 11 tokens · day total 12')),
   'combined model includes direct-allocated NordRouter and both other providers exactly once');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
   'one colour is assigned per distinct model');
-const balancedOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
-const balancedOtherHeight = Number(balancedOther.getAttribute('height'));
-const balancedColors = new Map(segments.map((e) => [e.children[0].textContent.split(' · ')[1], e.getAttribute('fill')]));
-assertEqual(historyScale, 'balanced', 'balanced is the default history scale');
+assertEqual(historyScale, 'linear', 'linear is the default history scale');
+assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('linear token axis'),
+  'initial history chart has a token axis');
+assertEqual(all(chart).filter((e) => e.tagName === 'TITLE').length, 0,
+  'linear chart has no native SVG tooltip');
+assertEqual(all(chart).filter((e) => e.tagName === 'TEXT').slice(0, 3).map((e) => e.textContent).join(','),
+  '12,6,0', 'initial axis is labelled in tokens');
+const linearOther = segments.find((e) => segmentLabel(e).includes('Other · 1 tokens'));
+const linearOtherHeight = Number(linearOther.getAttribute('height'));
+const linearColors = new Map(segments.map((e) => [segmentLabel(e).split(' · ')[0], e.getAttribute('fill')]));
+registry.get('history-scale').listeners.click[0]();
+assertEqual(historyScale, 'balanced', 'scale button exposes balanced view');
+assertEqual(registry.get('history-scale').textContent, 'Scale: balanced', 'button names weighted state');
+assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'true', 'balanced button sets pressed state');
 assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('not a token axis'),
   'balanced axis cannot be mistaken for token counts');
 assertEqual(all(chart).filter((e) => e.tagName === 'TEXT').slice(0, 3).map((e) => e.textContent).join(','),
   '100%,50%,0%', 'weighted axis is labelled as relative visual weight');
-registry.get('history-scale').listeners.click[0]();
-assertEqual(historyScale, 'linear', 'scale button exposes raw-token view');
-assertEqual(registry.get('history-scale').textContent, 'Scale: linear', 'button names raw-token state');
-assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'false', 'linear button clears pressed state');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
-const linearOther = segments.find((e) => e.children[0].textContent.includes('Other · 1 tokens'));
-assert(balancedOtherHeight > Number(linearOther.getAttribute('height')),
+const balancedOther = segments.find((e) => segmentLabel(e).includes('Other · 1 tokens'));
+assert(Number(balancedOther.getAttribute('height')) > linearOtherHeight,
   'balanced scale makes the small model segment more legible');
-assertEqual(segments.length, 2, 'linear mode keeps one segment per model/day');
-assertEqual(new Map(segments.map((e) => [e.children[0].textContent.split(' · ')[1], e.getAttribute('fill')])).get('Shared'),
-  balancedColors.get('Shared'), 'scale toggle preserves model colour');
-assert(chart.textContent.includes('Shared · 11 tokens') && chart.textContent.includes('day total 12'),
+assertEqual(segments.length, 2, 'balanced mode keeps one segment per model/day');
+assertEqual(new Map(segments.map((e) => [segmentLabel(e).split(' · ')[0], e.getAttribute('fill')])).get('Shared'),
+  linearColors.get('Shared'), 'scale toggle preserves model colour');
+assert(segments.some((e) => segmentLabel(e).includes('Shared · 11 tokens · day total 12')),
   'both views preserve actual model and day totals');
+registry.get('history-scale').listeners.click[0]();
+assertEqual(historyScale, 'linear', 'scale button restores linear view');
+assertEqual(registry.get('history-scale').textContent, 'Scale: linear', 'button visibly names token scale');
+assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'false', 'linear button clears pressed state');
 renderHistory({ models: [
   { source: 'openclaw', provider: 'local', model: 'Tiny', daily: [
     { date: '2026-10-02', total: 0 }, { date: '2026-10-03', total: 1 }] },
@@ -438,16 +462,69 @@ registry.get('history-scale').listeners.click[0]();
 assertEqual(historyScale, 'balanced', 'scale button restores balanced view');
 assertEqual(registry.get('history-scale').textContent, 'Scale: balanced', 'button visibly names weighted state');
 assertEqual(registry.get('history-scale').getAttribute('aria-pressed'), 'true', 'balanced button exposes pressed state');
+assertEqual(all(chart).filter((e) => e.tagName === 'TITLE').length, 0,
+  'balanced chart has no native tooltip; accessible scale label remains on SVG');
+assert(all(chart).some((e) => e.tagName === 'SVG' && e.getAttribute('aria-label').includes('fourth-root')),
+  'balanced SVG retains an accessible scale description');
 renderHistory({ models: [
   { source: 'openclaw', provider: 'local', model: 'Huge', daily: [{ date: '2026-10-03', total: 1000000 }] },
   { source: 'openclaw', provider: 'local', model: 'Small', daily: [{ date: '2026-10-03', total: 1000 }] },
 ], source_daily: { nordrouter: [] } });
 segments = all(chart).filter((e) => e.tagName === 'RECT');
-const big = segments.find((e) => e.children[0].textContent.includes('Huge · 1,000,000 tokens'));
-const small = segments.find((e) => e.children[0].textContent.includes('Small · 1,000 tokens'));
+const big = segments.find((e) => segmentLabel(e).includes('Huge · 1.0M tokens'));
+const small = segments.find((e) => segmentLabel(e).includes('Small · 1.0K tokens'));
 assert(Number(small.getAttribute('height')) / Number(big.getAttribute('height')) > 0.15,
   'fourth-root composition keeps a thousand-token model visible beside a million-token model');
-assert(chart.textContent.includes('day total 1,001,000'), 'visual weighting never changes raw totals');
+assert(segments.every((e) => segmentLabel(e).includes('day total 1.0M')),
+  'visual weighting never changes raw totals');
+renderHistory({ models: [
+  { source: 'openclaw', provider: 'local', model: 'gpt-6.1-sol', daily: [{ date: '2026-10-03', total: 51659130 }] },
+  { source: 'openclaw', provider: 'local', model: 'Other', daily: [{ date: '2026-10-03', total: 1020708 }] },
+], source_daily: { nordrouter: [] } });
+segments = all(chart).filter((e) => e.tagName === 'RECT');
+const sol = segments.find((e) => segmentLabel(e).startsWith('gpt-6.1-sol'));
+const other = segments.find((e) => segmentLabel(e).startsWith('Other'));
+const tip = all(chart).find((e) => e.classList.contains('history-tooltip'));
+assertEqual(sol.children.length, 0, 'segment has no native SVG title to duplicate custom tooltip');
+assertEqual(segmentLabel(sol), 'gpt-6.1-sol · 51.7M tokens · day total 52.7M',
+  'tooltip shares Model Usage compact token formatter and omits date');
+assert(!segmentLabel(sol).includes('2026') && !segmentLabel(sol).includes('51,659,130'),
+  'accessible label omits date and raw token counts');
+assert(all(chart).some((e) => e.tagName === 'TEXT' && e.textContent === '03.10.2026'),
+  'date remains below the bar');
+const touch = (rect, type, id, x, y) => rect.listeners[type][0]({ pointerType: 'touch', pointerId: id,
+  clientX: x, clientY: y, target: rect });
+touch(sol, 'pointerdown', 1, 380, 20);
+touch(sol, 'pointerup', 1, 380, 20);
+sol.listeners.focus[0](); // Chromium focuses a tabindex SVG rect after a touch tap.
+assertEqual(tip.style.visibility, 'visible', 'tap opens persistent tooltip');
+assertEqual(tooltipText(chart), segmentLabel(sol), 'visible tooltip text matches compact accessible label');
+assert(Number.parseInt(tip.style.left, 10) >= 8 && Number.parseInt(tip.style.left, 10) <= 202 &&
+  Number.parseInt(tip.style.top, 10) >= 8, 'tooltip is clamped to mobile viewport');
+touch(other, 'pointerdown', 2, 200, 30);
+touch(other, 'pointerup', 2, 200, 30);
+sol.listeners.blur[0]();
+other.listeners.focus[0]();
+assertEqual(tooltipText(chart), segmentLabel(other), 'another segment replaces the touched tooltip');
+assertEqual(tip.style.visibility, 'visible', 'blur of prior touched segment does not hide the new one');
+touch(other, 'pointerdown', 3, 200, 30);
+touch(other, 'pointerup', 3, 200, 30);
+assertEqual(tip.style.visibility, 'hidden', 'second tap dismisses tooltip');
+touch(sol, 'pointerdown', 4, 100, 100);
+touch(sol, 'pointerup', 4, 100, 130);
+assertEqual(tip.style.visibility, 'hidden', 'scroll-like movement does not open tooltip');
+sol.listeners.pointerenter[0]({ pointerType: 'mouse', clientX: 120, clientY: 150 });
+assertEqual(tip.style.visibility, 'visible', 'desktop hover opens tooltip');
+sol.listeners.pointerleave[0]({ pointerType: 'mouse' });
+assertEqual(tip.style.visibility, 'hidden', 'desktop pointer leave closes tooltip');
+touch(sol, 'pointerdown', 5, 100, 100);
+touch(sol, 'pointerup', 5, 100, 100);
+windowListeners.pointerdown({ target: registry.get('hero') });
+assertEqual(tip.style.visibility, 'hidden', 'outside tap closes tooltip');
+touch(sol, 'pointerdown', 6, 100, 100);
+touch(sol, 'pointerup', 6, 100, 100);
+windowListeners.scroll();
+assertEqual(tip.style.visibility, 'hidden', 'scroll dismisses an already open touch tooltip');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,
@@ -575,6 +652,10 @@ assert(!code.includes('insertAdjacentHTML'), 'dashboard script must not use inse
 assert(!code.includes('document.write'), 'dashboard script must not use document.write');
 
 console.log('OK: dashboard DOM contract holds');
+selectedDays = initialSelectedDays;
+setPeriodButtons();
+registry.get('history-scale').listeners.click[0]();
+assertEqual(historyScale, 'linear', 'progressive scenarios start with the default scale');
 
 /* An accelerated timer tick must request a provider refresh and repaint from
    a changed backend snapshot without invoking the Refresh button. */
@@ -587,57 +668,202 @@ async function waitForReload() {
 }
 
 (async () => {
-  await waitForReload();
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  const request = (url, from = 0) => pendingFetches.slice(from).find((entry) => entry.url === url);
+  const reply = (entry, body) => {
+    assert(entry, 'missing pending fetch');
+    entry.resolve({ ok: true, json: () => Promise.resolve(body) });
+  };
+  const urlFor = (days, source) => '/api/v1/model-breakdown?days=' + days + '&daily=true&source=' + source;
+  const quotaFor = (source) => '/api/v1/quotas' + (source === 'all' ? '' : '?source=' + source);
+  const quotaResponse = (url, used = 10) => {
+    const source = url.includes('?source=') ? url.split('?source=')[1] : 'all';
+    return { ...QUOTAS, quotas: QUOTAS.quotas.filter((row) => source === 'all' || row.provider === source)
+      .map((row) => row.provider === 'codex' && row.account === 'codex_1'
+        ? { ...row, used_percentage: used, remaining_percentage: 100 - used } : row) };
+  };
+  const answer = (entry, days) => reply(entry, entry.url.startsWith('/api/v1/quotas')
+    ? quotaResponse(entry.url) : modelFor(days, entry.url.includes('nordrouter') ? 'nordrouter' : 'openclaw'));
+  const modelFor = (days, source, date = '2026-10-03') => ({
+    meta: { ...MODELS.meta, start_date: date, end_date: date, days,
+      openclaw_status: source === 'openclaw' ? 'ok' : 'pending',
+      nordrouter_status: source === 'nordrouter' ? 'ok' : 'pending' },
+    sources: source === 'nordrouter'
+      ? { nordrouter: { tokens: days, billed_cost_usd: 0.125, complete: true },
+          openclaw_nordrouter_comparison_tokens: 0 }
+      : { openclaw: { tokens: 2, estimated_cost_usd: 0.03, complete: true },
+          openclaw_nordrouter_comparison_tokens: 0 },
+    source_daily: { nordrouter: source === 'nordrouter' ? [{ date, tokens: days }] : [] },
+    models: source === 'nordrouter'
+      ? [{ source, provider: source, model: 'direct-' + days + 'd', cost_usd: 0.125,
+          totals: { total: days }, daily: [] }]
+      : [{ source, provider: 'xai', model: 'grok-' + days + 'd', cost_usd: 0.03,
+          totals: { total: 2 }, daily: [{ date, total: 2 }] }],
+  });
+  const clickPeriod = (days) => registry.get('period-' + days).listeners.click[0]();
+  const settle = async () => { await flush(); await flush(); };
+
+  // Initial GETs begin alongside a deliberately stalled full refresh.
+  const initialUpdate = request('/api/v1/display/update');
+  assert(initialUpdate, 'initial provider update started');
+  assertEqual(initialSelectedDays, 7, 'initial selection is seven days');
+  assertEqual(initialPressed[0], 'true', 'seven-day button starts pressed');
+  assertEqual(initialPressed[1], 'false', 'thirty-day button starts unpressed');
+  assertEqual(JSON.parse(initialUpdate.options.body).view, '7d', 'initial update requests seven days');
+  assert(request(quotaFor('all')) && request(quotaFor('codex')) && request(quotaFor('grok')) &&
+    request(quotaFor('grok_bot')) && request(urlFor(7, 'nordrouter')) &&
+    request(urlFor(7, 'openclaw')), 'independent GETs start before full refresh completes');
+  reply(request(quotaFor('codex')), quotaResponse(quotaFor('codex')));
+  await settle();
+  assert(cardFor(codexRoot, 'first@example.test'), 'Codex renders while Grok, cache, OpenClaw and update wait');
+  assert(!registry.get('quotas').textContent.includes('Grok Build'), 'Grok is still pending');
+  request(quotaFor('grok')).reject(new Error('slow Grok timeout'));
+  await settle();
+  assert(cardFor(codexRoot, 'first@example.test'), 'Grok failure retains Codex');
+  assert(registry.get('error').textContent.includes('grok unavailable: slow Grok timeout'),
+    'Grok failure is identified locally');
+  const staleCache = quotaResponse(quotaFor('all'));
+  staleCache.quotas = staleCache.quotas.map((row) => row.provider === 'codex' && row.account === 'codex_1'
+    ? { ...row, used_percentage: 98, remaining_percentage: 2 } : row);
+  reply(request(quotaFor('all')), staleCache);
+  reply(request(quotaFor('grok_bot')), quotaResponse(quotaFor('grok_bot')));
+  await settle();
+  assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('10% used'),
+    'late stale cache cannot overwrite fresh Codex quota');
+  reply(request(urlFor(7, 'nordrouter')), modelFor(7, 'nordrouter'));
+  await settle();
+  assert(registry.get('models').textContent.includes('direct-7d'), 'direct model renders before OpenClaw');
+  assert(all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 7')),
+    'direct history renders before OpenClaw');
+  assert(registry.get('hero').textContent.includes('incomplete source'), 'incomplete canonical total is not invented');
+  request(urlFor(7, 'openclaw')).reject(new Error('slow Gateway timeout'));
+  initialUpdate.reject(new Error('provider refresh failed'));
+  await settle();
+  assert(registry.get('models').textContent.includes('direct-7d'), 'Gateway failure retains direct model');
+  assert(registry.get('quotas').textContent, 'quota section remains rendered');
+  assert(registry.get('error').textContent.includes('openclaw unavailable: slow Gateway timeout'),
+    'Gateway failure is identified locally');
+  assert(!registry.get('period-1').disabled, 'period buttons stay usable during a failed refresh');
+
+  // A period switch starts all sources without another full refresh. OpenClaw
+  // can arrive first, then NordRouter completes the canonical total.
+  const beforeOne = pendingFetches.length;
+  clickPeriod(1);
+  assertEqual(selectedDays, 1, 'one-day selection is immediate');
+  assertEqual(registry.get('period-1').getAttribute('aria-pressed'), 'true', 'one-day button is pressed');
+  assert(!pendingFetches.slice(beforeOne).some((entry) => entry.url === '/api/v1/display/update'),
+    'period switch avoids provider refresh');
+  reply(request(urlFor(1, 'openclaw'), beforeOne), modelFor(1, 'openclaw'));
+  reply(request(quotaFor('grok'), beforeOne), quotaResponse(quotaFor('grok')));
+  await settle();
+  assert(registry.get('quotas').textContent.includes('Grok Build'), 'Grok renders while Codex is pending');
+  request(quotaFor('codex'), beforeOne).reject(new Error('slow Codex timeout'));
+  await settle();
+  assert(registry.get('quotas').textContent.includes('Grok Build'), 'Codex failure retains Grok');
+  assert(registry.get('error').textContent.includes('codex unavailable: slow Codex timeout'),
+    'Codex failure is identified locally');
+  assert(registry.get('models').textContent.includes('grok-1d'), 'OpenClaw row renders before NordRouter');
+  assert(!registry.get('models').textContent.includes('direct-7d'), 'new period does not mix old direct rows');
+  reply(request(quotaFor('all'), beforeOne), quotaResponse(quotaFor('all')));
+  reply(request(quotaFor('grok_bot'), beforeOne), quotaResponse(quotaFor('grok_bot')));
+  reply(request(urlFor(1, 'nordrouter'), beforeOne), modelFor(1, 'nordrouter'));
+  await settle();
+  assert(registry.get('models').textContent.includes('direct-1d'), 'direct one-day row joins ready OpenClaw');
+  assert(all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 3')),
+    'both sources combine in linear chart');
+  assert(registry.get('hero').textContent.includes('Total tokens') &&
+    registry.get('hero').textContent.includes('3'), 'canonical one-day total completes');
+  assert(registry.get('metrics').textContent.includes('$0.1250'), 'one-day billed spend uses direct source');
+
+  // Late responses from superseded periods cannot repaint or report errors.
+  const beforeThirty = pendingFetches.length;
+  clickPeriod(30);
+  const thirty = pendingFetches.slice(beforeThirty);
+  const beforeSeven = pendingFetches.length;
+  clickPeriod(7);
+  const seven = pendingFetches.slice(beforeSeven);
+  seven.forEach((entry) => answer(entry, 7));
+  await settle();
+  thirty.find((entry) => entry.url.includes('openclaw')).reject(new Error('late failure'));
+  thirty.filter((entry) => !entry.url.includes('openclaw')).forEach((entry) => answer(entry, 30));
+  await settle();
+  assertEqual(selectedDays, 7, 'latest period remains selected');
+  assert(registry.get('models').textContent.includes('direct-7d') &&
+    !registry.get('models').textContent.includes('direct-30d'), 'late source cannot repaint latest period');
+  assert(!registry.get('error').textContent.includes('late failure'), 'late error is ignored');
+
+  // Same-period refresh preserves already visible data on one-source failure.
+  const beforeRefresh = pendingFetches.length;
+  registry.get('refresh').listeners.click[0]();
+  const fresh = pendingFetches.slice(beforeRefresh);
+  assert(fresh.some((entry) => entry.url === '/api/v1/display/update'), 'manual refresh starts full update');
+  fresh.find((entry) => entry.url.includes('openclaw')).reject(new Error('current Gateway failure'));
+  fresh.filter((entry) => entry.url !== '/api/v1/display/update' && !entry.url.includes('openclaw'))
+    .forEach((entry) => answer(entry, 7));
+  fresh.find((entry) => entry.url === '/api/v1/display/update').reject(new Error('refresh timeout'));
+  await settle();
+  assert(registry.get('models').textContent.includes('grok-7d') &&
+    registry.get('models').textContent.includes('direct-7d'), 'failed refresh retains displayed sources');
+  assert(registry.get('error').textContent.includes('openclaw unavailable: current Gateway failure'),
+    'current source failure is visible');
+  assert(!registry.get('refresh').disabled, 'Refresh re-enables after update failure');
+
+  const beforeSuccessfulRefresh = pendingFetches.length;
+  registry.get('refresh').listeners.click[0]();
+  const successful = pendingFetches.slice(beforeSuccessfulRefresh);
+  reply(successful.find((entry) => entry.url === '/api/v1/display/update'), PAYLOAD);
+  await settle();
+  assertEqual(pendingFetches.slice(beforeSuccessfulRefresh).filter((entry) =>
+    entry.url === urlFor(7, 'openclaw')).length, 1,
+  'full refresh does not duplicate a pending Gateway request');
+  successful.find((entry) => entry.url === urlFor(7, 'openclaw')).resolve({
+    ok: true, json: () => Promise.resolve(modelFor(7, 'openclaw')),
+  });
+  pendingFetches.slice(beforeSuccessfulRefresh).filter((entry) =>
+    entry.url.startsWith('/api/v1/quotas') || entry.url === urlFor(7, 'nordrouter'))
+    .forEach((entry) => answer(entry, 7));
+  await settle();
+  assert(!registry.get('error').textContent.includes('current Gateway failure'),
+    'successful source request clears its earlier error');
+
   let updates = 0;
   let used = 11;
+  let currentDay = '2026-10-03';
   global.fetch = (url, options) => {
     if (url === '/api/v1/display/update') {
       updates++;
-      assertEqual(JSON.parse(options.body).reason, 'auto_refresh', 'timer must refresh providers');
       return Promise.resolve({ ok: true, json: () => Promise.resolve(PAYLOAD) });
     }
-    if (url === '/api/v1/quotas') {
-      const rows = { ...QUOTAS, generated_at_utc: new Date().toISOString(),
-        quotas: QUOTAS.quotas.map((row) => row.provider === 'codex' && row.account === 'codex_1'
-          ? { ...row, used_percentage: used, remaining_percentage: 100 - used } : row) };
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(rows) });
-    }
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(url.includes('model-breakdown') ? MODELS : PAYLOAD) });
+    const body = url.startsWith('/api/v1/quotas')
+      ? { ...quotaResponse(url, used), generated_at_utc: new Date().toISOString() }
+      : modelFor(selectedDays, url.includes('nordrouter') ? 'nordrouter' : 'openclaw', currentDay);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
   };
-  assert(typeof autoRefreshTick === 'function', 'automatic timer must be installed');
+  assert(typeof autoRefreshTick === 'function', 'automatic timer is installed');
   autoRefreshTick();
   await waitForReload();
-  assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('11% used'), 'first automatic snapshot rendered');
+  await settle();
+  assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('11% used'), 'first automatic quota rendered');
   used = 44;
   autoRefreshTick();
   await waitForReload();
-  assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('44% used'), 'changed quota rendered without button');
-  assertEqual(updates, 2, 'each automatic tick must issue one provider refresh');
-  const calls = [];
-  global.fetch = (url) => {
-    calls.push(url);
-    const body = url.includes('model-breakdown')
-      ? { ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 },
-          sources: { nordrouter: { tokens: 4, billed_cost_usd: 0.1, complete: true },
-            openclaw: { tokens: 5, estimated_cost_usd: 0.05, complete: true },
-            openclaw_nordrouter_comparison_tokens: 7 },
-          source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] },
-          models: [{ source: 'nordrouter', provider: 'nordrouter', model: 'direct-7d', cost_usd: 0.1,
-            totals: { total: 4 }, daily: [] },
-            { source: 'openclaw', provider: 'xai', model: 'grok-7d', cost_usd: 0.05,
-              totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] }] }
-      : QUOTAS;
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
-  };
-  registry.get('period-7').listeners.click[0]();
+  await settle();
+  assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('44% used'), 'changed quota repainted');
+  assertEqual(updates, 2, 'each automatic tick starts one provider update');
+  clickPeriod(1);
+  await settle();
+  currentDay = '2026-10-04';
+  autoRefreshTick();
   await waitForReload();
-  assertEqual(selectedDays, 7, 'toggle commits selected period after both sources load');
-  assert(calls.some((url) => url.includes('days=7&daily=true')), 'toggle requests seven-day model data');
-  assert(!calls.includes('/api/v1/display/update'), 'period switch does not force unrelated provider collection');
-  assert(registry.get('hero').textContent.includes('Total tokens'), 'toggle repaints overview');
-  assert(registry.get('history').textContent.includes('day total 9'), 'toggle repaints history');
-  assert(registry.get('models').textContent.includes('direct-7d'), 'toggle repaints direct model row');
-  assert(registry.get('models').textContent.includes('grok-7d'), 'toggle repaints OpenClaw model usage');
-  assertEqual(registry.get('period-7').getAttribute('aria-pressed'), 'true', 'toggle updates pressed state');
-  console.log('OK: accelerated auto-refresh repainted changed provider data');
+  await settle();
+  assert(registry.get('model-stamp').textContent.includes('04.10.2026 → 04.10.2026'),
+    'midnight refresh selects new local day');
+  assert(!registry.get('history').textContent.includes('03.10.2026'), 'old day is not charted');
+  clickPeriod(30);
+  await settle();
+  assertEqual(selectedDays, 30, 'thirty-day period remains available');
+  assert(all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 32')),
+    'thirty-day history renders');
+  assertEqual(historyScale, 'linear', 'progressive loads preserve linear scale default');
+  console.log('OK: independent sources render progressively and preserve period/scale state');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

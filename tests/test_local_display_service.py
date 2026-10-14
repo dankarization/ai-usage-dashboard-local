@@ -150,6 +150,73 @@ def test_get_quotas_has_typed_openapi_response():
     assert response_schema == {"$ref": "#/components/schemas/QuotasResponse"}
 
 
+def test_live_provider_quotas_do_not_wait_for_each_other(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setattr(local_display_service, "load_env", lambda: None)
+    monkeypatch.setattr(local_display_service, "_cached_payload", None)
+    monkeypatch.setattr(local_display_service, "_payload_path", tmp_path / "missing.json")
+    monkeypatch.setenv("GROK_COOKIE", "fixture-cookie")
+    monkeypatch.setattr(local_display_service, "load_all_codex_quotas", lambda: [
+        {"provider": "codex", "label": "7d", "percentage": 25, "status": "ok"}])
+    waiting = threading.Event()
+    release = threading.Event()
+
+    def slow_grok(_cookie):
+        waiting.set()
+        assert release.wait(5), "test did not release Grok"
+        raise RuntimeError("Grok unavailable")
+
+    monkeypatch.setattr(local_display_service.grok_usage, "export_grok_quota", slow_grok)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            delayed = executor.submit(lambda: TestClient(local_display_service.app,
+                raise_server_exceptions=False).get("/api/v1/quotas?source=grok"))
+            assert waiting.wait(2), "Grok did not start"
+            codex = executor.submit(lambda: TestClient(local_display_service.app).get(
+                "/api/v1/quotas?source=codex"))
+            result = codex.result(timeout=2)
+            assert result.status_code == 200
+            assert result.json()["quotas"][0]["provider"] == "codex"
+            assert result.json()["quotas"][0]["used_percentage"] == 25
+            assert not delayed.done(), "Codex must finish before delayed Grok"
+            release.set()
+            assert delayed.result(timeout=2).status_code == 500
+    finally:
+        release.set()
+
+
+def test_live_grok_quota_does_not_wait_for_codex(monkeypatch):
+    monkeypatch.setattr(local_display_service, "load_env", lambda: None)
+    monkeypatch.setenv("GROK_COOKIE", "fixture-cookie")
+    waiting = threading.Event()
+    release = threading.Event()
+
+    def slow_codex():
+        waiting.set()
+        assert release.wait(5), "test did not release Codex"
+        return []
+
+    monkeypatch.setattr(local_display_service, "load_all_codex_quotas", slow_codex)
+    monkeypatch.setattr(local_display_service.grok_usage, "export_grok_quota", lambda _cookie: [
+        {"provider": "grok", "label": "Weekly", "percentage": 50}])
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            delayed = executor.submit(lambda: TestClient(local_display_service.app).get(
+                "/api/v1/quotas?source=codex"))
+            assert waiting.wait(2), "Codex did not start"
+            grok = executor.submit(lambda: TestClient(local_display_service.app).get(
+                "/api/v1/quotas?source=grok"))
+            result = grok.result(timeout=2)
+            assert result.status_code == 200
+            assert result.json()["quotas"][0]["provider"] == "grok"
+            assert not delayed.done(), "Grok must finish before delayed Codex"
+            release.set()
+            assert delayed.result(timeout=2).status_code == 200
+    finally:
+        release.set()
+
+
 def test_health_exposes_offset_aware_timestamp():
     body = TestClient(local_display_service.app).get("/health").json()
     assert body["generated_at_utc"]
@@ -449,6 +516,55 @@ def test_model_breakdown_returns_per_model_shape(monkeypatch):
 
     schema = TestClient(local_display_service.app).get("/openapi.json").json()
     assert "account" not in schema["components"]["schemas"]["ModelBreakdownEntry"]["properties"]
+
+
+def test_model_breakdown_accepts_one_day_window(monkeypatch):
+    requested = []
+
+    def build(days=30, include_daily=True):
+        requested.append((days, include_daily))
+        return {"meta": {"start_date": "2026-10-08", "end_date": "2026-10-08", "days": days},
+                "totals": {"total": 0}, "models": []}
+
+    monkeypatch.setattr(local_display_service, "build_model_breakdown", build)
+    response = TestClient(local_display_service.app).get("/api/v1/model-breakdown?days=1&daily=true")
+    assert response.status_code == 200
+    assert requested == [(1, True)]
+    assert response.json()["meta"]["days"] == 1
+    assert response.json()["meta"]["start_date"] == response.json()["meta"]["end_date"]
+
+
+def test_period_views_do_not_wait_for_provider_refresh(monkeypatch):
+    refresh_started = threading.Event()
+    release_refresh = threading.Event()
+
+    def slow_refresh():
+        refresh_started.set()
+        assert release_refresh.wait(timeout=10)
+        return {"meta": {}, "summary": {"total_tokens": 0}, "daily": []}
+
+    def breakdown(days=30, include_daily=True):
+        return {"meta": {"start_date": "2026-10-08", "end_date": "2026-10-08", "days": days},
+                "totals": {"total": 0}, "models": []}
+
+    monkeypatch.setattr(local_display_service, "generate_latest_payload", slow_refresh)
+    monkeypatch.setattr(local_display_service, "build_model_breakdown", breakdown)
+    request = local_display_service.UpdateRequest(reason="force_button", view="30d", device_id="test")
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        refresh = executor.submit(local_display_service.display_update, request, Response())
+        try:
+            assert refresh_started.wait(timeout=2)
+            views = [executor.submit(TestClient(local_display_service.app).get,
+                                     f"/api/v1/model-breakdown?days={days}&daily=true")
+                     for days in (1, 7, 30)]
+            for days, future in zip((1, 7, 30), views):
+                response = future.result(timeout=3)
+                assert response.status_code == 200
+                assert response.json()["meta"]["days"] == days
+        finally:
+            release_refresh.set()
+        refresh.result(timeout=2)
 
 
 def test_model_breakdown_daily_false_omits_daily_entries(monkeypatch):

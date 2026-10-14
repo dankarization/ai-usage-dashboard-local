@@ -2,16 +2,18 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
 from pathlib import Path
+import os
 import threading
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 
 from dashboard_page import DASHBOARD_HTML
 
-from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_env
+from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_all_codex_quotas, load_env
+import grok_usage
 from dashboard_models import (
     AntigravityIngestRequest,
     AntigravityIngestResponse,
@@ -115,17 +117,32 @@ def token_usage_json() -> dict[str, Any]:
     response_model=QuotasResponse,
     response_model_exclude_unset=True,
     summary="Return current provider quota windows",
-    description="Returns a compact automation-oriented view of cached provider quotas, including used and remaining percentages plus reset timestamps. This endpoint reuses the dashboard cache and does not force provider refreshes.",
+    description="Without source, returns the cached automation view without refreshing. source=codex, grok, or grok_bot fetches only that provider live, independently of the full dashboard refresh.",
 )
-def quotas() -> dict[str, Any]:
+def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot'] = 'all') -> dict[str, Any]:
     global _cached_payload
-    payload = _cached_payload
-    if payload is None:
-        payload = _read_payload_from_disk()
-        if payload is not None:
-            _cached_payload = payload
-    if payload is None:
-        payload = {"meta": {}, "quotas": []}
+    if source == 'all':
+        payload = _cached_payload
+        if payload is None:
+            payload = _read_payload_from_disk()
+            if payload is not None:
+                _cached_payload = payload
+        if payload is None:
+            payload = {"meta": {}, "quotas": []}
+    else:
+        load_env()
+        if source == 'codex':
+            snapshots = load_all_codex_quotas()
+        else:
+            cookie = os.environ.get('GROK_COOKIE', '')
+            if source == 'grok':
+                snapshots = grok_usage.export_grok_quota(cookie) if cookie else []
+            else:
+                snapshots = grok_usage.export_grok_bot_quota(cookie) if cookie else [{
+                    'provider': 'grok_bot', 'label': 'Weekly Grok Bot Limit', 'status': 'unavailable',
+                }]
+        payload = {"meta": {"generated_at_utc": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds")},
+                   "quotas": snapshots}
     quota_items = []
     for item in payload.get("quotas") or []:
         used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
@@ -152,13 +169,16 @@ def quotas() -> dict[str, Any]:
     "/api/v1/model-breakdown",
     response_model=ModelBreakdownResponse,
     summary="Return per-model token usage breakdown",
-    description="Returns OpenClaw Gateway usage including comparison-only NordRouter-route rows, plus canonical direct NordRouter analytics. Gateway model-day rows have total tokens only; provider account identity is not included. Direct NordRouter model totals are window aggregates, its daily rows account-wide. Canonical totals exclude the OpenClaw NordRouter duplicate. Pass ?daily=false to omit daily entries.",
+    description="Returns OpenClaw Gateway usage including comparison-only NordRouter-route rows, plus canonical direct NordRouter analytics. Use source=openclaw or source=nordrouter to read one source independently; the default source=all preserves the combined response. Gateway model-day rows have total tokens only; provider account identity is not included. Direct NordRouter model totals are window aggregates, its daily rows account-wide. Canonical totals exclude the OpenClaw NordRouter duplicate. Pass ?daily=false to omit daily entries.",
 )
-def model_breakdown(days: int = 30, daily: bool = True) -> dict[str, Any]:
+def model_breakdown(days: int = 30, daily: bool = True, source: Literal['all', 'openclaw', 'nordrouter'] = 'all') -> dict[str, Any]:
     days = max(1, min(days, 90))
-    with _refresh_lock:
-        load_env()
+    # Reads Gateway aggregates and NordRouter's independently locked cache;
+    # do not queue a period switch behind an unrelated full provider refresh.
+    load_env()
+    if source == 'all':
         return build_model_breakdown(days=days, include_daily=daily)
+    return build_model_breakdown(days=days, include_daily=daily, source=source)
 
 
 @app.post(

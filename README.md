@@ -47,12 +47,13 @@ The collector writes a private `token_usage_eink.json` cache used by the web ser
 | `GET /` or `/dashboard` | Web dashboard |
 | `GET /health` | Service liveness |
 | `GET /token_usage.json` | Cached full dashboard payload |
-| `GET /api/v1/quotas` | Cache-only provider quota windows |
-| `GET /api/v1/model-breakdown?days=7&daily=true` | Model and daily usage; `days=30` is the default |
+| `GET /api/v1/quotas` | Cache-only provider quota windows (unchanged default) |
+| `GET /api/v1/quotas?source=codex\|grok\|grok_bot` | Fetch one provider's quota live without waiting for other providers or the full refresh |
+| `GET /api/v1/model-breakdown?days=7&daily=true` | Model and daily usage; `days=30` and `source=all` are the API defaults. `source=openclaw` or `source=nordrouter` isolates one source. |
 | `POST /api/v1/display/update` | Serialized full refresh; the page uses it on open, every five minutes, and on Refresh |
 | `POST /api/v1/antigravity/ingest` | Optional cross-machine Antigravity entry ingest |
 
-The page shares a 7d/30d selector across overview, history, and model usage. Quota reset windows and today's NordRouter figures retain their own periods. `GET /api/v1/quotas` does not force a provider refresh; it uses the in-memory or on-disk cache. Response models and field descriptions are defined in `dashboard_models.py` and available at `/openapi.json`. `scripts/push-antigravity` can send local entries from a separately configured satellite machine.
+The page shares a 1d/7d/30d selector across overview, history, and model usage (7d by default). Usage history opens with a linear token axis; its Scale button can switch to balanced visual weighting. The page requests cached quotas, live Codex/Grok/Grok Bot quotas, direct NordRouter usage, and OpenClaw usage independently so ready sections appear before the full provider refresh finishes; a failed source leaves already displayed data intact. The 1d view covers the current local calendar day, from midnight to now; NordRouter's selected-window billed spend comes from the matching model-breakdown response. Quota reset windows and today's NordRouter figures retain their own periods. `GET /api/v1/quotas` without a source does not force a provider refresh; it uses the in-memory or on-disk cache. Other provider quotas in this aggregate retain that cache freshness rather than separate live polling. Response models and field descriptions are defined in `dashboard_models.py` and available at `/openapi.json`. `scripts/push-antigravity` can send local entries from a separately configured satellite machine.
 
 ## Verification and privacy
 

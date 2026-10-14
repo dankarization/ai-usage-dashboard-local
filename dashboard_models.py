@@ -129,8 +129,8 @@ class AutomationQuotaSnapshot(AccountMetrics):
 class QuotasResponse(BaseModel):
     """Compact quota response intended for scripts and agents."""
 
-    generated_at: Optional[str] = Field(default=None, description='Generation time of the cached dashboard snapshot in local ISO format. Naive Pacific wall clock kept for backward compatibility; prefer generated_at_utc.')
-    generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) of the cached dashboard snapshot. Consumers render it in their own timezone.')
+    generated_at: Optional[str] = Field(default=None, description='Generation time of a cached dashboard snapshot in local ISO format. Absent for live source responses. Naive Pacific wall clock kept for backward compatibility; prefer generated_at_utc.')
+    generated_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp (seconds precision) of the returned quota snapshot. Consumers render it in their own timezone.')
     quotas: list[AutomationQuotaSnapshot] = Field(default_factory=list, description='Current quota windows across all available providers.')
 
 
@@ -157,7 +157,7 @@ class UpdateRequest(BaseModel):
     """Request body for forcing a dashboard refresh."""
 
     reason: str = Field(description='Why the refresh is requested, e.g. force_button.')
-    view: str = Field(description='Requested view window, e.g. "7d" or "30d".')
+    view: str = Field(description='Requested view window, e.g. "1d", "7d", or "30d".')
     device_id: str = Field(description='Identifier of the device requesting the refresh.')
 
 
@@ -214,8 +214,8 @@ class ModelBreakdownMeta(BaseModel):
     start_date: Optional[str] = Field(default=None, description='Inclusive start date, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date, YYYY-MM-DD.')
     days: Optional[int] = Field(default=None, description='Number of days covered, inclusive of both endpoints.')
-    openclaw_status: Optional[str] = Field(default=None, description='Gateway usage rollup status: fresh/refreshing/stale/unavailable.')
-    nordrouter_status: Optional[str] = Field(default=None, description='Direct NordRouter analytics status.')
+    openclaw_status: Optional[str] = Field(default=None, description='Gateway usage rollup status: fresh/refreshing/stale/unavailable; pending when this source was not requested.')
+    nordrouter_status: Optional[str] = Field(default=None, description='Direct NordRouter analytics status; pending when this source was not requested.')
 
 
 class ModelBreakdownResponse(BaseModel):

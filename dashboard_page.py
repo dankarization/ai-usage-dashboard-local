@@ -141,6 +141,7 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums;white-space:now
 .history-scale{margin-left:auto;font-size:11px;padding:5px 9px}
 svg.chart{display:block;width:100%;height:300px}
 .chart-summary{color:var(--faint);font-size:11px;padding:6px 0 0}
+.history-tooltip{position:fixed;z-index:30;visibility:hidden;pointer-events:none;max-width:min(280px,calc(100vw - 16px));padding:7px 10px;border-radius:var(--radius-sm);background:var(--raised);color:var(--text);font-size:12px;line-height:1.4;box-shadow:0 0 0 0.67px var(--line),0 4px 16px #0008;overflow-wrap:anywhere}
 .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:5px var(--s3);color:var(--muted);font-size:11px;padding:8px 0 0}
 .legend-item{display:flex;align-items:flex-start;gap:5px;min-width:0;overflow-wrap:anywhere}
 .swatch{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none;margin-top:2px}
@@ -205,8 +206,9 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="spacer"></div>
     <span id="stamp" class="stamp" aria-live="polite">Loading…</span>
     <div class="period" role="group" aria-label="Usage period">
-      <button id="period-30" class="btn" type="button" aria-pressed="true">30d</button>
-      <button id="period-7" class="btn" type="button" aria-pressed="false">7d</button>
+      <button id="period-30" class="btn" type="button" aria-pressed="false">30d</button>
+      <button id="period-7" class="btn" type="button" aria-pressed="true">7d</button>
+      <button id="period-1" class="btn" type="button" aria-pressed="false">1d</button>
     </div>
     <button id="refresh" class="btn primary" type="button"><span class="pulse" aria-hidden="true"></span>Refresh</button>
   </div>
@@ -242,7 +244,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-history">
-    <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="true">Scale: balanced</button></div>
+    <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button></div>
     <div id="history" class="panel chart-wrap"></div>
   </section>
 
@@ -505,7 +507,7 @@ function orderGroups(groups) {
   });
 }
 
-function renderQuotas(data, models) {
+function renderQuotas(data, models, pending) {
   var rows = data.quotas || [];
   var root = $('quotas');
   root.replaceChildren();
@@ -516,12 +518,13 @@ function renderQuotas(data, models) {
   if (codex.length) {
     orderGroups(groupQuotas(codex)).forEach(function (group) { limitGroup(group, codexRoot); });
   } else {
-    node('p', 'No Codex snapshot available.', codexRoot).className = 'empty';
+    node('p', pending && pending.codex ? 'Loading Codex quota…' : 'No Codex snapshot available.', codexRoot).className = 'empty';
   }
 
   var others = rows.filter(function (row) { return row.provider !== 'nordrouter' && row.provider !== 'codex'; });
   if (!others.length) {
-    node('p', 'No Grok or other quota snapshots available.', root).className = 'empty';
+    node('p', pending && (pending.grok || pending.grok_bot) ? 'Loading provider quotas…' :
+      'No Grok or other quota snapshots available.', root).className = 'empty';
   } else {
     orderGroups(groupQuotas(others)).forEach(function (group) { limitGroup(group, root); });
   }
@@ -534,13 +537,15 @@ function renderQuotas(data, models) {
   }
 
   $('metrics').replaceChildren();
-  [['Balance · current', 'balance_usd'], ['Spend today · current day', 'spend_today_usd'],
-   ['Billed spend', selectedDays === 30 ? 'spend_30d_usd' : 'spend_7d_usd']]
+  var billedSpend = selectedDays === 1 ? (models.sources || {}).nordrouter : null;
+  [['Balance · current', nr.balance_usd], ['Spend today · current day', nr.spend_today_usd],
+   ['Billed spend', selectedDays === 1 ? billedSpend && billedSpend.billed_cost_usd :
+     nr[selectedDays === 30 ? 'spend_30d_usd' : 'spend_7d_usd']]]
     .forEach(function (pair) {
       var box = node('div', undefined, $('metrics')); box.className = 'nr-cell';
       node('div', pair[0], box).className = 'k';
-      var value = node('div', usd(nr[pair[1]]), box);
-      value.className = 'v' + (number(nr[pair[1]]) ? '' : ' unknown');
+      var value = node('div', usd(pair[1]), box);
+      value.className = 'v' + (number(pair[1]) ? '' : ' unknown');
     });
   topModels('today', nr.top_models_today);
   topModels('week', (models.models || []).filter(function (row) { return row.source === 'nordrouter'; })
@@ -600,7 +605,14 @@ function renderHero(payload) {
 
 /* ---------- history chart ---------- */
 var lastHistoryData = null;
-var historyScale = 'balanced';
+var historyScale = 'linear';
+var activeHistoryTooltip = null;
+window.addEventListener('pointerdown', function (event) {
+  if (activeHistoryTooltip && event.target !== activeHistoryTooltip.rect) activeHistoryTooltip.hide();
+});
+window.addEventListener('scroll', function () {
+  if (activeHistoryTooltip) activeHistoryTooltip.hide();
+});
 var SVG_NS = 'http://www.w3.org/2000/svg';
 function svgEl(tag, attrs, parent) {
   var element = document.createElementNS(SVG_NS, tag);
@@ -611,6 +623,7 @@ function svgEl(tag, attrs, parent) {
 function renderHistory(payload) {
   lastHistoryData = payload;
   var root = $('history');
+  if (activeHistoryTooltip) activeHistoryTooltip.hide();
   root.replaceChildren();
   var byDate = new Map();
   var categories = new Map();
@@ -691,9 +704,6 @@ function renderHistory(payload) {
   var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img',
     'aria-label': balanced ? 'Daily model usage; fourth-root visual weighting per model, not a token axis' :
       'Daily token usage stacked by model; linear token axis' }, root);
-  svgEl('title', {}, svg).textContent = balanced ?
-    'Balanced view: fourth-root visual weighting per model; hover segments for raw tokens' :
-    'Linear view: segment heights proportional to raw tokens';
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
     svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);
@@ -705,6 +715,24 @@ function renderHistory(payload) {
   var barW = Math.max(2, Math.min(22, slot * 0.6));
   var axisLabels = Math.min(6, Math.max(2, Math.floor(plotW / 90)));
   var labelEvery = Math.ceil(series.length / axisLabels);
+  var tooltip = node('div', undefined, root);
+  tooltip.className = 'history-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  function hideTooltip() {
+    tooltip.style.visibility = 'hidden';
+    if (activeHistoryTooltip && activeHistoryTooltip.hide === hideTooltip) activeHistoryTooltip = null;
+  }
+  function showTooltip(rect, label, x, y, touch) {
+    if (activeHistoryTooltip && activeHistoryTooltip.hide !== hideTooltip) activeHistoryTooltip.hide();
+    tooltip.textContent = label;
+    tooltip.style.visibility = 'visible';
+    var viewportW = window.innerWidth || 360, viewportH = window.innerHeight || 640;
+    var tipW = tooltip.offsetWidth || 220, tipH = tooltip.offsetHeight || 44;
+    tooltip.style.left = Math.max(8, Math.min(x + 12, viewportW - tipW - 8)) + 'px';
+    tooltip.style.top = Math.max(8, Math.min(y - tipH - 12 < 8 ? y + 12 : y - tipH - 12,
+      viewportH - tipH - 8)) + 'px';
+    activeHistoryTooltip = { rect: rect, hide: hideTooltip, touch: touch };
+  }
   series.forEach(function (day, index) {
     var x = padL + slot * index + (slot - barW) / 2;
     var stacked = 0;
@@ -716,11 +744,47 @@ function renderHistory(payload) {
       var barH = plotH * weight / scaleMax;
       var rect = svgEl('rect', {
         x: x, y: padT + plotH * (1 - stacked / scaleMax), width: barW, height: barH,
-        fill: category.color,
+        fill: category.color, tabindex: 0,
       }, svg);
-      svgEl('title', {}, rect).textContent = dateOnly(day.date) + ' · ' + category.label + ' · ' +
-        amount.toLocaleString() + ' tokens' +
-        ' (day total ' + day.total_tokens.toLocaleString() + ')';
+      var label = category.label + ' · ' + tokens(amount) + ' tokens · day total ' + tokens(day.total_tokens);
+      rect.setAttribute('aria-label', label);
+      rect.addEventListener('pointerenter', function (event) {
+        if (event.pointerType === 'mouse') showTooltip(rect, label, event.clientX, event.clientY, false);
+      });
+      rect.addEventListener('pointermove', function (event) {
+        if (event.pointerType === 'mouse') showTooltip(rect, label, event.clientX, event.clientY, false);
+      });
+      rect.addEventListener('pointerleave', function (event) {
+        if (event.pointerType === 'mouse' && activeHistoryTooltip &&
+            activeHistoryTooltip.rect === rect && !activeHistoryTooltip.touch) hideTooltip();
+      });
+      var touchStart = null;
+      var suppressTouchFocusUntil = 0;
+      rect.addEventListener('pointerdown', function (event) {
+        if (event.pointerType === 'touch') {
+          touchStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
+          suppressTouchFocusUntil = Date.now() + 500;
+        }
+      });
+      rect.addEventListener('pointercancel', function () { touchStart = null; });
+      rect.addEventListener('pointerup', function (event) {
+        if (event.pointerType !== 'touch' || !touchStart || touchStart.id !== event.pointerId) return;
+        var moved = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y) > 10;
+        touchStart = null;
+        if (moved) return;
+        if (activeHistoryTooltip && activeHistoryTooltip.rect === rect && activeHistoryTooltip.touch) hideTooltip();
+        else showTooltip(rect, label, event.clientX, event.clientY, true);
+      });
+      rect.addEventListener('focus', function () {
+        // Chromium focuses tabindex SVG rects after touch pointerup. That
+        // synthetic focus must not replace the persistent touch state.
+        if (Date.now() < suppressTouchFocusUntil) return;
+        var box = rect.getBoundingClientRect();
+        showTooltip(rect, label, box.left + box.width / 2, box.top, false);
+      });
+      rect.addEventListener('blur', function () {
+        if (activeHistoryTooltip && activeHistoryTooltip.rect === rect && !activeHistoryTooltip.touch) hideTooltip();
+      });
     });
     if (index === 0 || index === series.length - 1 || index % labelEvery === 0) {
       var last = index === series.length - 1;
@@ -869,12 +933,13 @@ function json(url, options) {
 }
 
 var busy = false;
-var selectedDays = 30;
+var selectedDays = 7;
+var loadVersion = 0;
+var lastLoaded = null;
 function setPeriodButtons() {
-  [30, 7].forEach(function (days) {
+  [30, 7, 1].forEach(function (days) {
     var button = $('period-' + days);
     button.setAttribute('aria-pressed', String(days === selectedDays));
-    button.disabled = busy;
   });
 }
 function renderPeriod(models, quotas) {
@@ -883,32 +948,119 @@ function renderPeriod(models, quotas) {
   renderHistory(models);
   renderModels(models);
 }
+function partialModels(state) {
+  var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter;
+  var openSource = openclaw && openclaw.sources && openclaw.sources.openclaw || { complete: false };
+  var directSource = nordrouter && nordrouter.sources && nordrouter.sources.nordrouter || { complete: false };
+  return {
+    meta: Object.assign({}, (nordrouter || openclaw || {}).meta || {}, {
+      days: state.days,
+      openclaw_status: openclaw ? openclaw.meta.openclaw_status : 'loading',
+      nordrouter_status: nordrouter ? nordrouter.meta.nordrouter_status : 'loading',
+    }),
+    totals: { total: openSource.complete && directSource.complete
+      ? openSource.tokens + directSource.tokens : null },
+    sources: { openclaw: openSource, nordrouter: directSource,
+      openclaw_nordrouter_comparison_tokens: openclaw && openclaw.sources.openclaw_nordrouter_comparison_tokens },
+    source_daily: { nordrouter: nordrouter && nordrouter.source_daily ? nordrouter.source_daily.nordrouter : [] },
+    models: (openclaw ? openclaw.models : []).concat(nordrouter ? nordrouter.models : []),
+  };
+}
+function renderAvailable(state) {
+  var models = partialModels(state);
+  if (state.parts.openclaw || state.parts.nordrouter) {
+    renderHero(models);
+    renderHistory(models);
+    renderModels(models);
+  }
+  if (state.quotas) renderQuotas(state.quotas, models, state.quotaPending);
+  $('error').textContent = Object.keys(state.errors).map(function (source) {
+    return source + ' unavailable: ' + state.errors[source] + '. Last displayed data retained where available.';
+  }).join(' ');
+}
+function mergeQuotaParts(state) {
+  var cached = state.quotaParts.all || { quotas: [] };
+  var rows = (cached.quotas || []).slice();
+  ['codex', 'grok', 'grok_bot'].forEach(function (source) {
+    var part = state.quotaParts[source];
+    if (!part) return;
+    rows = rows.filter(function (row) { return row.provider !== source; }).concat(part.quotas || []);
+  });
+  var latest = state.quotaParts.all || state.quotaParts.codex || state.quotaParts.grok || state.quotaParts.grok_bot;
+  state.quotas = Object.assign({}, latest || {}, { quotas: rows });
+}
+function loadSources(version, state, requested) {
+  requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'nordrouter', 'openclaw'];
+  requested.forEach(function (source) {
+    var ticket = state.requests[source] = (state.requests[source] || 0) + 1;
+    function current() { return version === loadVersion && ticket === state.requests[source]; }
+    if (source === 'quotas' || source === 'codex' || source === 'grok' || source === 'grok_bot') {
+      var quotaSource = source === 'quotas' ? 'all' : source;
+      state.quotaPending[quotaSource] = true;
+      json('/api/v1/quotas' + (source === 'quotas' ? '' : '?source=' + source)).then(function (quotas) {
+        if (!current()) return;
+        state.quotaParts[quotaSource] = quotas;
+        delete state.quotaPending[quotaSource];
+        mergeQuotaParts(state);
+        delete state.errors[source];
+        renderAvailable(state);
+      }).catch(function (error) {
+        if (!current()) return;
+        delete state.quotaPending[quotaSource];
+        state.errors[source] = error.message;
+        renderAvailable(state);
+      });
+      return;
+    }
+    json('/api/v1/model-breakdown?days=' + state.days + '&daily=true&source=' + source)
+      .then(function (models) {
+        if (!current()) return;
+        if (models.meta.days !== state.days) throw new Error('period mismatch');
+        if (source === 'openclaw' && models.meta.openclaw_status === 'unavailable')
+          throw new Error('Gateway usage unavailable');
+        var other = source === 'openclaw' ? 'nordrouter' : 'openclaw';
+        var previous = state.parts[other];
+        if (previous && (previous.meta.start_date !== models.meta.start_date ||
+            previous.meta.end_date !== models.meta.end_date)) delete state.parts[other];
+        state.parts[source] = models;
+        delete state.errors[source];
+        renderAvailable(state);
+      }).catch(function (error) {
+        if (!current()) return;
+        state.errors[source] = error.message;
+        renderAvailable(state);
+      });
+  });
+}
 function reload(force, nextDays) {
-  if (busy) return;
-  busy = true;
+  if (busy && !nextDays) return;
+  var days = nextDays || selectedDays;
+  var version = ++loadVersion;
+  selectedDays = days;
+  var state = lastLoaded && lastLoaded.days === days ? lastLoaded :
+    { days: days, quotas: null, quotaParts: {}, quotaPending: {}, parts: {}, errors: {}, requests: {} };
+  state.errors = {};
+  lastLoaded = state;
+  busy = !nextDays;
   var button = $('refresh');
-  button.disabled = true; button.classList.add('busy');
+  button.disabled = busy;
+  if (busy) button.classList.add('busy'); else button.classList.remove('busy');
   setPeriodButtons();
   $('error').textContent = '';
-  var days = nextDays || selectedDays;
-  var prefix = nextDays ? Promise.resolve() : json('/api/v1/display/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: force ? 'force_button' : 'auto_refresh', view: days + 'd', device_id: 'web_dashboard' }),
-      });
-
-  prefix.then(function () {
-    return Promise.all([
-      json('/api/v1/quotas'),
-      json('/api/v1/model-breakdown?days=' + days + '&daily=true'),
-    ]);
-  }).then(function (results) {
-    if (results[1].meta.days !== days) throw new Error('period mismatch');
-    selectedDays = days;
-    renderPeriod(results[1], results[0]);
+  loadSources(version, state);
+  if (nextDays) return;
+  json('/api/v1/display/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: force ? 'force_button' : 'auto_refresh', view: days + 'd', device_id: 'web_dashboard' }),
+  }).then(function () {
+    if (version === loadVersion) loadSources(version, state, ['quotas', 'nordrouter']);
   }).catch(function (error) {
-    $('error').textContent = 'Selected period unavailable: ' + error.message + '. Last displayed data retained.';
+    if (version !== loadVersion) return;
+    state.errors.refresh = error.message;
+    renderAvailable(state);
   }).finally(function () {
+    if (version !== loadVersion) return;
     busy = false; button.disabled = false; button.classList.remove('busy');
     setPeriodButtons();
   });
@@ -931,7 +1083,7 @@ modelSortColumns.forEach(function (key) {
   });
 });
 syncModelSortHeaders();
-['30', '7'].forEach(function (days) {
+['30', '7', '1'].forEach(function (days) {
   $('period-' + days).addEventListener('click', function () {
     if (Number(days) !== selectedDays) reload(false, Number(days));
   });
