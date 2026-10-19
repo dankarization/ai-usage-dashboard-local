@@ -933,13 +933,24 @@ function addTotals(into, values) {
   });
   return into;
 }
+var SOURCE_LABELS = { nordrouter: 'NordRouter', openclaw: 'OpenClaw', hermes: 'Hermes' };
+function displayName(name) {
+  // Same model, same label: drop the routing suffix (:fjord, :saga) and the
+  // context suffix (-900k) but keep the vendor prefix the sources report.
+  var raw = String(name || '');
+  var cut = raw.indexOf('/');
+  var head = cut < 0 ? '' : raw.slice(0, cut + 1);
+  var tail = cut < 0 ? raw : raw.slice(cut + 1);
+  return head + tail.split(':')[0].replace(/-\d+k$/, '');
+}
 function preferredName(rows) {
   // The most common spelling labels the row: a vendor prefix shared by most
   // reports reads better than a bare alias that happens to be shorter.
   var counts = new Map();
   rows.forEach(function (row) {
     if (!row.model) return;
-    counts.set(row.model, (counts.get(row.model) || 0) + 1);
+    var name = displayName(row.model);
+    counts.set(name, (counts.get(name) || 0) + 1);
   });
   var names = Array.from(counts.keys());
   if (!names.length) return 'unknown';
@@ -948,6 +959,19 @@ function preferredName(rows) {
   });
   return names[0];
 }
+function money(value) {
+  if (!number(value)) return '—';
+  return '$' + (value >= 0.01 ? value.toFixed(2) : value.toFixed(4));
+}
+function effectiveCost(row, rates) {
+  if (number(row.cost_usd)) return row.cost_usd;
+  // Hermes reports no cost; price it at the rate this model already carries.
+  // The NordRouter account bills its route once, so that route stays unpriced here.
+  if (String(row.provider || '').toLowerCase() === 'nordrouter') return null;
+  var rate = rates[row.model_key || row.model];
+  if (!rate || !rate.tokens) return null;
+  return rate.cost / rate.tokens * ((row.totals && row.totals.total) || 0);
+}
 function tableModels(data) {
   var groups = new Map();
   (data.models || []).forEach(function (row) {
@@ -955,6 +979,7 @@ function tableModels(data) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   });
+  var rates = agentRates(data.models || []);
   return Array.from(groups.entries()).map(function (entry) {
     var rows = entry[1];
     var direct = rows.filter(function (row) { return row.source === 'nordrouter'; });
@@ -968,7 +993,8 @@ function tableModels(data) {
     var cost = null, costKind = null, daily = [], providers = [];
     shown.forEach(function (row) {
       addTotals(totals, row.totals);
-      if (number(row.cost_usd)) cost = (cost || 0) + row.cost_usd;
+      var rowCost = effectiveCost(row, rates);
+      if (number(rowCost)) cost = (cost || 0) + rowCost;
       if (!costKind && row.cost_kind) costKind = row.cost_kind;
       if (row.provider && providers.indexOf(row.provider) < 0) providers.push(row.provider);
       (row.daily || []).forEach(function (day) { daily.push(day); });
@@ -982,6 +1008,12 @@ function tableModels(data) {
       cost_kind: billed ? 'billed' : (costKind || (number(cost) ? 'estimated' : null)),
       comparison_total: billed && comparison.total > 0 ? comparison.total : null,
       comparison_categories: billed && comparison.total > 0 ? comparison : null,
+      contributors: rows.map(function (row) {
+        var value = effectiveCost(row, rates);
+        return { source: row.source, provider: row.provider, model: row.model,
+                 tokens: (row.totals && row.totals.total) || 0, cost_usd: value,
+                 cost_kind: number(row.cost_usd) ? row.cost_kind : (number(value) ? 'derived' : null) };
+      }).sort(function (a, b) { return b.tokens - a.tokens; }),
       daily: daily,
     };
   });
@@ -1046,12 +1078,23 @@ function renderModels(data) {
       swatch.setAttribute('aria-hidden', 'true');
     }
     node('span', row.model || '—', modelName);
-    if (row.daily && row.daily.length) {
+    var daily = row.daily || [];
+    var parts = row.contributors || [];
+    if (daily.length || parts.length > 1) {
       var detail = node('details', undefined, modelCell);
-      node('summary', row.daily.length + ' daily rows', detail);
-      row.daily.forEach(function (day) {
+      node('summary', daily.length ? daily.length + ' daily rows' : parts.length + ' sources', detail);
+      daily.forEach(function (day) {
         node('div', dateOnly(day.date) + ' · ' + tokens(day.total) + ' tokens', detail).className = 'src';
       });
+      if (parts.length > 1) {
+        parts.forEach(function (part) {
+          // Who reported this model, with their own tokens and USD, so the summed
+          // figure on the right can be checked line by line.
+          node('div', (SOURCE_LABELS[part.source] || part.source) + ' · ' + (part.model || '—') +
+            ' · ' + tokens(part.tokens) + ' tok · ' + money(part.cost_usd) +
+            (part.cost_kind ? ' ' + part.cost_kind : ''), detail).className = 'src part';
+        });
+      }
     }
     var comparedTotals = row.comparison_categories || row.totals || {};
     ['input', 'output', 'cache_read', 'cache_write'].forEach(function (field) {

@@ -426,9 +426,13 @@ assert(!heroText.includes('comparison'), 'agent NordRouter comparisons are gone 
 assert(registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct model appears in unified table');
 assertEqual(registry.get('models').children.map((row) => routeName(row)).join(','),
   'nordrouter,NordRouter,xai,openai', 'one row per model, labelled by its route');
-assert(!registry.get('models').textContent.includes('OpenClaw') &&
-  !registry.get('models').textContent.includes('Hermes'),
-  'the agent split stays out of the table for now');
+const firstModelCell = registry.get('models').children[0].children[1];
+const firstParts = all(firstModelCell).filter((e) => e.classList.contains('part'));
+assert(firstParts.length >= 2, 'a merged row breaks its summed USD down per source');
+assert(firstParts.every((e) => e.textContent.includes(' tok · ')),
+  'each breakdown line carries its own token count and cost slot');
+assert(firstParts.some((e) => e.textContent.includes('$')),
+  'a priced source shows its USD, a NordRouter-route row stays unpriced by design');
 assert(registry.get('models-note').textContent.includes('billed USD'), 'table note explains cost provenance');
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
@@ -549,7 +553,7 @@ assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
 assert(['nordrouter'].every((source) =>
   modelSwatch('Shared', source).style.background === chartColor('Shared')),
   'the merged row of a shared model maps to its one chart colour');
-assertEqual(registry.get('models').children.filter((row) => row.children[1].textContent.startsWith('Shared')).length, 1,
+assertEqual(registry.get('models').children.filter((row) => row.children[1].children[0].textContent.startsWith('Shared')).length, 1,
   'a model reported on several routes still occupies one row');
 assertEqual(historyScale, 'linear', 'linear is the default history scale');
 assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('linear token axis'),
@@ -683,7 +687,8 @@ const mergedFixture = { ...MODELS, models: [
 const originalRows = JSON.stringify(mergedFixture.models);
 renderModels(mergedFixture);
 assertEqual(registry.get('models').children.length, 4, 'matched route becomes one billed row');
-const rowFor = (name) => registry.get('models').children.find((row) => row.children[1].textContent === name);
+const rowFor = (name) => registry.get('models').children.find((row) =>
+  all(row.children[1]).some((e) => e.classList.contains('model-name') && e.textContent === name));
 const matchedRow = rowFor('z-ai/glm-5.3');
 assertEqual(routeName(matchedRow), 'NordRouter', 'direct model source has its original label');
 assertEqual(routeName(rowFor('unmatched-route')), 'nordrouter', 'unmatched route source is unchanged');
@@ -730,19 +735,31 @@ renderModels({ models: [
     model_key: 'minimax-m3', totals: { total: 40 }, cost_usd: 0, daily: [] },
 ] });
 assertEqual(registry.get('models').children.length, 3, 'routing and context variants collapse into one row each');
-const flashRow = registry.get('models').children.find((row) => row.children[1].textContent.startsWith('deepseek/deepseek-v4.1-flash'));
-assertEqual(flashRow.children[1].textContent, 'deepseek/deepseek-v4.1-flash',
+const flashRow = registry.get('models').children.find((row) => row.children[1].children[0].textContent.startsWith('deepseek/deepseek-v4.1-flash'));
+assertEqual(flashRow.children[1].children[0].textContent, 'deepseek/deepseek-v4.1-flash',
   'the most common spelling labels the merged row');
 assertEqual(flashRow.children[6].textContent, '30150', 'both billed spellings are summed before the crossed-out agent total');
 assertEqual(flashRow.children[7].textContent, '$1.50billed', 'billed cost of both spellings is summed');
-const solRow = registry.get('models').children.find((row) => row.children[1].textContent === 'gpt-6-sol');
+const solRow = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'gpt-6-sol');
 assertEqual(solRow.children[6].textContent, '10', 'agent rows of one model are summed');
-assertEqual(solRow.children[7].textContent, '$0.10estimated', 'agent cost of one model is summed');
-const m3Row = registry.get('models').children.find((row) => row.children[1].textContent === 'minimax/minimax-m3');
-assertEqual(m3Row.children[1].textContent, 'minimax/minimax-m3',
+assertEqual(solRow.children[7].textContent, '$0.33estimated',
+  'Hermes tokens are priced at the rate OpenClaw reports for the same model');
+const m3Row = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'minimax/minimax-m3');
+assertEqual(m3Row.children[1].children[0].textContent, 'minimax/minimax-m3',
   'the most common spelling labels the row even when a bare alias is shorter');
 assertEqual(m3Row.children[6].textContent, '4160',
   'every spelling of one model lands in a single row: crossed-out agent total, then direct');
+
+/* Labels drop routing and context suffixes but keep the vendor prefix. */
+renderModels({ models: [
+  { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4-flash:saga',
+    model_key: 'deepseek-v4-flash', totals: { total: 10 }, cost_usd: 1, daily: [] },
+  { source: 'hermes', provider: 'openai', model: 'gpt-6-sol-900k',
+    model_key: 'gpt-6-sol', totals: { total: 5 }, cost_usd: null, daily: [] },
+]});
+assertEqual(registry.get('models').children.map((row) => row.children[1].children[0].textContent).join(','),
+  'deepseek/deepseek-v4-flash,gpt-6-sol',
+  'routing and context suffixes never leak into the model label');
 
 /* Hermes cost is derived when the page loads each source separately. */
 const partialState = {
@@ -774,7 +791,7 @@ const SORT_MODELS = { ...MODELS, models: [
   { source: 'openclaw', provider: 'xai', model: 'Beta', cost_usd: null,
     totals: { total: 20, input: 12, output: 3, cache_read: 4, cache_write: 1 }, daily: [] },
 ] };
-const modelOrder = () => registry.get('models').children.map((row) => row.children[1].textContent).join(',');
+const modelOrder = () => registry.get('models').children.map((row) => row.children[1].children[0].textContent).join(',');
 const sortClick = (key) => registry.get('model-sort-' + key).listeners.click[0]();
 assert(['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd']
   .every((key) => registry.get('model-sort-' + key).listeners.click.length === 1),
