@@ -933,11 +933,20 @@ function addTotals(into, values) {
   });
   return into;
 }
-function shortestName(rows) {
-  // The plainest spelling wins: gpt-6-sol over gpt-6-sol-900k, no :fjord suffix.
-  return rows.map(function (row) { return row.model || ''; })
-    .filter(function (name) { return name; })
-    .sort(function (a, b) { return a.length - b.length || a.localeCompare(b); })[0] || 'unknown';
+function preferredName(rows) {
+  // The most common spelling labels the row: a vendor prefix shared by most
+  // reports reads better than a bare alias that happens to be shorter.
+  var counts = new Map();
+  rows.forEach(function (row) {
+    if (!row.model) return;
+    counts.set(row.model, (counts.get(row.model) || 0) + 1);
+  });
+  var names = Array.from(counts.keys());
+  if (!names.length) return 'unknown';
+  names.sort(function (a, b) {
+    return (counts.get(b) - counts.get(a)) || (a.length - b.length) || a.localeCompare(b);
+  });
+  return names[0];
 }
 function tableModels(data) {
   var groups = new Map();
@@ -966,7 +975,7 @@ function tableModels(data) {
     });
     agents.forEach(function (row) { addTotals(comparison, row.totals); });
     return {
-      model: shortestName(rows), model_key: entry[0],
+      model: preferredName(rows), model_key: entry[0],
       source: billed ? 'nordrouter' : (shown[0] || {}).source,
       provider: billed ? 'nordrouter' : (providers[0] || 'unknown'),
       totals: totals, cost_usd: cost,

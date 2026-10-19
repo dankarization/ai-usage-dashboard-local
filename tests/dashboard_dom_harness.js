@@ -721,16 +721,27 @@ renderModels({ models: [
     model_key: 'gpt-6-sol', totals: { total: 7 }, cost_usd: null, daily: [] },
   { source: 'openclaw', provider: 'openai', model: 'gpt-6-sol',
     model_key: 'gpt-6-sol', totals: { total: 3 }, cost_usd: 0.1, daily: [] },
+  { source: 'hermes', provider: 'nordrouter', model: 'minimax-m3',
+    model_key: 'minimax-m3', totals: { total: 1 }, cost_usd: null, daily: [] },
+  { source: 'nordrouter', provider: 'nordrouter', model: 'minimax/minimax-m3',
+    model_key: 'minimax-m3', totals: { total: 60 }, cost_usd: 0.6, daily: [] },
+  { source: 'openclaw', provider: 'nordrouter', model: 'minimax/minimax-m3',
+    model_key: 'minimax-m3', totals: { total: 40 }, cost_usd: 0, daily: [] },
 ] });
-assertEqual(registry.get('models').children.length, 2, 'routing and context variants collapse into one row each');
+assertEqual(registry.get('models').children.length, 3, 'routing and context variants collapse into one row each');
 const flashRow = registry.get('models').children.find((row) => row.children[1].textContent.startsWith('deepseek/deepseek-v4.1-flash'));
 assertEqual(flashRow.children[1].textContent, 'deepseek/deepseek-v4.1-flash',
-  'the plainest spelling labels the merged row');
+  'the most common spelling labels the merged row');
 assertEqual(flashRow.children[6].textContent, '30150', 'both billed spellings are summed before the crossed-out agent total');
 assertEqual(flashRow.children[7].textContent, '$1.50billed', 'billed cost of both spellings is summed');
 const solRow = registry.get('models').children.find((row) => row.children[1].textContent === 'gpt-6-sol');
 assertEqual(solRow.children[6].textContent, '10', 'agent rows of one model are summed');
 assertEqual(solRow.children[7].textContent, '$0.10estimated', 'agent cost of one model is summed');
+const m3Row = registry.get('models').children.find((row) => row.children[1].textContent === 'minimax/minimax-m3');
+assertEqual(m3Row.children[1].textContent, 'minimax/minimax-m3',
+  'the most common spelling labels the row even when a bare alias is shorter');
+assertEqual(m3Row.children[6].textContent, '4160',
+  'every spelling of one model lands in a single row: crossed-out agent total, then direct');
 
 const SORT_MODELS = { ...MODELS, models: [
   { source: 'openclaw', provider: 'xai', model: 'Alpha', account: 'unknown', cost_usd: 1,
