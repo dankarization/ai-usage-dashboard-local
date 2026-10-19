@@ -744,6 +744,28 @@ assertEqual(m3Row.children[1].textContent, 'minimax/minimax-m3',
 assertEqual(m3Row.children[6].textContent, '4160',
   'every spelling of one model lands in a single row: crossed-out agent total, then direct');
 
+/* Hermes cost is derived when the page loads each source separately. */
+const partialState = {
+  days: 7, quotaParts: {}, quotas: null, quotaPending: {}, errors: {}, requests: {}, parts: {
+    openclaw: { meta: { days: 7, openclaw_status: 'ok', start_date: 'p', end_date: 'q' },
+      sources: { openclaw: { tokens: 9000, estimated_cost_usd: 9, priced_models: 1, unpriced_models: 0, complete: true } },
+      models: [{ source: 'openclaw', provider: 'openai', model: 'gpt-6-sol', model_key: 'gpt-6-sol',
+        totals: { total: 9000 }, cost_usd: 9, daily: [] }] },
+    hermes: { meta: { days: 7, hermes_status: 'ok', start_date: 'p', end_date: 'q' },
+      sources: { hermes: { tokens: 1000, estimated_cost_usd: null, priced_models: 0, unpriced_models: 1, complete: true } },
+      models: [{ source: 'hermes', provider: 'openai', model: 'gpt-6-sol-900k', model_key: 'gpt-6-sol',
+        totals: { total: 1000 }, cost_usd: null, daily: [] }] },
+    nordrouter: { meta: { days: 7, nordrouter_status: 'ok', start_date: 'p', end_date: 'q' },
+      sources: { nordrouter: { tokens: 0, billed_cost_usd: 0, complete: true } }, models: [] },
+  },
+};
+renderAvailable(partialState);
+const partialHero = registry.get('hero').textContent;
+assert(partialHero.includes('Estimated cost') && partialHero.includes('$10.00'),
+  'a Hermes row borrows the rate its model already reports from OpenClaw');
+assert(!partialHero.includes('unpriced'),
+  'a derived rate clears the unpriced marker instead of leaving cost blank');
+
 const SORT_MODELS = { ...MODELS, models: [
   { source: 'openclaw', provider: 'xai', model: 'Alpha', account: 'unknown', cost_usd: 1,
     totals: { total: 10, input: 8, output: 1, cache_read: 1, cache_write: 0 }, daily: [] },

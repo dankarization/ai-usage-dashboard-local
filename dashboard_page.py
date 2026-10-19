@@ -1114,6 +1114,43 @@ function renderPeriod(models, quotas) {
   renderHistory(models);
   renderModels(models);
 }
+function agentRates(models) {
+  // Hermes reports no cost of its own; borrow the per-token rate the same model
+  // already carries from any priced source in this window (OpenClaw, NordRouter).
+  var rates = {};
+  (models || []).forEach(function (row) {
+    var total = (row.totals && row.totals.total) || 0;
+    var cost = row.cost_usd;
+    if (cost === null || cost === undefined || !total) return;
+    var key = row.model_key || row.model;
+    if (!rates[key]) rates[key] = { cost: 0, tokens: 0 };
+    rates[key].cost += cost;
+    rates[key].tokens += total;
+  });
+  return rates;
+}
+function priceAgents(models) {
+  var rates = agentRates(models);
+  var result = {};
+  ['openclaw', 'hermes'].forEach(function (name) {
+    var priced = 0, unpriced = 0, cost = 0;
+    (models || []).forEach(function (row) {
+      if (row.source !== name) return;
+      // The NordRouter account bills its route once, for every agent.
+      if (String(row.provider || '').toLowerCase() === 'nordrouter') return;
+      var total = (row.totals && row.totals.total) || 0;
+      var value = row.cost_usd;
+      if (value === null || value === undefined) {
+        var rate = rates[row.model_key || row.model];
+        if (rate && rate.tokens) value = rate.cost / rate.tokens * total;
+        else unpriced += 1;
+      }
+      if (value !== null && value !== undefined) { cost += value; priced += 1; }
+    });
+    result[name] = { estimated_cost_usd: priced ? cost : null, unpriced_models: unpriced };
+  });
+  return result;
+}
 function partialModels(state) {
   var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter, hermes = state.parts.hermes;
   var openSource = openclaw && openclaw.sources && openclaw.sources.openclaw || { complete: false };
@@ -1121,6 +1158,9 @@ function partialModels(state) {
   var directSource = nordrouter && nordrouter.sources && nordrouter.sources.nordrouter || { complete: false };
   var agents = [openSource, hermesSource];
   var agentsComplete = agents.every(function (source) { return source.complete; });
+  var merged = (openclaw ? openclaw.models : []).concat(hermes ? hermes.models : [])
+    .concat(nordrouter ? nordrouter.models : []);
+  var priced = priceAgents(merged);
   return {
     meta: Object.assign({}, (nordrouter || openclaw || hermes || {}).meta || {}, {
       days: state.days,
@@ -1131,12 +1171,12 @@ function partialModels(state) {
     totals: { total: agentsComplete && directSource.complete
       ? agents.reduce(function (sum, source) { return sum + (source.tokens || 0); }, 0) + directSource.tokens
       : null },
-    sources: { openclaw: openSource, hermes: hermesSource, nordrouter: directSource,
+    sources: { openclaw: Object.assign({}, openSource, priced.openclaw),
+      hermes: Object.assign({}, hermesSource, priced.hermes), nordrouter: directSource,
       openclaw_nordrouter_comparison_tokens: openclaw && openclaw.sources.openclaw_nordrouter_comparison_tokens,
       hermes_nordrouter_comparison_tokens: hermes && hermes.sources.hermes_nordrouter_comparison_tokens },
     source_daily: { nordrouter: nordrouter && nordrouter.source_daily ? nordrouter.source_daily.nordrouter : [] },
-    models: (openclaw ? openclaw.models : []).concat(hermes ? hermes.models : [])
-      .concat(nordrouter ? nordrouter.models : []),
+    models: merged,
   };
 }
 function renderAvailable(state) {
