@@ -187,9 +187,12 @@ class ModelBreakdownEntry(BaseModel):
 
     cost_usd: Optional[float] = Field(default=None, description="Reported provider spend for this model and window.")
 
-    source: str = Field(description='Data source: openclaw or direct nordrouter. OpenClaw NordRouter-route rows are comparison-only and excluded from totals.')
+    cost_kind: Optional[str] = Field(default=None, description="Provenance of cost_usd: billed (provider invoice), reported (source-recorded estimate), or estimated (priced locally from tokens). Absent when the source has no price for this model, and for comparison-only NordRouter rows.")
+
+    source: str = Field(description='Data source: openclaw, hermes, or direct nordrouter. Agent NordRouter-route rows are comparison-only and excluded from totals.')
     provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')
     model: str = Field(description='Model identifier reported by the source; names alone do not prove account identity.')
+    model_key: Optional[str] = Field(default=None, description='Display key shared by every spelling that bills as one model: NordRouter routing variants (:fjord, :saga), provider prefixes, and -900k context variants collapse into one key. Group rows by this key to show and sum one model.')
     totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window.')
     daily: list[ModelDailyEntry] = Field(default_factory=list, description='Per-day token entries for this model, ordered by date. Empty when ?daily=false is passed.')
 
@@ -215,6 +218,7 @@ class ModelBreakdownMeta(BaseModel):
     end_date: Optional[str] = Field(default=None, description='Inclusive end date, YYYY-MM-DD.')
     days: Optional[int] = Field(default=None, description='Number of days covered, inclusive of both endpoints.')
     openclaw_status: Optional[str] = Field(default=None, description='Gateway usage rollup status: fresh/refreshing/stale/unavailable; pending when this source was not requested.')
+    hermes_status: Optional[str] = Field(default=None, description='Hermes native session usage status: ok, not_configured when no Hermes state database exists, or unavailable when none could be read; pending when this source was not requested.')
     nordrouter_status: Optional[str] = Field(default=None, description='Direct NordRouter analytics status; pending when this source was not requested.')
 
 
@@ -225,7 +229,7 @@ class ModelBreakdownResponse(BaseModel):
     totals: ModelBreakdownTotals = Field(default_factory=ModelBreakdownTotals, description='Aggregate token totals across all models.')
     models: list[ModelBreakdownEntry] = Field(default_factory=list, description='Per-model entries, ordered by total tokens descending.')
     source_daily: Optional[dict] = Field(default=None, description='Source-level daily rows, currently direct NordRouter account buckets; not per-model splits.')
-    sources: Optional[dict] = Field(default=None, description='Canonical source totals and cost provenance; OpenClaw NordRouter comparison rows excluded.')
+    sources: Optional[dict] = Field(default=None, description='Canonical source totals and cost provenance keyed by source (openclaw, hermes, nordrouter), plus per-agent NordRouter comparison token totals; every agent NordRouter comparison row is excluded.')
 
 
 class AntigravityIngestRequest(BaseModel):

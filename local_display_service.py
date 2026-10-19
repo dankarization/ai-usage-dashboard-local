@@ -169,9 +169,9 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot'] = 'all') -> dict[
     "/api/v1/model-breakdown",
     response_model=ModelBreakdownResponse,
     summary="Return per-model token usage breakdown",
-    description="Returns OpenClaw Gateway usage including comparison-only NordRouter-route rows, plus canonical direct NordRouter analytics. Use source=openclaw or source=nordrouter to read one source independently; the default source=all preserves the combined response. Gateway model-day rows have total tokens only; provider account identity is not included. Direct NordRouter model totals are window aggregates, its daily rows account-wide. Canonical totals exclude the OpenClaw NordRouter duplicate. Pass ?daily=false to omit daily entries.",
+    description="Returns OpenClaw Gateway usage plus Hermes native session usage, including comparison-only NordRouter-route rows from both agents, and canonical direct NordRouter analytics. Use source=openclaw, source=hermes, or source=nordrouter to read one source independently; the default source=all preserves the combined response. Agent model-day rows have total tokens only; provider account identity is not included. Direct NordRouter model totals are window aggregates, its daily rows account-wide. Canonical totals exclude every agent NordRouter duplicate. Pass ?daily=false to omit daily entries.",
 )
-def model_breakdown(days: int = 30, daily: bool = True, source: Literal['all', 'openclaw', 'nordrouter'] = 'all') -> dict[str, Any]:
+def model_breakdown(days: int = 30, daily: bool = True, source: Literal['all', 'openclaw', 'hermes', 'nordrouter'] = 'all') -> dict[str, Any]:
     days = max(1, min(days, 90))
     # Reads Gateway aggregates and NordRouter's independently locked cache;
     # do not queue a period switch behind an unrelated full provider refresh.

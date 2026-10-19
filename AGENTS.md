@@ -2,7 +2,9 @@
 
 ## What This Repo Is
 
-This project aggregates local AI usage data from Codex, Cursor, GLM/Z.ai, Claude Code, OpenCode, and DeepSeek Harness (DSH). It can print daily token/cost tables, generate a desktop chart, and serve a web dashboard and JSON API through a local FastAPI service. The FastAPI service exposes typed Pydantic response models (`dashboard_models.py`) so `/openapi.json` is self-describing for AI agents.
+This project aggregates local AI usage data from Codex, Cursor, GLM/Z.ai, Claude Code, OpenCode, DeepSeek Harness (DSH), OpenClaw Gateway, and Hermes native sessions. It can print daily token/cost tables, generate a desktop chart, and serve a web dashboard and JSON API through a local FastAPI service. The FastAPI service exposes typed Pydantic response models (`dashboard_models.py`) so `/openapi.json` is self-describing for AI agents.
+
+Hermes usage is read from `session_model_usage` in each profile's `state.db` under `HERMES_HOME` (default `~/.hermes-native`, falling back to `~/.hermes`). Only aggregate rows are read: model, billing route, token counts, and activity timestamps. Transcripts are never touched, and Hermes prices are taken from the shared table in `pricing_config.py` rather than from Hermes itself.
 
 This repository is public. Keep credentials, raw exports, and unredacted screenshots out of Git.
 

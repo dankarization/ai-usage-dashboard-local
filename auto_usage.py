@@ -31,6 +31,7 @@ import requests
 import antigravity_usage as _antigravity_usage
 import dsh_usage as _dsh_usage
 import grok_usage as _grok_usage
+import hermes_usage as _hermes_usage
 import nordrouter_usage as _nordrouter_usage
 from pricing_config import get_pricing, calc_cost
 
@@ -2827,19 +2828,38 @@ def build_legacy_model_breakdown(days: int = 30, *, include_daily: bool = True) 
     }
 
 
+MODEL_KEY_SUFFIX = re.compile(r'-\d+k$')
+
+
+def model_key(model: str) -> str:
+    """Collapse the names that bill as one model into a single display key.
+
+    NordRouter appends a routing variant (``:fjord``, ``:saga``), agents prefix
+    the provider (``z-ai/``), and context-window variants carry a ``-900k``
+    suffix. Those are the same underlying model, so the dashboard shows one row
+    with the summed tokens instead of one row per spelling.
+    """
+    base = (model or '').split(':', 1)[0].split('/')[-1].strip().lower()
+    return MODEL_KEY_SUFFIX.sub('', base)
+
+
 def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source: str = 'all') -> dict[str, object]:
-    """Gateway rows for comparison; direct NordRouter is canonical for its route.
+    """Agent rollups for comparison; direct NordRouter is canonical for its route.
+
+    OpenClaw Gateway and Hermes native sessions both report per-model usage.
+    Neither is authoritative for a NordRouter route: that account bills once, so
+    agent rows on a NordRouter route stay comparison-only.
 
     Local Codex/OpenCode/Claude exports remain available to old CLI reports,
     but are deliberately not imported into this API to avoid overlapping the
-    OpenClaw rollups or claiming provider-account identity they do not carry.
+    agent rollups or claiming provider-account identity they do not carry.
     """
     import openclaw_usage
 
     start_str, end_str, _, _ = get_date_range(days)
     models = []
     gateway_status = 'pending'
-    if source != 'nordrouter':
+    if source in ('all', 'openclaw'):
         gateway_status = 'ok'
         try:
             gateway = openclaw_usage.fetch_usage(start_str, end_str)
@@ -2850,15 +2870,26 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             gateway_status = 'unavailable'
 
+    hermes_status = 'pending'
+    if source in ('all', 'hermes'):
+        if not _hermes_usage.state_dbs():
+            hermes_status = 'not_configured'
+        else:
+            hermes_status = 'ok'
+            try:
+                models.extend(_hermes_usage.model_entries(start_str, end_str, include_daily=include_daily))
+            except (OSError, ValueError, sqlite3.Error):
+                hermes_status = 'unavailable'
+
     # Direct NordRouter analytics is the sole NordRouter history authority.
-    nr_status = 'pending' if source == 'openclaw' else 'not_configured'
+    nr_status = 'pending' if source in ('openclaw', 'hermes') else 'not_configured'
     nr_daily = []
     nr_window_cost = None
     nr_window_days = None
     expected_dates = {d.isoformat() for d in list_dates_in_range(start_str, end_str)}
     nr_complete = False
     nr_key = os.environ.get('NORDROUTER_API_KEY', '')
-    if nr_key and source != 'openclaw':
+    if nr_key and source in ('all', 'nordrouter'):
         nr, stale = _nordrouter_usage.Client(nr_key).get('analytics', days=max(1, min(days, 90)))
         nr_status = 'stale' if stale else 'ok'
         if nr:
@@ -2877,11 +2908,49 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
                     'cost_usd': float(model['amount_usd']),
                 })
 
+    for row in models:
+        row.setdefault('model_key', model_key(row['model']))
     models.sort(key=lambda row: row['totals']['total'], reverse=True)
-    canonical_openclaw = [m for m in models if m['source'] == 'openclaw'
-                          and m['provider'].lower() != 'nordrouter']
-    priced_openclaw = [m for m in canonical_openclaw if m['cost_usd'] is not None]
-    detailed = [m['totals'] for m in canonical_openclaw]
+    # Hermes records no cost of its own. Instead of leaving its rows blank, price
+    # them at the rate the same model already carries in this window (OpenClaw
+    # rollups or the NordRouter bill): cost per token, not a second price opinion.
+    rates: dict[str, list[float]] = {}
+    for row in models:
+        total = row['totals'].get('total') or 0
+        cost = row.get('cost_usd')
+        if cost is None or total <= 0:
+            continue
+        bucket = rates.setdefault(row['model_key'], [0.0, 0])
+        bucket[0] += float(cost)
+        bucket[1] += int(total)
+    for row in models:
+        if row['source'] != 'hermes' or row.get('cost_usd') is not None:
+            continue
+        if row['provider'].lower() == 'nordrouter':
+            continue  # the account API bills this route once for every agent
+        bucket = rates.get(row['model_key'])
+        if not bucket or not bucket[1]:
+            continue
+        row['cost_usd'] = bucket[0] / bucket[1] * row['totals']['total']
+        row['cost_kind'] = 'estimated'
+    # Both agents are canonical for every route except NordRouter, which the
+    # account API bills once for all of them.
+    agent_models = [m for m in models if m['source'] in ('openclaw', 'hermes')
+                    and m['provider'].lower() != 'nordrouter']
+
+    def agent_source(name: str) -> dict:
+        rows = [m for m in agent_models if m['source'] == name]
+        priced = [m for m in rows if m['cost_usd'] is not None]
+        return {'tokens': sum(m['totals']['total'] for m in rows),
+                'estimated_cost_usd': sum(m['cost_usd'] for m in priced) if priced else None,
+                'priced_models': len(priced),
+                'unpriced_models': len(rows) - len(priced)}
+
+    openclaw_source = agent_source('openclaw')
+    hermes_source = agent_source('hermes')
+    openclaw_source['complete'] = gateway_status not in ('unavailable', 'pending')
+    hermes_source['complete'] = hermes_status not in ('unavailable', 'pending')
+    detailed = [m['totals'] for m in agent_models]
     def amount(field):
         return sum(t.get(field) or 0 for t in detailed)
     total_input, total_output = amount('input'), amount('output')
@@ -2891,30 +2960,31 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             'generated_at': datetime.now(ZoneInfo('America/Los_Angeles')).replace(tzinfo=None).isoformat(timespec='seconds'),
             'generated_at_utc': _now_utc_iso(), 'start_date': start_str,
             'end_date': end_str, 'days': days,
-            'openclaw_status': gateway_status, 'nordrouter_status': nr_status,
+            'openclaw_status': gateway_status, 'hermes_status': hermes_status,
+            'nordrouter_status': nr_status,
         },
         'totals': {
             'input': total_input, 'output': total_output, 'cache_read': cache_read,
             'cache_write': amount('cache_write'),
             # Direct daily account buckets, not per-model top-list totals.
-            'total': (sum(m['totals']['total'] for m in canonical_openclaw) +
-                      sum(day['tokens'] for day in nr_daily)) if source == 'all' and gateway_status != 'unavailable' and nr_complete else None,
+            'total': (sum(m['totals']['total'] for m in agent_models) +
+                      sum(day['tokens'] for day in nr_daily))
+                     if source == 'all' and openclaw_source['complete']
+                     and hermes_source['complete'] and nr_complete else None,
             'input_output_ratio': round(total_input / total_output, 2) if total_output else None,
             'cache_hit_rate': round(cache_read / (total_input + cache_read), 4) if total_input + cache_read else None,
         },
         'source_daily': {'nordrouter': nr_daily if include_daily else []},
         'sources': {
-            'openclaw': {'tokens': sum(m['totals']['total'] for m in canonical_openclaw),
-                         'estimated_cost_usd': sum(m['cost_usd'] for m in priced_openclaw)
-                         if priced_openclaw else None,
-                         'priced_models': len(priced_openclaw),
-                         'unpriced_models': len(canonical_openclaw) - len(priced_openclaw),
-                         'complete': gateway_status not in ('unavailable', 'pending')},
+            'openclaw': openclaw_source,
+            'hermes': hermes_source,
             'nordrouter': {'tokens': sum(day['tokens'] for day in nr_daily) if nr_daily else None,
                            'billed_cost_usd': nr_window_cost if nr_window_days == days else None,
                            'window_days': nr_window_days, 'complete': nr_complete},
             'openclaw_nordrouter_comparison_tokens': sum(m['totals']['total'] for m in models
                 if m['source'] == 'openclaw' and m['provider'].lower() == 'nordrouter'),
+            'hermes_nordrouter_comparison_tokens': sum(m['totals']['total'] for m in models
+                if m['source'] == 'hermes' and m['provider'].lower() == 'nordrouter'),
         },
         'models': models,
     }

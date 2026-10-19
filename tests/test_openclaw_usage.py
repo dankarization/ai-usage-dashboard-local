@@ -63,6 +63,8 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture-key')
     monkeypatch.setattr('auto_usage.get_date_range', lambda days: ('2026-10-01', '2026-10-07', None, None))
     monkeypatch.setattr('auto_usage._nordrouter_usage.Client', DirectClient)
+    # The real Hermes databases on this host are not part of this contract.
+    monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
     result = build_model_breakdown(days=7)
     assert [(r['source'], r['provider'], r['totals']['total']) for r in result['models']] == [
         ('openclaw', 'nordrouter', 21), ('nordrouter', 'nordrouter', 20),

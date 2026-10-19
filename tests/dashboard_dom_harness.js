@@ -77,8 +77,8 @@ const registry = new Map();
   registry.set(id, new Element('div'));
 });
 const sectionNotes = {
-  'overview-note': 'Canonical direct NordRouter + non-NordRouter OpenClaw',
-  'models-note': 'NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. Input/output/cache are OpenClaw comparisons, not direct token types. Unmatched routes have no direct bill; model rows are not account totals.',
+  'overview-note': 'Canonical direct NordRouter + agent usage, summed per model',
+  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; the crossed-out agent total → direct figure is the account number. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.',
 };
 Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
@@ -152,12 +152,16 @@ const MODELS = {
   totals: { total: 30 },
   sources: { nordrouter: { tokens: 20, billed_cost_usd: 0.4, complete: true },
     openclaw: { tokens: 10, estimated_cost_usd: 0.2, complete: true },
-    openclaw_nordrouter_comparison_tokens: 21 },
+    openclaw_nordrouter_comparison_tokens: 21,
+    hermes: { tokens: 6, estimated_cost_usd: 0.1, unpriced_models: 0, complete: true },
+    hermes_nordrouter_comparison_tokens: 5 },
   source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 20 }] },
   models: [
     { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3', cost_usd: 0.4, totals: { total: 19 }, daily: [] },
     { source: 'openclaw', provider: 'nordrouter', model: 'nr-route', cost_usd: 0.5, totals: { total: 21 }, daily: [{ date: '2026-10-03', total: 21 }] },
     { source: 'openclaw', provider: 'xai', model: 'grok-test', cost_usd: 0.2, totals: { total: 10 }, daily: [{ date: '2026-10-03', total: 10 }] },
+    { source: 'hermes', provider: 'nordrouter', model: 'nr-route', cost_usd: null, totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] },
+    { source: 'hermes', provider: 'openai', model: 'hermes-model', cost_usd: 0.1, cost_kind: 'estimated', totals: { total: 6 }, daily: [{ date: '2026-10-03', total: 6 }] },
   ],
 };
 
@@ -176,9 +180,14 @@ function cardFor(root, needle) {
 }
 function segmentLabel(segment) { return segment.getAttribute('aria-label'); }
 function tooltipText(root) { return all(root).find((e) => e.classList.contains('history-tooltip')).textContent; }
+/* The route cell carries the provider plus the agent that reported the row. */
+function routeName(row) {
+  const src = all(row.children[0]).find((e) => e.classList.contains('src'));
+  return src && src.textContent;
+}
 function modelRow(name, source) {
   return registry.get('models').children.find((row) => row.children[1].children[0].textContent === name &&
-    (!source || row.children[0].textContent === source));
+    (!source || routeName(row) === source));
 }
 function modelSwatch(name, source) {
   const row = modelRow(name, source);
@@ -401,44 +410,60 @@ assert(registry.get('codex').textContent.includes('Weekly') &&
   'provider quota period abbreviations are not rendered outside selector buttons');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('strip-item'))
   .map((e) => e.children[0].textContent).join(','),
-  'Total tokens,OpenClaw NordRouter comparison,NordRouter billed cost,OpenClaw estimated cost',
-  'token cards precede price cards in responsive DOM order');
+  'Total tokens,NordRouter billed cost,Estimated cost',
+  'the strip keeps three figures and drops both agent comparisons');
 assert(!/(?:7|30)d/.test(heroText), 'overview headings contain no period suffix');
 assert(heroText.includes('Total tokens') && heroText.includes('30'), 'default overview uses canonical 30d total');
 let heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
-assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 20,other OpenClaw 10',
-  '30d overview shows separate source chips with their canonical values');
+assertEqual(heroPills.map((e) => e.textContent).join(','),
+  'direct NordRouter 20,other OpenClaw 10,other Hermes 6',
+  '30d overview keeps a separate chip per agent');
 assert(heroPills.every((e) => e.className === 'pill'), 'source chips keep the pill visual hook');
 assert(heroText.includes('NordRouter billed cost') && heroText.includes('$0.4000'), 'direct billed cost shown');
-assert(heroText.includes('OpenClaw estimated cost') && heroText.includes('$0.2000'), 'estimate shown separately');
-assert(heroText.includes('comparison') && heroText.includes('21'), 'comparison duplicate shown but excluded');
+assert(heroText.includes('Estimated cost') && heroText.includes('$0.3000'),
+  'agent estimates are summed on one line');
+assert(!heroText.includes('comparison'), 'agent NordRouter comparisons are gone from the strip');
 assert(registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct model appears in unified table');
-assertEqual(registry.get('models').children.map((row) => row.children[0].textContent).join(','),
-  'nordrouter,NordRouter,xai', 'source labels identify providers without billing provenance');
-assert(registry.get('models-note').textContent.includes('billed USD'), 'table note explains cost provenance');
+assertEqual(registry.get('models').children.map((row) => routeName(row)).join(','),
+  'nordrouter,NordRouter,xai,openai', 'one row per model, labelled by its route');
+const firstModelCell = registry.get('models').children[0].children[1];
+const firstParts = all(firstModelCell).filter((e) => e.classList.contains('part'));
+assert(firstParts.length >= 2, 'a merged row breaks its summed USD down per source');
+assert(firstParts.every((e) => e.textContent.includes(' · ')),
+  'each breakdown line is a source line');
+assert(firstParts.some((e) => e.textContent.includes(' tok · ')),
+  'agent lines carry their own token count');
+const lastPart = firstParts[firstParts.length - 1].textContent;
+assert(!/NordRouter .* tok ·/.test(lastPart),
+  'a NordRouter line never claims a countable token figure');
+assert(registry.get('models-note').textContent.includes('NordRouter bills every agent'),
+  'table note explains why the account figure is not summed with the agents');
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
-assertEqual(segments.length, 2, '30d draws separate OpenClaw and NordRouter model segments');
-assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, 'models have distinct colours');
+assertEqual(segments.length, 3, '30d draws one segment per model');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 3, 'models have distinct colours');
 assertEqual(all(chart).filter((e) => e.classList.contains('legend-item')).length, 0,
   'history no longer repeats the model list');
 assertEqual(modelSwatch('grok-test', 'xai').style.background, chartColor('grok-test'),
   'OpenClaw model row identifies its chart segment');
+assertEqual(modelSwatch('hermes-model', 'openai').style.background, chartColor('hermes-model'),
+  'Hermes-reported model row identifies its chart segment');
 assertEqual(modelSwatch('nr-route', 'nordrouter').style.background, chartColor('nr-route'),
   'attributed NordRouter route identifies its chart segment');
 assert(!modelSwatch('z-ai/glm-5.3', 'NordRouter'),
   'direct-only model has no invented daily chart attribution');
 assert(!chart.textContent.includes('all models; daily split unavailable'), 'NordRouter route uses model-day data');
 assert(segments.some((e) => segmentLabel(e).includes('nr-route · 20 tokens')) &&
-  !segments.some((e) => segmentLabel(e).includes('nr-route · 21 tokens')),
-  'direct NordRouter daily total replaces comparison-only route total');
-assert(segments.every((e) => segmentLabel(e).includes('day total 30')), 'history excludes the 21-token duplicate');
+  !segments.some((e) => segmentLabel(e).includes('nr-route · 21 tokens')) &&
+  !segments.some((e) => segmentLabel(e).includes('nr-route · 26 tokens')),
+  'direct NordRouter daily total replaces both agents comparison-only route totals');
+assert(segments.every((e) => segmentLabel(e).includes('day total 36')), 'history excludes the 26-token duplicate');
 assertEqual(all(chart).filter((e) => e.tagName === 'TEXT' && e.textContent === '03.10.2026').at(-1).getAttribute('text-anchor'),
   'end', 'last date label stays inside the chart');
 let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, 'history has one summary line');
-assertEqual(summary[0].textContent, 'daily tokens · peak 30', 'linear summary excludes total and estimate note');
+assertEqual(summary[0].textContent, 'daily tokens · peak 36', 'linear summary excludes total and estimate note');
 const initialGrokColor = chartColor('grok-test');
 const initialRouteColor = chartColor('nr-route');
 const changedOrder = { ...MODELS, models: [...MODELS.models].reverse().concat({
@@ -464,33 +489,38 @@ assertEqual(modelSwatch('grok-test', 'xai').style.background, initialGrokColor,
   'other OpenClaw history remains identified when direct daily data is absent');
 renderPeriod(MODELS, QUOTAS);
 windowListeners.resize();
-assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize keeps model segments');
-assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day total 30')),
+assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 3, 'resize keeps model segments');
+assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day total 36')),
   'resize keeps deduplicated history');
 selectedDays = 7;
-renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 9 },
+renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 11 },
   sources: { nordrouter: { tokens: 4, billed_cost_usd: 0.1, complete: true },
     openclaw: { tokens: 5, estimated_cost_usd: 0.05, complete: true },
-    openclaw_nordrouter_comparison_tokens: 7 },
+    openclaw_nordrouter_comparison_tokens: 7,
+    hermes: { tokens: 2, estimated_cost_usd: 0.02, unpriced_models: 0, complete: true },
+    hermes_nordrouter_comparison_tokens: 3 },
   models: [
     { source: 'nordrouter', provider: 'nordrouter', model: 'direct-7d', cost_usd: 0.1, totals: { total: 4 }, daily: [] },
     { source: 'openclaw', provider: 'xai', model: 'grok-7d', cost_usd: 0.05, totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] },
     { source: 'openclaw', provider: 'nordrouter', model: 'nr-7d', cost_usd: 0.2, totals: { total: 7 }, daily: [{ date: '2026-10-03', total: 7 }] },
+    { source: 'hermes', provider: 'openai', model: 'hermes-7d', cost_usd: 0.02, cost_kind: 'estimated', totals: { total: 2 }, daily: [{ date: '2026-10-03', total: 2 }] },
   ], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } }, QUOTAS);
-assert(registry.get('hero').textContent.includes('Total tokens') && registry.get('hero').textContent.includes('9'), '7d overview');
+assert(registry.get('hero').textContent.includes('Total tokens') && registry.get('hero').textContent.includes('11'), '7d overview');
 heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
-assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,other OpenClaw 5',
-  '7d overview updates both source chips');
+assertEqual(heroPills.map((e) => e.textContent).join(','),
+  'direct NordRouter 4,other OpenClaw 5,other Hermes 2',
+  '7d overview updates both agent chips');
 assert(registry.get('models').textContent.includes('direct-7d'), '7d direct model row');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
-assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 9')), '7d history');
+assert(registry.get('models').textContent.includes('hermes-7d'), '7d Hermes table');
+assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 11')), '7d history');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
-assertEqual(segments.length, 2, '7d draws both model segments');
-assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, '7d models have distinct colours');
+assertEqual(segments.length, 3, '7d draws both agent segments and the direct route');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 3, '7d models have distinct colours');
 assert(segments.some((e) => segmentLabel(e).includes('nr-7d · 4 tokens')), '7d NordRouter segment reconciles to direct source');
 summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, '7d has one summary line');
-assertEqual(summary[0].textContent, 'daily tokens · peak 9', '7d linear summary excludes total and estimate note');
+assertEqual(summary[0].textContent, 'daily tokens · peak 11', '7d linear summary excludes total and estimate note');
 assert(registry.get('metrics').textContent.includes('Billed spend'), 'NordRouter metric follows selection');
 assert(!registry.get('selected-top-label').textContent.includes('7d'), 'top-model label has no period suffix');
 Object.entries(sectionNotes).forEach(([id, value]) => {
@@ -524,9 +554,11 @@ assert(segments.some((e) => segmentLabel(e).includes('Shared · 11 tokens · day
   'combined model includes direct-allocated NordRouter and both other providers exactly once');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
   'one colour is assigned per distinct model');
-assert(['nordrouter', 'xai', 'local'].every((source) =>
+assert(['nordrouter'].every((source) =>
   modelSwatch('Shared', source).style.background === chartColor('Shared')),
-  'each participating source row of a shared model maps to its one chart colour');
+  'the merged row of a shared model maps to its one chart colour');
+assertEqual(registry.get('models').children.filter((row) => row.children[1].children[0].textContent.startsWith('Shared')).length, 1,
+  'a model reported on several routes still occupies one row');
 assertEqual(historyScale, 'linear', 'linear is the default history scale');
 assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('linear token axis'),
   'initial history chart has a token axis');
@@ -647,6 +679,8 @@ const mergedFixture = { ...MODELS, models: [
     totals: { total: 1234567 }, cost_usd: 2.185573, daily: [] },
   { source: 'openclaw', provider: 'nordrouter', model: 'z-ai/glm-5.3',
     totals: { total: 765432, input: 70 }, cost_usd: 9, daily: [] },
+  { source: 'hermes', provider: 'nordrouter', model: 'z-ai/glm-5.3',
+    totals: { total: 111222, input: 30 }, cost_usd: null, daily: [] },
   { source: 'nordrouter', provider: 'nordrouter', model: 'google/gemini-3.6-flash',
     totals: { total: 42 }, cost_usd: 0.000012, daily: [] },
   { source: 'openclaw', provider: 'nordrouter', model: 'unmatched-route',
@@ -657,31 +691,106 @@ const mergedFixture = { ...MODELS, models: [
 const originalRows = JSON.stringify(mergedFixture.models);
 renderModels(mergedFixture);
 assertEqual(registry.get('models').children.length, 4, 'matched route becomes one billed row');
-const rowFor = (name) => registry.get('models').children.find((row) => row.children[1].textContent === name);
+const rowFor = (name) => registry.get('models').children.find((row) =>
+  all(row.children[1]).some((e) => e.classList.contains('model-name') && e.textContent === name));
 const matchedRow = rowFor('z-ai/glm-5.3');
-assertEqual(matchedRow.children[0].textContent, 'NordRouter', 'direct model source has its original label');
-assertEqual(rowFor('unmatched-route').children[0].textContent, 'nordrouter', 'unmatched route source is unchanged');
-assertEqual(rowFor('other').children[0].textContent, 'xai', 'other provider source is unchanged');
-assertEqual(all(matchedRow.children[6]).find((e) => e.tagName === 'S').textContent, '765.4K',
-  'OpenClaw tokens use compact formatting and are crossed out before direct tokens');
+assertEqual(routeName(matchedRow), 'NordRouter', 'direct model source has its original label');
+assertEqual(routeName(rowFor('unmatched-route')), 'nordrouter', 'unmatched route source is unchanged');
+assertEqual(routeName(rowFor('other')), 'xai', 'other provider source is unchanged');
+const struck = all(matchedRow.children[6]).filter((e) => e.tagName === 'S');
+const billedParts = all(matchedRow.children[1]).filter((e) => e.classList.contains('part'));
+assertEqual(billedParts.length, 3, 'every reporting source gets its own line');
+assertEqual(billedParts[billedParts.length - 1].textContent,
+  'NordRouter · z-ai/glm-5.3 · unknown · $2.19 billed',
+  'the account figure is listed last and claims no token count: it already includes the agents');
+assertEqual(struck.length, 1, 'one crossed-out figure per model, not one per agent');
+assertEqual(struck[0].textContent, '876.7K', 'the crossed-out figure sums every agent report');
 assert(matchedRow.children[6].textContent.endsWith('1.2M'), 'direct tokens use compact formatting');
-assert(all(matchedRow.children[6]).find((e) => e.tagName === 'S').title.includes('765,432') &&
+assert(struck[0].title.includes('876,654') &&
   all(matchedRow.children[6]).find((e) => e.classList.contains('direct')).title.includes('1,234,567'),
   'exact underlying totals remain accessible in titles');
+assert(struck[0].title.startsWith('Agent-reported'), 'the struck figure names its provenance');
 assertEqual(matchedRow.children[7].textContent, '$2.19billed',
   'billed USD rounds to two decimals and replaces route estimate');
-assertEqual(matchedRow.children[2].textContent, '70', 'comparison token categories retain provenance');
+assertEqual(matchedRow.children[2].textContent, '100',
+  'comparison token categories sum both agents and retain provenance');
 const directOnly = rowFor('google/gemini-3.6-flash');
 assertEqual(all(directOnly.children[6]).filter((e) => e.tagName === 'S').length, 0,
-  'direct-only model has no invented OpenClaw comparison');
+  'direct-only model has no invented agent comparison');
 assertEqual(directOnly.children[7].textContent, '$0.00billed',
   'small billed cost still displays exactly two decimals');
 assertEqual(rowFor('other').children[7].textContent, '$0.56estimated',
   'estimated USD also rounds to exactly two decimals');
-assert(rowFor('unmatched-route').children[7].textContent.includes('no direct match') &&
-  !rowFor('unmatched-route').children[7].textContent.includes('$3'),
-  'unmatched route estimate is not presented as a bill');
+assert(rowFor('unmatched-route').children[7].textContent === '$3.00estimated',
+  'agent-only route keeps its estimate but is labelled estimated');
 assertEqual(JSON.stringify(mergedFixture.models), originalRows, 'table merge never mutates API models');
+/* Spellings that bill as one model share a model_key and must collapse. */
+renderModels({ models: [
+  { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash:fjord',
+    model_key: 'deepseek-v4.1-flash', totals: { total: 100 }, cost_usd: 1, daily: [] },
+  { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
+    model_key: 'deepseek-v4.1-flash', totals: { total: 50 }, cost_usd: 0.5, daily: [] },
+  { source: 'openclaw', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
+    model_key: 'deepseek-v4.1-flash', totals: { total: 30 }, cost_usd: 9, daily: [] },
+  { source: 'hermes', provider: 'openai', model: 'gpt-6-sol-900k',
+    model_key: 'gpt-6-sol', totals: { total: 7 }, cost_usd: null, daily: [] },
+  { source: 'openclaw', provider: 'openai', model: 'gpt-6-sol',
+    model_key: 'gpt-6-sol', totals: { total: 3 }, cost_usd: 0.1, daily: [] },
+  { source: 'hermes', provider: 'nordrouter', model: 'minimax-m3',
+    model_key: 'minimax-m3', totals: { total: 1 }, cost_usd: null, daily: [] },
+  { source: 'nordrouter', provider: 'nordrouter', model: 'minimax/minimax-m3',
+    model_key: 'minimax-m3', totals: { total: 60 }, cost_usd: 0.6, daily: [] },
+  { source: 'openclaw', provider: 'nordrouter', model: 'minimax/minimax-m3',
+    model_key: 'minimax-m3', totals: { total: 40 }, cost_usd: 0, daily: [] },
+] });
+assertEqual(registry.get('models').children.length, 3, 'routing and context variants collapse into one row each');
+const flashRow = registry.get('models').children.find((row) => row.children[1].children[0].textContent.startsWith('deepseek/deepseek-v4.1-flash'));
+assertEqual(flashRow.children[1].children[0].textContent, 'deepseek/deepseek-v4.1-flash',
+  'the most common spelling labels the merged row');
+assertEqual(flashRow.children[6].textContent, '30150', 'both billed spellings are summed before the crossed-out agent total');
+assertEqual(flashRow.children[7].textContent, '$1.50billed', 'billed cost of both spellings is summed');
+const solRow = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'gpt-6-sol');
+assertEqual(solRow.children[6].textContent, '10', 'agent rows of one model are summed');
+assertEqual(solRow.children[7].textContent, '$0.33estimated',
+  'Hermes tokens are priced at the rate OpenClaw reports for the same model');
+const m3Row = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'minimax/minimax-m3');
+assertEqual(m3Row.children[1].children[0].textContent, 'minimax/minimax-m3',
+  'the most common spelling labels the row even when a bare alias is shorter');
+assertEqual(m3Row.children[6].textContent, '4160',
+  'every spelling of one model lands in a single row: crossed-out agent total, then direct');
+
+/* Labels drop routing and context suffixes but keep the vendor prefix. */
+renderModels({ models: [
+  { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4-flash:saga',
+    model_key: 'deepseek-v4-flash', totals: { total: 10 }, cost_usd: 1, daily: [] },
+  { source: 'hermes', provider: 'openai', model: 'gpt-6-sol-900k',
+    model_key: 'gpt-6-sol', totals: { total: 5 }, cost_usd: null, daily: [] },
+]});
+assertEqual(registry.get('models').children.map((row) => row.children[1].children[0].textContent).join(','),
+  'deepseek/deepseek-v4-flash,gpt-6-sol',
+  'routing and context suffixes never leak into the model label');
+
+/* Hermes cost is derived when the page loads each source separately. */
+const partialState = {
+  days: 7, quotaParts: {}, quotas: null, quotaPending: {}, errors: {}, requests: {}, parts: {
+    openclaw: { meta: { days: 7, openclaw_status: 'ok', start_date: 'p', end_date: 'q' },
+      sources: { openclaw: { tokens: 9000, estimated_cost_usd: 9, priced_models: 1, unpriced_models: 0, complete: true } },
+      models: [{ source: 'openclaw', provider: 'openai', model: 'gpt-6-sol', model_key: 'gpt-6-sol',
+        totals: { total: 9000 }, cost_usd: 9, daily: [] }] },
+    hermes: { meta: { days: 7, hermes_status: 'ok', start_date: 'p', end_date: 'q' },
+      sources: { hermes: { tokens: 1000, estimated_cost_usd: null, priced_models: 0, unpriced_models: 1, complete: true } },
+      models: [{ source: 'hermes', provider: 'openai', model: 'gpt-6-sol-900k', model_key: 'gpt-6-sol',
+        totals: { total: 1000 }, cost_usd: null, daily: [] }] },
+    nordrouter: { meta: { days: 7, nordrouter_status: 'ok', start_date: 'p', end_date: 'q' },
+      sources: { nordrouter: { tokens: 0, billed_cost_usd: 0, complete: true } }, models: [] },
+  },
+};
+renderAvailable(partialState);
+const partialHero = registry.get('hero').textContent;
+assert(partialHero.includes('Estimated cost') && partialHero.includes('$10.00'),
+  'a Hermes row borrows the rate its model already reports from OpenClaw');
+assert(!partialHero.includes('unpriced'),
+  'a derived rate clears the unpriced marker instead of leaving cost blank');
 
 const SORT_MODELS = { ...MODELS, models: [
   { source: 'openclaw', provider: 'xai', model: 'Alpha', account: 'unknown', cost_usd: 1,
@@ -691,7 +800,7 @@ const SORT_MODELS = { ...MODELS, models: [
   { source: 'openclaw', provider: 'xai', model: 'Beta', cost_usd: null,
     totals: { total: 20, input: 12, output: 3, cache_read: 4, cache_write: 1 }, daily: [] },
 ] };
-const modelOrder = () => registry.get('models').children.map((row) => row.children[1].textContent).join(',');
+const modelOrder = () => registry.get('models').children.map((row) => row.children[1].children[0].textContent).join(',');
 const sortClick = (key) => registry.get('model-sort-' + key).listeners.click[0]();
 assert(['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd']
   .every((key) => registry.get('model-sort-' + key).listeners.click.length === 1),
@@ -792,21 +901,30 @@ async function waitForReload() {
       .map((row) => row.provider === 'codex' && row.account === 'codex_1'
         ? { ...row, used_percentage: used, remaining_percentage: 100 - used } : row) };
   };
+  const sourceOf = (url) => url.includes('nordrouter') ? 'nordrouter'
+    : (url.includes('source=hermes') ? 'hermes' : 'openclaw');
   const answer = (entry, days) => reply(entry, entry.url.startsWith('/api/v1/quotas')
-    ? quotaResponse(entry.url) : modelFor(days, entry.url.includes('nordrouter') ? 'nordrouter' : 'openclaw'));
+    ? quotaResponse(entry.url) : modelFor(days, sourceOf(entry.url)));
+  // Hermes contributes no tokens in this scenario: the point is that its part
+  // must complete before the canonical total is published, not that it changes it.
   const modelFor = (days, source, date = '2026-10-03') => ({
     meta: { ...MODELS.meta, start_date: date, end_date: date, days,
       openclaw_status: source === 'openclaw' ? 'ok' : 'pending',
+      hermes_status: source === 'hermes' ? 'ok' : 'pending',
       nordrouter_status: source === 'nordrouter' ? 'ok' : 'pending' },
     sources: source === 'nordrouter'
       ? { nordrouter: { tokens: days, billed_cost_usd: 0.125, complete: true },
           openclaw_nordrouter_comparison_tokens: 0 }
-      : { openclaw: { tokens: 2, estimated_cost_usd: 0.03, complete: true },
-          openclaw_nordrouter_comparison_tokens: 0 },
+      : source === 'hermes'
+        ? { hermes: { tokens: 0, estimated_cost_usd: null, unpriced_models: 0, complete: true },
+            hermes_nordrouter_comparison_tokens: 0 }
+        : { openclaw: { tokens: 2, estimated_cost_usd: 0.03, complete: true },
+            openclaw_nordrouter_comparison_tokens: 0 },
     source_daily: { nordrouter: source === 'nordrouter' ? [{ date, tokens: days }] : [] },
     models: source === 'nordrouter'
       ? [{ source, provider: source, model: 'direct-' + days + 'd', cost_usd: 0.125,
           totals: { total: days }, daily: [] }]
+      : source === 'hermes' ? []
       : [{ source, provider: 'xai', model: 'grok-' + days + 'd', cost_usd: 0.03,
           totals: { total: 2 }, daily: [{ date, total: 2 }] }],
   });
@@ -822,7 +940,8 @@ async function waitForReload() {
   assertEqual(JSON.parse(initialUpdate.options.body).view, '7d', 'initial update requests seven days');
   assert(request(quotaFor('all')) && request(quotaFor('codex')) && request(quotaFor('grok')) &&
     request(quotaFor('grok_bot')) && request(urlFor(7, 'nordrouter')) &&
-    request(urlFor(7, 'openclaw')), 'independent GETs start before full refresh completes');
+    request(urlFor(7, 'openclaw')) && request(urlFor(7, 'hermes')),
+    'independent GETs start before full refresh completes');
   reply(request(quotaFor('codex')), quotaResponse(quotaFor('codex')));
   await settle();
   assert(cardFor(codexRoot, 'first@example.test'), 'Codex renders while Grok, cache, OpenClaw and update wait');
@@ -841,6 +960,7 @@ async function waitForReload() {
   assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('10% used'),
     'late stale cache cannot overwrite fresh Codex quota');
   reply(request(urlFor(7, 'nordrouter')), modelFor(7, 'nordrouter'));
+  reply(request(urlFor(7, 'hermes')), modelFor(7, 'hermes'));
   await settle();
   assert(registry.get('models').textContent.includes('direct-7d'), 'direct model renders before OpenClaw');
   assert(all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 7')),
@@ -864,6 +984,7 @@ async function waitForReload() {
   assert(!pendingFetches.slice(beforeOne).some((entry) => entry.url === '/api/v1/display/update'),
     'period switch avoids provider refresh');
   reply(request(urlFor(1, 'openclaw'), beforeOne), modelFor(1, 'openclaw'));
+  reply(request(urlFor(1, 'hermes'), beforeOne), modelFor(1, 'hermes'));
   reply(request(quotaFor('grok'), beforeOne), quotaResponse(quotaFor('grok')));
   await settle();
   assert(registry.get('quotas').textContent.includes('Grok Build'), 'Grok renders while Codex is pending');
@@ -930,7 +1051,8 @@ async function waitForReload() {
     ok: true, json: () => Promise.resolve(modelFor(7, 'openclaw')),
   });
   pendingFetches.slice(beforeSuccessfulRefresh).filter((entry) =>
-    entry.url.startsWith('/api/v1/quotas') || entry.url === urlFor(7, 'nordrouter'))
+    entry.url.startsWith('/api/v1/quotas') || entry.url === urlFor(7, 'nordrouter') ||
+    entry.url === urlFor(7, 'hermes'))
     .forEach((entry) => answer(entry, 7));
   await settle();
   assert(!registry.get('error').textContent.includes('current Gateway failure'),
@@ -946,7 +1068,7 @@ async function waitForReload() {
     }
     const body = url.startsWith('/api/v1/quotas')
       ? { ...quotaResponse(url, used), generated_at_utc: new Date().toISOString() }
-      : modelFor(selectedDays, url.includes('nordrouter') ? 'nordrouter' : 'openclaw', currentDay);
+      : modelFor(selectedDays, sourceOf(url), currentDay);
     return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
   };
   assert(typeof autoRefreshTick === 'function', 'automatic timer is installed');

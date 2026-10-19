@@ -694,3 +694,37 @@ def test_html_dashboard_routes_are_self_contained_and_do_not_collect(monkeypatch
         assert '<script src=' not in response.text
         assert '<link ' not in response.text
         assert 'innerHTML' not in response.text
+
+
+def test_model_breakdown_source_hermes_isolates_the_agent(monkeypatch):
+    """Hermes is an independent source: it must be requestable on its own."""
+    requested = []
+    fake = {
+        "meta": {"days": 7, "start_date": "2026-10-13", "end_date": "2026-10-19",
+                 "openclaw_status": "pending", "hermes_status": "ok",
+                 "nordrouter_status": "pending"},
+        "totals": {"total": None},
+        "source_daily": {"nordrouter": []},
+        "sources": {"hermes": {"tokens": 120, "estimated_cost_usd": 0.5,
+                               "priced_models": 1, "unpriced_models": 0, "complete": True},
+                    "hermes_nordrouter_comparison_tokens": 40},
+        "models": [
+            {"source": "hermes", "provider": "openai", "model": "gpt-5.6-sol",
+             "totals": {"total": 120}, "daily": [], "cost_usd": 0.5, "cost_kind": "estimated"},
+        ],
+    }
+
+    def build(days=30, include_daily=True, source="all"):
+        requested.append((days, include_daily, source))
+        return fake
+
+    monkeypatch.setattr(local_display_service, "build_model_breakdown", build)
+    response = TestClient(local_display_service.app).get(
+        "/api/v1/model-breakdown?days=7&daily=false&source=hermes")
+
+    assert response.status_code == 200
+    assert requested == [(7, False, "hermes")]
+    body = response.json()
+    assert body["meta"]["hermes_status"] == "ok"
+    assert body["sources"]["hermes"]["tokens"] == 120
+    assert body["models"][0]["cost_kind"] == "estimated"
