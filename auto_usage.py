@@ -2828,6 +2828,21 @@ def build_legacy_model_breakdown(days: int = 30, *, include_daily: bool = True) 
     }
 
 
+MODEL_KEY_SUFFIX = re.compile(r'-\d+k$')
+
+
+def model_key(model: str) -> str:
+    """Collapse the names that bill as one model into a single display key.
+
+    NordRouter appends a routing variant (``:fjord``, ``:saga``), agents prefix
+    the provider (``z-ai/``), and context-window variants carry a ``-900k``
+    suffix. Those are the same underlying model, so the dashboard shows one row
+    with the summed tokens instead of one row per spelling.
+    """
+    base = (model or '').split(':', 1)[0].split('/')[-1].strip().lower()
+    return MODEL_KEY_SUFFIX.sub('', base)
+
+
 def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source: str = 'all') -> dict[str, object]:
     """Agent rollups for comparison; direct NordRouter is canonical for its route.
 
@@ -2893,6 +2908,8 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
                     'cost_usd': float(model['amount_usd']),
                 })
 
+    for row in models:
+        row.setdefault('model_key', model_key(row['model']))
     models.sort(key=lambda row: row['totals']['total'], reverse=True)
     # Both agents are canonical for every route except NordRouter, which the
     # account API bills once for all of them.

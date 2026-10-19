@@ -192,6 +192,7 @@ class ModelBreakdownEntry(BaseModel):
     source: str = Field(description='Data source: openclaw, hermes, or direct nordrouter. Agent NordRouter-route rows are comparison-only and excluded from totals.')
     provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')
     model: str = Field(description='Model identifier reported by the source; names alone do not prove account identity.')
+    model_key: Optional[str] = Field(default=None, description='Display key shared by every spelling that bills as one model: NordRouter routing variants (:fjord, :saga), provider prefixes, and -900k context variants collapse into one key. Group rows by this key to show and sum one model.')
     totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window.')
     daily: list[ModelDailyEntry] = Field(default_factory=list, description='Per-day token entries for this model, ordered by date. Empty when ?daily=false is passed.')
 

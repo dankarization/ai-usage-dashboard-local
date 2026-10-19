@@ -80,7 +80,7 @@ def test_page_marks_brand_and_colors_by_remaining_capacity():
 
 
 def test_page_labels_list_price_estimate_and_never_fakes_it():
-    assert 'OpenClaw estimated cost' in DASHBOARD_HTML
+    assert 'Estimated cost' in DASHBOARD_HTML
     assert 'NordRouter billed cost' in DASHBOARD_HTML
     assert 'excludes NordRouter route' not in DASHBOARD_HTML
     assert 'actual direct account window' not in DASHBOARD_HTML
@@ -100,9 +100,10 @@ def test_history_owns_model_table_and_note_is_in_footer():
     assert history is not None
     assert 'id="history"' in history.group(1)
     assert 'id="model-table"' in history.group(1)
-    note = ('NordRouter rows: crossed-out OpenClaw and Hermes route comparisons → direct tokens and billed USD. '
-            'Input/output/cache are agent comparisons, not direct token types. '
-            'Unmatched routes have no direct bill; model rows are not account totals.')
+    note = ('One row per model: spellings that bill as one model are summed. '
+            'NordRouter rows: crossed-out agent total → direct tokens and billed USD. '
+            'Input/output/cache on that row are agent comparisons, not direct token types. '
+            'Model rows are not account totals.')
     footer = re.search(r'<footer class="foot">(.*?)</footer>', DASHBOARD_HTML, re.S)
     assert footer is not None
     assert footer.group(1).count(note) == 1
