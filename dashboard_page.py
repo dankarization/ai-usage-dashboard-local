@@ -635,7 +635,6 @@ function renderHero(payload) {
   var gateway = sources.openclaw || {};
   var hermes = sources.hermes || {};
   var agents = [gateway, hermes];
-  var agentTokens = agents.reduce(function (sum, source) { return sum + (source.tokens || 0); }, 0);
   var agentPriced = agents.filter(function (source) { return number(source.estimated_cost_usd); });
   var agentCost = agentPriced.length
     ? agentPriced.reduce(function (sum, source) { return sum + source.estimated_cost_usd; }, 0) : null;
@@ -656,7 +655,12 @@ function renderHero(payload) {
   if (full) {
     var pills = node('div', undefined, root); pills.className = 'pillrow';
     node('span', 'direct NordRouter ' + tokens(direct.tokens), pills).className = 'pill';
-    node('span', 'agents ' + tokens(agentTokens), pills).className = 'pill';
+    var gatewayPill = node('span', 'other OpenClaw ' + tokens(gateway.tokens), pills);
+    gatewayPill.className = 'pill';
+    gatewayPill.title = 'OpenClaw tokens outside the NordRouter account';
+    var hermesPill = node('span', 'other Hermes ' + tokens(hermes.tokens), pills);
+    hermesPill.className = 'pill';
+    hermesPill.title = 'Hermes tokens outside the NordRouter account';
   }
 }
 

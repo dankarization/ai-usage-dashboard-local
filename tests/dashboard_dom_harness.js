@@ -415,8 +415,9 @@ assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('strip-
 assert(!/(?:7|30)d/.test(heroText), 'overview headings contain no period suffix');
 assert(heroText.includes('Total tokens') && heroText.includes('30'), 'default overview uses canonical 30d total');
 let heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
-assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 20,agents 16',
-  '30d overview sums both agents instead of splitting them');
+assertEqual(heroPills.map((e) => e.textContent).join(','),
+  'direct NordRouter 20,other OpenClaw 10,other Hermes 6',
+  '30d overview keeps a separate chip per agent');
 assert(heroPills.every((e) => e.className === 'pill'), 'source chips keep the pill visual hook');
 assert(heroText.includes('NordRouter billed cost') && heroText.includes('$0.4000'), 'direct billed cost shown');
 assert(heroText.includes('Estimated cost') && heroText.includes('$0.3000'),
@@ -499,8 +500,9 @@ renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 11
   ], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } }, QUOTAS);
 assert(registry.get('hero').textContent.includes('Total tokens') && registry.get('hero').textContent.includes('11'), '7d overview');
 heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
-assertEqual(heroPills.map((e) => e.textContent).join(','), 'direct NordRouter 4,agents 7',
-  '7d overview sums the agents into one chip');
+assertEqual(heroPills.map((e) => e.textContent).join(','),
+  'direct NordRouter 4,other OpenClaw 5,other Hermes 2',
+  '7d overview updates both agent chips');
 assert(registry.get('models').textContent.includes('direct-7d'), '7d direct model row');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
 assert(registry.get('models').textContent.includes('hermes-7d'), '7d Hermes table');
