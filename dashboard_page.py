@@ -639,15 +639,11 @@ function renderHero(payload) {
   var agentCost = agentPriced.length
     ? agentPriced.reduce(function (sum, source) { return sum + source.estimated_cost_usd; }, 0) : null;
   var unpriced = agents.reduce(function (sum, source) { return sum + (source.unpriced_models || 0); }, 0);
-  var comparison = (sources.openclaw_nordrouter_comparison_tokens || 0) +
-    (sources.hermes_nordrouter_comparison_tokens || 0);
   var root = $('hero');
   root.replaceChildren();
   var full = direct.complete && gateway.complete && hermes.complete;
   stripItem(root, 'Total tokens', full ? tokens(payload.totals.total) : '—',
     full ? null : 'incomplete source · total unavailable', !full);
-  // The agents' own NordRouter figures are comparisons: the account bills once.
-  stripItem(root, 'NordRouter comparison', tokens(comparison), null, false);
   stripItem(root, 'NordRouter billed cost', usd(direct.billed_cost_usd),
     null, !number(direct.billed_cost_usd));
   stripItem(root, 'Estimated cost', usd(agentCost),

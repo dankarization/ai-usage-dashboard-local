@@ -410,8 +410,8 @@ assert(registry.get('codex').textContent.includes('Weekly') &&
   'provider quota period abbreviations are not rendered outside selector buttons');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('strip-item'))
   .map((e) => e.children[0].textContent).join(','),
-  'Total tokens,NordRouter comparison,NordRouter billed cost,Estimated cost',
-  'token cards precede price cards in responsive DOM order');
+  'Total tokens,NordRouter billed cost,Estimated cost',
+  'the strip keeps three figures and drops both agent comparisons');
 assert(!/(?:7|30)d/.test(heroText), 'overview headings contain no period suffix');
 assert(heroText.includes('Total tokens') && heroText.includes('30'), 'default overview uses canonical 30d total');
 let heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
@@ -422,8 +422,7 @@ assert(heroPills.every((e) => e.className === 'pill'), 'source chips keep the pi
 assert(heroText.includes('NordRouter billed cost') && heroText.includes('$0.4000'), 'direct billed cost shown');
 assert(heroText.includes('Estimated cost') && heroText.includes('$0.3000'),
   'agent estimates are summed on one line');
-assert(heroText.includes('NordRouter comparison') && heroText.includes('26'),
-  'both agents compare against the same billed account');
+assert(!heroText.includes('comparison'), 'agent NordRouter comparisons are gone from the strip');
 assert(registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct model appears in unified table');
 assertEqual(registry.get('models').children.map((row) => routeName(row)).join(','),
   'nordrouter,NordRouter,xai,openai', 'one row per model, labelled by its route');

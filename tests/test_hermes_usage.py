@@ -213,6 +213,41 @@ def test_breakdown_adds_hermes_and_keeps_nordrouter_comparison_only(monkeypatch,
     assert result['sources']['openclaw_nordrouter_comparison_tokens'] == 0
 
 
+def test_hermes_rows_are_priced_at_the_rate_another_source_reports(monkeypatch, tmp_path):
+    """Hermes reports no cost, so its rows borrow the per-token rate of the same model.
+
+    OpenClaw bills gpt-6-sol at a known amount for a known token count; Hermes
+    usage of the same model is priced at that ratio instead of staying blank.
+    """
+    import auto_usage
+    import openclaw_usage
+
+    today = date.today()
+    make_db(tmp_path / 'state.db', [
+        {'model': 'gpt-6-sol', 'provider': 'openai', 'input': 1_000, 'last_seen': stamp(today)},
+        {'model': 'unknown-model', 'provider': 'openai', 'input': 500, 'last_seen': stamp(today)},
+    ])
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {})
+    monkeypatch.setattr(openclaw_usage, 'model_entries', lambda *a, **k: [
+        {'source': 'openclaw', 'provider': 'openai', 'model': 'gpt-6-sol',
+         'totals': {'input': 9_000, 'output': 0, 'cache_read': 0, 'cache_write': 0, 'total': 9_000},
+         'daily': [], 'cost_usd': 9.0, 'cost_kind': 'estimated'},
+    ])
+    monkeypatch.setattr(auto_usage, 'get_date_range',
+                        lambda days: (today.isoformat(), today.isoformat(), None, None))
+
+    result = auto_usage.build_model_breakdown(days=1, source='all')
+
+    rows = {row['model']: row for row in result['models'] if row['source'] == 'hermes'}
+    # 1_000 tokens at the 9.0 / 9_000 rate OpenClaw reports for the same model.
+    assert rows['gpt-6-sol']['cost_usd'] == pytest.approx(1.0)
+    assert rows['gpt-6-sol']['cost_kind'] == 'estimated'
+    # A model nobody priced stays unknown rather than guessed.
+    assert rows['unknown-model']['cost_usd'] is None
+
+
 def test_breakdown_reports_hermes_as_not_configured_without_state_db(monkeypatch, tmp_path):
     import auto_usage
 

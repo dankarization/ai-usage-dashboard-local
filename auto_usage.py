@@ -2911,6 +2911,28 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     for row in models:
         row.setdefault('model_key', model_key(row['model']))
     models.sort(key=lambda row: row['totals']['total'], reverse=True)
+    # Hermes records no cost of its own. Instead of leaving its rows blank, price
+    # them at the rate the same model already carries in this window (OpenClaw
+    # rollups or the NordRouter bill): cost per token, not a second price opinion.
+    rates: dict[str, list[float]] = {}
+    for row in models:
+        total = row['totals'].get('total') or 0
+        cost = row.get('cost_usd')
+        if cost is None or total <= 0:
+            continue
+        bucket = rates.setdefault(row['model_key'], [0.0, 0])
+        bucket[0] += float(cost)
+        bucket[1] += int(total)
+    for row in models:
+        if row['source'] != 'hermes' or row.get('cost_usd') is not None:
+            continue
+        if row['provider'].lower() == 'nordrouter':
+            continue  # the account API bills this route once for every agent
+        bucket = rates.get(row['model_key'])
+        if not bucket or not bucket[1]:
+            continue
+        row['cost_usd'] = bucket[0] / bucket[1] * row['totals']['total']
+        row['cost_kind'] = 'estimated'
     # Both agents are canonical for every route except NordRouter, which the
     # account API bills once for all of them.
     agent_models = [m for m in models if m['source'] in ('openclaw', 'hermes')
