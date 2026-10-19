@@ -176,6 +176,19 @@ function cardFor(root, needle) {
 }
 function segmentLabel(segment) { return segment.getAttribute('aria-label'); }
 function tooltipText(root) { return all(root).find((e) => e.classList.contains('history-tooltip')).textContent; }
+function modelRow(name, source) {
+  return registry.get('models').children.find((row) => row.children[1].children[0].textContent === name &&
+    (!source || row.children[0].textContent === source));
+}
+function modelSwatch(name, source) {
+  const row = modelRow(name, source);
+  return row && all(row.children[1]).find((e) => e.classList.contains('model-swatch'));
+}
+function chartColor(name) {
+  const segment = all(registry.get('history')).find((e) => e.tagName === 'RECT' &&
+    segmentLabel(e).startsWith(name + ' · '));
+  return segment && segment.getAttribute('fill');
+}
 
 /* ---------------- pure helpers ---------------- */
 assertEqual(severity(10), 'ok', 'severity(10)');
@@ -408,9 +421,14 @@ const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 2, '30d draws separate OpenClaw and NordRouter model segments');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, 'models have distinct colours');
-let legend = all(chart).filter((e) => e.classList.contains('legend-item'));
-assertEqual(legend.map((e) => e.textContent).join(','), 'grok-test,nr-route',
-  'legend identifies models without provider prefixes');
+assertEqual(all(chart).filter((e) => e.classList.contains('legend-item')).length, 0,
+  'history no longer repeats the model list');
+assertEqual(modelSwatch('grok-test', 'xai').style.background, chartColor('grok-test'),
+  'OpenClaw model row identifies its chart segment');
+assertEqual(modelSwatch('nr-route', 'nordrouter').style.background, chartColor('nr-route'),
+  'attributed NordRouter route identifies its chart segment');
+assert(!modelSwatch('z-ai/glm-5.3', 'NordRouter'),
+  'direct-only model has no invented daily chart attribution');
 assert(!chart.textContent.includes('all models; daily split unavailable'), 'NordRouter route uses model-day data');
 assert(segments.some((e) => segmentLabel(e).includes('nr-route · 20 tokens')) &&
   !segments.some((e) => segmentLabel(e).includes('nr-route · 21 tokens')),
@@ -421,6 +439,30 @@ assertEqual(all(chart).filter((e) => e.tagName === 'TEXT' && e.textContent === '
 let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, 'history has one summary line');
 assertEqual(summary[0].textContent, 'daily tokens · peak 30', 'linear summary excludes total and estimate note');
+const initialGrokColor = chartColor('grok-test');
+const initialRouteColor = chartColor('nr-route');
+const changedOrder = { ...MODELS, models: [...MODELS.models].reverse().concat({
+  source: 'openclaw', provider: 'local', model: 'a-first', totals: { total: 1 },
+  daily: [{ date: '2026-10-03', total: 1 }],
+}) };
+renderHistory(changedOrder);
+renderModels(changedOrder);
+assertEqual(chartColor('grok-test'), initialGrokColor, 'another model and input order do not recolour Grok');
+assertEqual(chartColor('nr-route'), initialRouteColor, 'another model and input order do not recolour route');
+assertEqual(modelSwatch('grok-test', 'xai').style.background, initialGrokColor,
+  'table swatch follows stable chart colour after refresh');
+registry.get('model-sort-model').listeners.click[0]();
+assertEqual(modelSwatch('nr-route', 'nordrouter').style.background, initialRouteColor,
+  'sorting table does not recolour charted model');
+registry.get('model-sort-model').listeners.click[0]();
+registry.get('model-sort-model').listeners.click[0]();
+renderHistory({ ...MODELS, source_daily: { nordrouter: [] } });
+renderModels(MODELS);
+assert(!modelSwatch('nr-route', 'nordrouter'),
+  'a route with no direct daily tokens must not claim chart attribution');
+assertEqual(modelSwatch('grok-test', 'xai').style.background, initialGrokColor,
+  'other OpenClaw history remains identified when direct daily data is absent');
+renderPeriod(MODELS, QUOTAS);
 windowListeners.resize();
 assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize keeps model segments');
 assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day total 30')),
@@ -466,21 +508,25 @@ assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('
   'allocated model bars preserve canonical day total');
 assertEqual(new Set(all(chart).filter((e) => e.tagName === 'RECT').map((e) => e.getAttribute('fill'))).size, 3,
   'three individual models keep distinct colours');
-renderHistory({ models: [
+const sharedHistory = { models: [
   { source: 'openclaw', provider: 'nordrouter', model: 'Shared', daily: [{ date: '2026-10-03', total: 3 }] },
   { source: 'openclaw', provider: 'xai', model: 'Shared', daily: [{ date: '2026-10-03', total: 5 }] },
   { source: 'openclaw', provider: 'local', model: 'Shared', daily: [{ date: '2026-10-03', total: 2 }] },
   { source: 'openclaw', provider: 'openai', model: 'Other', daily: [{ date: '2026-10-03', total: 1 }] },
-], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } });
-legend = all(chart).filter((e) => e.classList.contains('legend-item'));
-assertEqual(legend.map((e) => e.textContent).join(','), 'Other,Shared',
-  'the same model across providers has one legend entry');
+], source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 4 }] } };
+renderHistory(sharedHistory);
+renderModels(sharedHistory);
+assertEqual(all(chart).filter((e) => e.classList.contains('legend-item')).length, 0,
+  'shared model does not recreate the duplicate legend');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 2, 'same model draws one combined segment per day');
 assert(segments.some((e) => segmentLabel(e).includes('Shared · 11 tokens · day total 12')),
   'combined model includes direct-allocated NordRouter and both other providers exactly once');
 assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
   'one colour is assigned per distinct model');
+assert(['nordrouter', 'xai', 'local'].every((source) =>
+  modelSwatch('Shared', source).style.background === chartColor('Shared')),
+  'each participating source row of a shared model maps to its one chart colour');
 assertEqual(historyScale, 'linear', 'linear is the default history scale');
 assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label').includes('linear token axis'),
   'initial history chart has a token axis');

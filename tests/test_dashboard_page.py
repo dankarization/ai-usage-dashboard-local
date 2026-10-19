@@ -89,10 +89,25 @@ def test_page_labels_list_price_estimate_and_never_fakes_it():
     assert 'id="period-7"' in DASHBOARD_HTML
     assert 'id="period-1"' in DASHBOARD_HTML
     assert 'id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button>' in DASHBOARD_HTML
-    assert 'id="h-models">Model Usage' in DASHBOARD_HTML
+    assert 'id="h-models">Model Usage' not in DASHBOARD_HTML
     assert 'id="h-costs"' not in DASHBOARD_HTML
     assert 'id="cost-models"' not in DASHBOARD_HTML
     assert 'NordRouter model costs' not in DASHBOARD_HTML
+
+
+def test_history_owns_model_table_and_note_is_in_footer():
+    history = re.search(r'<section aria-labelledby="h-history">(.*?)</section>', DASHBOARD_HTML, re.S)
+    assert history is not None
+    assert 'id="history"' in history.group(1)
+    assert 'id="model-table"' in history.group(1)
+    note = ('NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. '
+            'Input/output/cache are OpenClaw comparisons, not direct token types. '
+            'Unmatched routes have no direct bill; model rows are not account totals.')
+    footer = re.search(r'<footer class="foot">(.*?)</footer>', DASHBOARD_HTML, re.S)
+    assert footer is not None
+    assert footer.group(1).count(note) == 1
+    assert footer.group(1).index(note) < footer.group(1).index('Auto-refresh every 5m')
+    assert DASHBOARD_HTML.count(note) == 1
 
 
 def test_period_words_only_appear_on_selector_buttons():

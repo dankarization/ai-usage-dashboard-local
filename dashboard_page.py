@@ -146,10 +146,10 @@ ol.top .amt{color:var(--muted);font-variant-numeric:tabular-nums;white-space:now
 .history-scale{margin-left:auto;font-size:11px;padding:5px 9px}
 svg.chart{display:block;width:100%;height:300px}
 .chart-summary{color:var(--faint);font-size:11px;padding:6px 0 0}
+.history-table{margin-top:var(--s3);padding-top:var(--s3);border-top:1px solid var(--line-soft)}
 .history-tooltip{position:fixed;z-index:30;visibility:hidden;pointer-events:none;max-width:min(280px,calc(100vw - 16px));padding:7px 10px;border-radius:var(--radius-sm);background:var(--raised);color:var(--text);font-size:12px;line-height:1.4;box-shadow:0 0 0 0.67px var(--line),0 4px 16px #0008;overflow-wrap:anywhere}
-.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:5px var(--s3);color:var(--muted);font-size:11px;padding:8px 0 0}
-.legend-item{display:flex;align-items:flex-start;gap:5px;min-width:0;overflow-wrap:anywhere}
-.swatch{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none;margin-top:2px}
+.model-name{display:inline-flex;align-items:baseline;gap:7px;min-width:0;overflow-wrap:anywhere}
+.model-swatch{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none;align-self:center}
 
 /* ---------- table ---------- */
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -174,6 +174,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 #error{color:#f0a8a2;font-size:12px;margin:var(--s3) 0 0}
 .empty{color:var(--faint);font-size:12px;font-style:italic;margin:6px 0}
 .foot{margin-top:var(--s6);color:var(--faint);font-size:11px;text-align:center}
+.foot p{margin:0}
+.foot .note{margin-bottom:var(--s2)}
 
 @media (max-width:640px){
   .wrap{padding:0 var(--s3)}
@@ -251,15 +253,12 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 
   <section aria-labelledby="h-history">
     <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button></div>
-    <div id="history" class="panel chart-wrap"></div>
-  </section>
-
-  <section aria-labelledby="h-models">
-    <div class="sec-head"><h2 id="h-models">Model Usage</h2><p class="note" id="models-note">NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. Input/output/cache are OpenClaw comparisons, not direct token types. Unmatched routes have no direct bill; model rows are not account totals.</p></div>
     <div class="panel">
-      <p id="model-stamp" class="note"></p>
-      <div class="scroll">
-        <table id="model-table">
+      <div id="history" class="chart-wrap"></div>
+      <div class="history-table">
+        <p id="model-stamp" class="note"></p>
+        <div class="scroll">
+          <table id="model-table">
           <thead><tr>
             <th id="model-sort-head-source"><button id="model-sort-source" class="sort-btn" type="button">Route<span id="model-sort-mark-source" class="sort-mark" aria-hidden="true">↕</span></button></th>
             <th id="model-sort-head-model"><button id="model-sort-model" class="sort-btn" type="button">Model / day<span id="model-sort-mark-model" class="sort-mark" aria-hidden="true">↕</span></button></th>
@@ -271,12 +270,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
             <th id="model-sort-head-usd" class="num"><button id="model-sort-usd" class="sort-btn" type="button">USD<span id="model-sort-mark-usd" class="sort-mark" aria-hidden="true">↕</span></button></th>
           </tr></thead>
           <tbody id="models"></tbody>
-        </table>
+          </table>
+        </div>
       </div>
     </div>
   </section>
 
-  <p class="foot">Auto-refresh every 5m · data never leaves this machine</p>
+  <footer class="foot"><p class="note" id="models-note">NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. Input/output/cache are OpenClaw comparisons, not direct token types. Unmatched routes have no direct bill; model rows are not account totals.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
 </main>
 
 <script>
@@ -655,6 +655,45 @@ function renderHero(payload) {
 /* ---------- history chart ---------- */
 var lastHistoryData = null;
 var historyScale = 'linear';
+var chartedModelRows = new Set();
+// Keep the active model set far apart; name-based assignments survive sorting and period changes.
+var MODEL_COLORS = {
+    'deepseek/deepseek-v4.1-flash:fjord': '#e658b4',
+    'free-final-fallback': '#8c8c8c',
+    'gpt-6-luna': '#5676ff',
+    'gpt-6-sol': '#41b1ff',
+    'gpt-6.1-sol': '#88ebe8',
+    'z-ai/glm-5.3': '#2adf82',
+    'grok-4.6': '#ff6b66',
+    'grok-4.7': '#ff9a42',
+    'gpt-6-astra': '#b088ff',
+    'gpt-5.6-terra': '#d7fb6a',
+    'z-ai/glm-5.3-flash': '#f5d189',
+    'deepseek/deepseek-v4-flash-0731': '#b62efa',
+    'deepseek/deepseek-v4.1-flash': '#fa2efa',
+    'gpt-5.6-luna': '#9460fb',
+    'gpt-5.6-sol': '#2597d0',
+    'moonshotai/kimi-k3': '#eea0d4',
+    'moonshotai/kimi-k2.6': '#fa2e72',
+    'gemma4:12b': '#72fa2e',
+    'qwen3.8:unc-rvn-iq2xxs': '#d07a25',
+    'qwen3.8:ad-iq2-xs': '#d02541',
+    'qwen/qwen3.8-max': '#97c7f7',
+    'frob/ministral-3:14b-thinking-q4_k_m': '#b4d025',
+    'gpt-oss:20b': '#25d0d0',
+    'nemotron-3-nano:30b-a3b-q4_k_m': '#92fcb5',
+    'google/gemini-3.6-flash': '#eeada0',
+    'minimax/minimax-m3': '#d02597'
+};
+function modelColor(model) {
+  var name = String(model || '').toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(MODEL_COLORS, name)) return MODEL_COLORS[name];
+  // Unseen models retain a stable, saturated accent until deliberately assigned.
+  var hash = 2166136261;
+  for (var i = 0; i < name.length; i++) hash = Math.imul(hash ^ name.charCodeAt(i), 16777619);
+  hash >>>= 0;
+  return 'hsl(' + (hash % 360) + ' 82% ' + (56 + (Math.floor(hash / 360) % 3) * 6) + '%)';
+}
 var activeHistoryTooltip = null;
 window.addEventListener('pointerdown', function (event) {
   if (activeHistoryTooltip && event.target !== activeHistoryTooltip.rect) activeHistoryTooltip.hide();
@@ -671,6 +710,7 @@ function svgEl(tag, attrs, parent) {
 }
 function renderHistory(payload) {
   lastHistoryData = payload;
+  chartedModelRows = new Set();
   var root = $('history');
   if (activeHistoryTooltip) activeHistoryTooltip.hide();
   root.replaceChildren();
@@ -691,6 +731,7 @@ function renderHistory(payload) {
     });
   });
   var directByDate = new Map();
+  var nordAttributedByDate = new Map();
   ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
     if (!number(day.tokens) || day.tokens < 0) return;
     directByDate.set(day.date, (directByDate.get(day.date) || 0) + day.tokens);
@@ -715,7 +756,21 @@ function renderHistory(payload) {
     var remainder = direct - allocations.reduce(function (sum, item) { return sum + item.amount; }, 0);
     allocations.sort(function (a, b) { return b.fraction - a.fraction || a.key.localeCompare(b.key); });
     for (var i = 0; i < remainder; i++) allocations[i].amount++;
-    allocations.forEach(function (item) { buckets.set(item.key, (buckets.get(item.key) || 0) + item.amount); });
+    allocations.forEach(function (item) {
+      buckets.set(item.key, (buckets.get(item.key) || 0) + item.amount);
+      if (item.amount > 0) {
+        if (!nordAttributedByDate.has(date)) nordAttributedByDate.set(date, new Set());
+        nordAttributedByDate.get(date).add(item.key);
+      }
+    });
+  });
+  (payload.models || []).forEach(function (model) {
+    if (model.source !== 'openclaw') return;
+    var nord = String(model.provider).toLowerCase() === 'nordrouter';
+    if ((model.daily || []).some(function (day) {
+      return number(day.total) && day.total > 0 && (!nord ||
+        (nordAttributedByDate.get(day.date) || new Set()).has(String(model.model || 'unknown')));
+    })) chartedModelRows.add(model);
   });
   byDate.forEach(function (buckets) {
     buckets.forEach(function (amount, key) {
@@ -733,8 +788,8 @@ function renderHistory(payload) {
   }
   var modelCategories = Array.from(categories.values()).filter(function (category) { return category.key !== unattributedKey && category.total > 0; })
     .sort(function (a, b) { return a.label.localeCompare(b.label); });
-  modelCategories.forEach(function (category, index) {
-    category.color = 'hsl(' + Math.round((index * 137.508) % 360) + ' 72% 62%)';
+  modelCategories.forEach(function (category) {
+    category.color = modelColor(category.key);
   });
   var unattributed = categories.get(unattributedKey);
   if (unattributed && unattributed.total > 0) unattributed.color = '#8491a3';
@@ -843,12 +898,6 @@ function renderHistory(payload) {
     }
   });
   node('div', (balanced ? 'visual weight relative to tallest day · raw token peak ' : 'daily tokens · peak ') + tokens(peak), root).className = 'chart-summary';
-  var legend = node('div', undefined, root); legend.className = 'legend';
-  stackOrder.forEach(function (category) {
-    var item = node('span', undefined, legend); item.className = 'legend-item';
-    var swatch = node('span', undefined, item); swatch.className = 'swatch'; swatch.style.background = category.color;
-    node('span', category.label, item);
-  });
 }
 
 /* ---------- model table ---------- */
@@ -925,7 +974,13 @@ function renderModels(data) {
     var srcCell = node('td', undefined, tr);
     node('span', row.source === 'nordrouter' ? 'NordRouter' : row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
-    node('span', row.model || '—', modelCell);
+    var modelName = node('span', undefined, modelCell); modelName.className = 'model-name';
+    if (chartedModelRows.has(row.source === 'nordrouter' ? row.comparison : row)) {
+      var swatch = node('span', undefined, modelName); swatch.className = 'model-swatch';
+      swatch.style.background = modelColor(row.model || 'unknown');
+      swatch.setAttribute('aria-hidden', 'true');
+    }
+    node('span', row.model || '—', modelName);
     if (row.daily && row.daily.length) {
       var detail = node('details', undefined, modelCell);
       node('summary', row.daily.length + ' daily rows', detail);
