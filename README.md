@@ -6,10 +6,10 @@ A self-hosted web dashboard for AI usage, quota windows, model breakdowns, and e
 
 ## What it shows
 
-- Overview: token totals, direct NordRouter tokens, OpenClaw tokens, and estimated/billed cost.
+- Overview: token totals, direct NordRouter tokens, OpenClaw tokens, Hermes tokens, and estimated/billed cost.
 - Provider quotas: separate Codex profiles, Cursor, GLM/Z.ai, Claude, Ollama, Antigravity, Grok, and Grok Bot when configured or available.
 - NordRouter: balance, spend windows, and top models from its account API.
-- Usage history and model usage: 7-day or 30-day view combining OpenClaw Gateway model-day data with direct NordRouter account-day data. Direct NordRouter spend is canonical; Gateway-routed NordRouter rows remain comparison-only to avoid double counting.
+- Usage history and model usage: 7-day or 30-day view combining OpenClaw Gateway model-day data, Hermes native session usage, and direct NordRouter account-day data. Direct NordRouter spend is canonical; both agents' NordRouter-routed rows remain comparison-only (crossed out) to avoid double counting. Every row names the agent that reported it.
 - Terminal table and optional desktop matplotlib chart from `auto_usage.py`.
 
 Missing/unknown values stay unavailable rather than being shown as zero. Collection reads local logs/caches and configured provider APIs; it does not upload usage data to a dashboard cloud service.
@@ -49,7 +49,7 @@ The collector writes a private `token_usage_eink.json` cache used by the web ser
 | `GET /token_usage.json` | Cached full dashboard payload |
 | `GET /api/v1/quotas` | Cache-only provider quota windows (unchanged default) |
 | `GET /api/v1/quotas?source=codex\|grok\|grok_bot` | Fetch one provider's quota live without waiting for other providers or the full refresh |
-| `GET /api/v1/model-breakdown?days=7&daily=true` | Model and daily usage; `days=30` and `source=all` are the API defaults. `source=openclaw` or `source=nordrouter` isolates one source. |
+| `GET /api/v1/model-breakdown?days=7&daily=true` | Model and daily usage; `days=30` and `source=all` are the API defaults. `source=openclaw`, `source=hermes`, or `source=nordrouter` isolates one source. |
 | `POST /api/v1/display/update` | Serialized full refresh; the page uses it on open, every five minutes, and on Refresh |
 | `POST /api/v1/antigravity/ingest` | Optional cross-machine Antigravity entry ingest |
 

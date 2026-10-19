@@ -273,6 +273,7 @@ def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypa
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
+    monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
     start, end, _, _ = usage.get_date_range(7)
     matched = analytics(7)
     matched['daily'] = [{'date': day.isoformat(), 'tokens': 123 if day.isoformat() == end else 0,
@@ -319,6 +320,7 @@ def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(monkeypatc
 
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', gateway)
     monkeypatch.setattr(nr.Client, 'get', analytics_day)
+    monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
     result = usage.build_model_breakdown(1)
     assert requested == [('gateway', end, end), ('analytics', 1)]
     assert result['meta']['start_date'] == result['meta']['end_date'] == end

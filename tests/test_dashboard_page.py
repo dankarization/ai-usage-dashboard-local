@@ -100,8 +100,8 @@ def test_history_owns_model_table_and_note_is_in_footer():
     assert history is not None
     assert 'id="history"' in history.group(1)
     assert 'id="model-table"' in history.group(1)
-    note = ('NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. '
-            'Input/output/cache are OpenClaw comparisons, not direct token types. '
+    note = ('NordRouter rows: crossed-out OpenClaw and Hermes route comparisons → direct tokens and billed USD. '
+            'Input/output/cache are agent comparisons, not direct token types. '
             'Unmatched routes have no direct bill; model rows are not account totals.')
     footer = re.search(r'<footer class="foot">(.*?)</footer>', DASHBOARD_HTML, re.S)
     assert footer is not None

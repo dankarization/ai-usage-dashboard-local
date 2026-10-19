@@ -159,6 +159,8 @@ th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04
 tbody tr:last-child td{border-bottom:0}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .src{font-family:var(--font-code);font-size:11px;color:var(--faint)}
+/* Which agent reported the row: the same route can appear for both. */
+.agent{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:var(--pill);background:var(--raised);color:var(--faint);font:500 9px/1.5 var(--font-ui);letter-spacing:.04em;text-transform:uppercase;vertical-align:middle}
 .sort-btn{appearance:none;border:0;background:none;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;padding:2px 0;cursor:pointer;white-space:nowrap}
 .sort-btn:hover{color:var(--text)}
 .sort-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
@@ -226,7 +228,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   <p id="error" role="status" aria-live="polite"></p>
 
   <section aria-labelledby="h-hero">
-    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note" id="overview-note">Canonical direct NordRouter + non-NordRouter OpenClaw</p></div>
+    <div class="sec-head"><h2 id="h-hero">Overview</h2><p class="note" id="overview-note">Canonical direct NordRouter + non-NordRouter OpenClaw + Hermes</p></div>
     <div id="hero" class="strip"></div>
   </section>
 
@@ -276,7 +278,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
   </section>
 
-  <footer class="foot"><p class="note" id="models-note">NordRouter rows: crossed-out OpenClaw route comparison → direct tokens and billed USD. Input/output/cache are OpenClaw comparisons, not direct token types. Unmatched routes have no direct bill; model rows are not account totals.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
+  <footer class="foot"><p class="note" id="models-note">NordRouter rows: crossed-out OpenClaw and Hermes route comparisons → direct tokens and billed USD. Input/output/cache are agent comparisons, not direct token types. Unmatched routes have no direct bill; model rows are not account totals.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
 </main>
 
 <script>
@@ -633,26 +635,37 @@ function renderHero(payload) {
   var sources = payload.sources || {};
   var direct = sources.nordrouter || {};
   var gateway = sources.openclaw || {};
+  var hermes = sources.hermes || {};
   var root = $('hero');
   root.replaceChildren();
-  var full = direct.complete && gateway.complete;
+  var full = direct.complete && gateway.complete && hermes.complete;
   stripItem(root, 'Total tokens', full ? tokens(payload.totals.total) : '—',
     full ? null : 'incomplete source · total unavailable', !full);
+  // Each agent's own NordRouter figure is a comparison: the account bills once.
   stripItem(root, 'OpenClaw NordRouter comparison',
     tokens(sources.openclaw_nordrouter_comparison_tokens), null, false);
+  stripItem(root, 'Hermes NordRouter comparison',
+    tokens(sources.hermes_nordrouter_comparison_tokens), null, false);
   stripItem(root, 'NordRouter billed cost', usd(direct.billed_cost_usd),
     null, !number(direct.billed_cost_usd));
   stripItem(root, 'OpenClaw estimated cost', usd(gateway.estimated_cost_usd),
     gateway.unpriced_models ? 'partial: ' + gateway.unpriced_models + ' unpriced models' : null,
     !number(gateway.estimated_cost_usd));
+  stripItem(root, 'Hermes estimated cost', usd(hermes.estimated_cost_usd),
+    hermes.unpriced_models ? 'partial: ' + hermes.unpriced_models + ' unpriced models' : null,
+    !number(hermes.estimated_cost_usd));
   if (full) {
     var pills = node('div', undefined, root); pills.className = 'pillrow';
     node('span', 'direct NordRouter ' + tokens(direct.tokens), pills).className = 'pill';
     node('span', 'other OpenClaw ' + tokens(gateway.tokens), pills).className = 'pill';
+    node('span', 'other Hermes ' + tokens(hermes.tokens), pills).className = 'pill';
   }
 }
 
 /* ---------- history chart ---------- */
+// Agent rollups share the model stack; NordRouter-route rows from either agent
+// are proxy weights for the direct account buckets, never their own series.
+var AGENT_SOURCES = { openclaw: true, hermes: true };
 var lastHistoryData = null;
 var historyScale = 'linear';
 var chartedModelRows = new Set();
@@ -718,7 +731,7 @@ function renderHistory(payload) {
   var categories = new Map();
   var nordByDate = new Map();
   (payload.models || []).forEach(function (model) {
-    if (model.source !== 'openclaw') return;
+    if (!AGENT_SOURCES[model.source]) return;
     var nord = String(model.provider).toLowerCase() === 'nordrouter';
     var key = String(model.model || 'unknown');
     if (!categories.has(key)) categories.set(key, { key: key, label: key, total: 0 });
@@ -765,7 +778,7 @@ function renderHistory(payload) {
     });
   });
   (payload.models || []).forEach(function (model) {
-    if (model.source !== 'openclaw') return;
+    if (!AGENT_SOURCES[model.source]) return;
     var nord = String(model.provider).toLowerCase() === 'nordrouter';
     if ((model.daily || []).some(function (day) {
       return number(day.total) && day.total > 0 && (!nord ||
@@ -904,28 +917,51 @@ function renderHistory(payload) {
 var modelSortColumns = ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'];
 var modelSort = { key: 'total', direction: 'default' };
 var lastModelsData = null;
+var AGENT_ORDER = ['openclaw', 'hermes'];
+function agentLabel(source) { return source === 'hermes' ? 'Hermes' : 'OpenClaw'; }
+/* An agent row on a NordRouter route: the account bills it once, so the row is
+   a comparison figure rather than canonical usage. */
+function isRouteComparison(row) {
+  return row.source !== 'nordrouter' && String(row.provider).toLowerCase() === 'nordrouter';
+}
+function comparisonTotals(row) {
+  var totals = null;
+  (row.comparisons || []).forEach(function (comparison) {
+    var values = comparison.totals || {};
+    if (!totals) totals = { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 };
+    Object.keys(totals).forEach(function (field) {
+      if (number(values[field])) totals[field] += values[field];
+    });
+  });
+  return totals ? { totals: totals } : null;
+}
 function tableModels(data) {
   var direct = new Map();
   (data.models || []).forEach(function (row) {
     if (row.source === 'nordrouter') direct.set(row.model, row);
   });
+  // Both agents can report the same route; keep every figure, in agent order.
   var comparisons = new Map();
   (data.models || []).forEach(function (row) {
-    if (row.source === 'openclaw' && String(row.provider).toLowerCase() === 'nordrouter')
-      comparisons.set(row.model, row);
+    if (!isRouteComparison(row)) return;
+    if (!comparisons.has(row.model)) comparisons.set(row.model, []);
+    comparisons.get(row.model).push(row);
+  });
+  comparisons.forEach(function (rows) {
+    rows.sort(function (a, b) { return AGENT_ORDER.indexOf(a.source) - AGENT_ORDER.indexOf(b.source); });
   });
   return (data.models || []).filter(function (row) {
-    return row.source === 'nordrouter' ||
-      (row.source === 'openclaw' &&
-       !(String(row.provider).toLowerCase() === 'nordrouter' && direct.has(row.model)));
+    // A matched route appears once, on the direct row, as struck-through comparisons.
+    return !(isRouteComparison(row) && direct.has(row.model));
   }).map(function (row) {
-    return row.source === 'nordrouter' ? Object.assign({}, row, { comparison: comparisons.get(row.model) }) : row;
+    return row.source === 'nordrouter'
+      ? Object.assign({}, row, { comparisons: comparisons.get(row.model) || [] }) : row;
   });
 }
 function modelSortValue(row, key) {
   if (key === 'source') return row.source === 'nordrouter' ? 'NordRouter' : row.provider || null;
   if (key === 'model') return row.model || null;
-  var detail = row.source === 'nordrouter' && key !== 'total' && key !== 'usd' ? row.comparison : row;
+  var detail = row.source === 'nordrouter' && key !== 'total' && key !== 'usd' ? comparisonTotals(row) : row;
   var value = key === 'usd' ? row.cost_usd : detail && detail.totals && detail.totals[key];
   return number(value) ? value : null;
 }
@@ -955,7 +991,9 @@ function renderModels(data) {
   $('model-stamp').textContent = 'snapshot ' +
     (meta.generated_at_utc ? time(meta.generated_at_utc) : serverTime(meta.generated_at) + ' (server time)') +
     (meta.start_date && meta.end_date ? ' · ' + dateOnly(meta.start_date) + ' → ' + dateOnly(meta.end_date) : '') +
-    ' · OpenClaw ' + (meta.openclaw_status || 'unknown') + ' · NordRouter ' + (meta.nordrouter_status || 'unknown');
+    ' · OpenClaw ' + (meta.openclaw_status || 'unknown') +
+    ' · Hermes ' + (meta.hermes_status || 'unknown') +
+    ' · NordRouter ' + (meta.nordrouter_status || 'unknown');
   var body = $('models');
   body.replaceChildren();
   var models = sortedModels(tableModels(data));
@@ -973,9 +1011,15 @@ function renderModels(data) {
     var tr = node('tr', undefined, body);
     var srcCell = node('td', undefined, tr);
     node('span', row.source === 'nordrouter' ? 'NordRouter' : row.provider || 'unknown', srcCell).className = 'src';
+    if (row.source !== 'nordrouter') {
+      var agent = node('span', agentLabel(row.source), srcCell);
+      agent.className = 'agent';
+      agent.title = row.source === 'hermes'
+        ? 'Hermes native session usage' : 'OpenClaw Gateway usage rollup';
+    }
     var modelCell = node('td', undefined, tr);
     var modelName = node('span', undefined, modelCell); modelName.className = 'model-name';
-    if (chartedModelRows.has(row.source === 'nordrouter' ? row.comparison : row)) {
+    if (chartedModelRows.has(row.source === 'nordrouter' ? (row.comparisons || [])[0] : row)) {
       var swatch = node('span', undefined, modelName); swatch.className = 'model-swatch';
       swatch.style.background = modelColor(row.model || 'unknown');
       swatch.setAttribute('aria-hidden', 'true');
@@ -988,20 +1032,22 @@ function renderModels(data) {
         node('div', dateOnly(day.date) + ' · ' + tokens(day.total) + ' tokens', detail).className = 'src';
       });
     }
+    var compared = row.source === 'nordrouter' ? comparisonTotals(row) : row;
     ['input', 'output', 'cache_read', 'cache_write'].forEach(function (field) {
-      var compared = row.source === 'nordrouter' ? row.comparison : row;
       var cell = node('td', tokens(compared && compared.totals && compared.totals[field]), tr);
       cell.className = 'num';
-      if (row.source === 'nordrouter' && row.comparison) cell.title = 'OpenClaw route comparison; not direct NordRouter token categories';
+      if (row.source === 'nordrouter' && compared) cell.title = 'Agent route comparison; not direct NordRouter token categories';
     });
     var total = row.totals && number(row.totals.total) ? row.totals.total : null;
     var tokCell = node('td', undefined, tr); tokCell.className = 'num';
     if (row.source === 'nordrouter') {
       var pair = node('span', undefined, tokCell); pair.className = 'token-compare';
-      if (row.comparison && row.comparison.totals && number(row.comparison.totals.total)) {
-        var old = node('s', tokens(row.comparison.totals.total), pair);
-        old.title = 'OpenClaw route comparison: ' + row.comparison.totals.total.toLocaleString() + ' tokens';
-      }
+      // Every agent's own figure is struck through: the billed number replaces them.
+      (row.comparisons || []).forEach(function (comparison) {
+        if (!comparison.totals || !number(comparison.totals.total)) return;
+        var old = node('s', tokens(comparison.totals.total), pair);
+        old.title = agentLabel(comparison.source) + ' route comparison: ' + comparison.totals.total.toLocaleString() + ' tokens';
+      });
       var actual = node('span', tokens(total), pair);
       actual.className = 'direct';
       actual.title = number(total) ? 'Direct NordRouter reported: ' + total.toLocaleString() + ' tokens' : 'Direct NordRouter tokens unavailable';
@@ -1018,7 +1064,8 @@ function renderModels(data) {
         number(row.cost_usd) ? '$' + row.cost_usd.toFixed(2) : '—', tr);
     costCell.className = 'num';
     node('span', row.source === 'nordrouter' ? 'billed' :
-      String(row.provider).toLowerCase() === 'nordrouter' ? 'no direct match' : 'estimated', costCell).className = 'cost-kind';
+      String(row.provider).toLowerCase() === 'nordrouter' ? 'no direct match'
+      : row.cost_kind || 'estimated', costCell).className = 'cost-kind';
   });
 }
 
@@ -1053,26 +1100,33 @@ function renderPeriod(models, quotas) {
   renderModels(models);
 }
 function partialModels(state) {
-  var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter;
+  var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter, hermes = state.parts.hermes;
   var openSource = openclaw && openclaw.sources && openclaw.sources.openclaw || { complete: false };
+  var hermesSource = hermes && hermes.sources && hermes.sources.hermes || { complete: false };
   var directSource = nordrouter && nordrouter.sources && nordrouter.sources.nordrouter || { complete: false };
+  var agents = [openSource, hermesSource];
+  var agentsComplete = agents.every(function (source) { return source.complete; });
   return {
-    meta: Object.assign({}, (nordrouter || openclaw || {}).meta || {}, {
+    meta: Object.assign({}, (nordrouter || openclaw || hermes || {}).meta || {}, {
       days: state.days,
       openclaw_status: openclaw ? openclaw.meta.openclaw_status : 'loading',
+      hermes_status: hermes ? hermes.meta.hermes_status : 'loading',
       nordrouter_status: nordrouter ? nordrouter.meta.nordrouter_status : 'loading',
     }),
-    totals: { total: openSource.complete && directSource.complete
-      ? openSource.tokens + directSource.tokens : null },
-    sources: { openclaw: openSource, nordrouter: directSource,
-      openclaw_nordrouter_comparison_tokens: openclaw && openclaw.sources.openclaw_nordrouter_comparison_tokens },
+    totals: { total: agentsComplete && directSource.complete
+      ? agents.reduce(function (sum, source) { return sum + (source.tokens || 0); }, 0) + directSource.tokens
+      : null },
+    sources: { openclaw: openSource, hermes: hermesSource, nordrouter: directSource,
+      openclaw_nordrouter_comparison_tokens: openclaw && openclaw.sources.openclaw_nordrouter_comparison_tokens,
+      hermes_nordrouter_comparison_tokens: hermes && hermes.sources.hermes_nordrouter_comparison_tokens },
     source_daily: { nordrouter: nordrouter && nordrouter.source_daily ? nordrouter.source_daily.nordrouter : [] },
-    models: (openclaw ? openclaw.models : []).concat(nordrouter ? nordrouter.models : []),
+    models: (openclaw ? openclaw.models : []).concat(hermes ? hermes.models : [])
+      .concat(nordrouter ? nordrouter.models : []),
   };
 }
 function renderAvailable(state) {
   var models = partialModels(state);
-  if (state.parts.openclaw || state.parts.nordrouter) {
+  if (state.parts.openclaw || state.parts.nordrouter || state.parts.hermes) {
     renderHero(models);
     renderHistory(models);
     renderModels(models);
@@ -1094,7 +1148,7 @@ function mergeQuotaParts(state) {
   state.quotas = Object.assign({}, latest || {}, { quotas: rows });
 }
 function loadSources(version, state, requested) {
-  requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'nordrouter', 'openclaw'];
+  requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'nordrouter', 'openclaw', 'hermes'];
   requested.forEach(function (source) {
     var ticket = state.requests[source] = (state.requests[source] || 0) + 1;
     function current() { return version === loadVersion && ticket === state.requests[source]; }
@@ -1122,10 +1176,15 @@ function loadSources(version, state, requested) {
         if (models.meta.days !== state.days) throw new Error('period mismatch');
         if (source === 'openclaw' && models.meta.openclaw_status === 'unavailable')
           throw new Error('Gateway usage unavailable');
-        var other = source === 'openclaw' ? 'nordrouter' : 'openclaw';
-        var previous = state.parts[other];
-        if (previous && (previous.meta.start_date !== models.meta.start_date ||
-            previous.meta.end_date !== models.meta.end_date)) delete state.parts[other];
+        if (source === 'hermes' && models.meta.hermes_status === 'unavailable')
+          throw new Error('Hermes usage unavailable');
+        // Every model part must describe the same window before they are combined.
+        ['openclaw', 'hermes', 'nordrouter'].forEach(function (other) {
+          if (other === source) return;
+          var previous = state.parts[other];
+          if (previous && (previous.meta.start_date !== models.meta.start_date ||
+              previous.meta.end_date !== models.meta.end_date)) delete state.parts[other];
+        });
         state.parts[source] = models;
         delete state.errors[source];
         renderAvailable(state);
