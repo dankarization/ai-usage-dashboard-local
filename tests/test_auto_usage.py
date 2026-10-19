@@ -1,6 +1,9 @@
 import sys
 import json
+import base64
+import os
 import sqlite3
+import time
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -1283,6 +1286,130 @@ def test_export_codex_quota_parses_wham_usage_response(monkeypatch, tmp_path):
 def test_export_codex_quota_returns_empty_when_no_auth_json(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, 'home', lambda: tmp_path)
     assert export_codex_quota() == []
+
+
+def _codex_test_token(exp: int, email: str = 'account@example.test') -> str:
+    claims = base64.urlsafe_b64encode(json.dumps({'exp': exp, 'email': email}).encode()).decode().rstrip('=')
+    return f'header.{claims}.signature'
+
+
+def test_codex_quota_expired_token_uses_managed_refresh_for_its_own_profile(monkeypatch, tmp_path):
+    home = tmp_path / 'secondary'
+    home.mkdir()
+    old = {'tokens': {'access_token': _codex_test_token(1),
+                      'id_token': _codex_test_token(1), 'account_id': 'secondary-id'}}
+    new = {'tokens': {**old['tokens'], 'access_token': _codex_test_token(int(time.time()) + 3600)}}
+    (home / 'auth.json').write_text(json.dumps(old))
+    called = []
+
+    def refresh(profile, identity):
+        called.append((profile, identity))
+        return new
+
+    monkeypatch.setattr('auto_usage._codex_managed_refresh', refresh)
+    def get(url, *, headers, timeout):
+        assert headers['Authorization'] == f"Bearer {new['tokens']['access_token']}"
+        assert headers['ChatGPT-Account-Id'] == 'secondary-id'
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: _WHAM_USAGE_RESPONSE)
+    monkeypatch.setattr('auto_usage.requests.get', get)
+
+    assert len(export_codex_quota(home)) == 2
+    assert called == [(home, ('secondary-id', 'account@example.test'))]
+
+
+def test_codex_quota_401_refreshes_once_and_retries_with_new_token(monkeypatch, tmp_path):
+    import requests
+    home = tmp_path / 'primary'
+    home.mkdir()
+    old = {'tokens': {'access_token': _codex_test_token(int(time.time()) + 3600),
+                      'id_token': _codex_test_token(int(time.time()) + 3600), 'account_id': 'primary-id'}}
+    new = {'tokens': {**old['tokens'], 'access_token': _codex_test_token(int(time.time()) + 7200)}}
+    (home / 'auth.json').write_text(json.dumps(old))
+    called = []
+    monkeypatch.setattr('auto_usage._codex_managed_refresh', lambda profile, identity: (called.append(profile), new)[1])
+
+    def get(url, *, headers, timeout):
+        called.append(headers['Authorization'])
+        if len(called) == 1:
+            response = requests.Response()
+            response.status_code = 401
+            raise requests.HTTPError(response=response)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: _WHAM_USAGE_RESPONSE)
+    monkeypatch.setattr('auto_usage.requests.get', get)
+
+    assert len(export_codex_quota(home)) == 2
+    assert called == [f"Bearer {old['tokens']['access_token']}", home,
+                      f"Bearer {new['tokens']['access_token']}"]
+
+
+def test_codex_refresh_refusal_does_not_publish_stale_jsonl_quota(monkeypatch, tmp_path):
+    from auto_usage import CodexQuotaAuthError
+    home = tmp_path / 'secondary'
+    home.mkdir()
+    (home / 'auth.json').write_text(json.dumps({'tokens': {
+        'access_token': _codex_test_token(1), 'id_token': _codex_test_token(1), 'account_id': 'secondary-id'}}))
+    sessions = home / 'sessions'
+    sessions.mkdir()
+    (sessions / 'old.jsonl').write_text('{"timestamp":"2026-06-18T12:30:12Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":12,"window_minutes":300}}}}\n')
+    monkeypatch.setattr('auto_usage._codex_managed_refresh',
+                        lambda *_: (_ for _ in ()).throw(CodexQuotaAuthError('Codex auth lifecycle unavailable')))
+    monkeypatch.setattr('auto_usage.requests.get', lambda *_a, **_kw: pytest.fail('expired token was sent'))
+
+    assert load_codex_quota(home=home) == []
+
+
+def test_codex_malformed_auth_does_not_publish_stale_jsonl_quota(tmp_path):
+    home = tmp_path / 'profile'
+    home.mkdir()
+    (home / 'auth.json').write_text('{invalid')
+    sessions = home / 'sessions'
+    sessions.mkdir()
+    (sessions / 'old.jsonl').write_text('{"timestamp":"2026-06-18T12:30:12Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":12,"window_minutes":300}}}}\n')
+
+    assert load_codex_quota(home=home) == []
+
+
+def test_codex_missing_cli_does_not_publish_stale_jsonl_quota(monkeypatch, tmp_path):
+    home = tmp_path / 'profile'
+    home.mkdir()
+    (home / 'auth.json').write_text(json.dumps({'tokens': {
+        'access_token': _codex_test_token(1), 'id_token': _codex_test_token(1), 'account_id': 'same-id'}}))
+    sessions = home / 'sessions'
+    sessions.mkdir()
+    (sessions / 'old.jsonl').write_text('{"timestamp":"2026-06-18T12:30:12Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":12,"window_minutes":300}}}}\n')
+    monkeypatch.setattr('auto_usage.subprocess.Popen',
+                        lambda *_a, **_kw: (_ for _ in ()).throw(FileNotFoundError('codex')))
+
+    assert load_codex_quota(home=home) == []
+
+
+def test_codex_managed_refresh_uses_cli_protocol_and_checks_identity(monkeypatch, tmp_path):
+    from auto_usage import _codex_managed_refresh
+    home = tmp_path / 'profile'
+    home.mkdir()
+    fresh = {'tokens': {'access_token': _codex_test_token(int(time.time()) + 3600),
+                        'id_token': _codex_test_token(int(time.time()) + 3600), 'account_id': 'same-id'}}
+    (home / 'auth.json').write_text(json.dumps(fresh))
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    fake_codex = bin_dir / 'codex'
+    fake_codex.write_text('''#!/usr/bin/env python3
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get('method') == 'initialize':
+        reply = {'id': request['id'], 'result': {}}
+    elif request.get('method') == 'account/read':
+        assert request['params'] == {'refreshToken': True}
+        reply = {'id': request['id'], 'result': {'account': {'type': 'chatgpt', 'email': 'account@example.test'}}}
+    else:
+        continue
+    print(json.dumps(reply), flush=True)
+''')
+    fake_codex.chmod(0o700)
+    monkeypatch.setenv('PATH', str(bin_dir) + os.pathsep + os.environ['PATH'])
+
+    assert _codex_managed_refresh(home, ('same-id', 'account@example.test')) == fresh
 
 
 def test_load_codex_quota_prefers_api_over_jsonl(monkeypatch, tmp_path):

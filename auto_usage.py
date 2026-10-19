@@ -14,6 +14,9 @@ import os
 import sys
 import argparse
 import sqlite3
+import select
+import threading
+import time
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -975,6 +978,113 @@ def _now_utc_iso() -> str:
     return datetime.now(ZoneInfo('UTC')).isoformat(timespec='seconds')
 
 
+class CodexQuotaAuthError(Exception):
+    """The current Codex login cannot provide an authenticated quota read."""
+
+
+_codex_refresh_lock = threading.Lock()
+
+
+def _codex_token_expiring(token: str) -> bool:
+    try:
+        encoded = token.split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+        return int(claims['exp']) <= time.time() + 60
+    except (IndexError, ValueError, KeyError, TypeError):
+        return False  # Unknown format: let the quota API decide.
+
+
+def _codex_auth_identity(auth: dict) -> tuple[str | None, str | None]:
+    tokens = auth.get('tokens') or {}
+    account_id = tokens.get('account_id')
+    try:
+        encoded = tokens['id_token'].split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+        email = claims.get('email') or (claims.get('https://api.openai.com/profile') or {}).get('email')
+    except (IndexError, ValueError, KeyError, TypeError, AttributeError):
+        email = None
+    return account_id, email
+
+
+def _load_codex_auth(path: Path) -> dict:
+    try:
+        auth = json.loads(path.read_text())
+        if not isinstance(auth, dict) or not isinstance(auth.get('tokens'), dict) or not auth['tokens'].get('access_token'):
+            raise ValueError('Missing Codex access token')
+        return auth
+    except (OSError, ValueError, TypeError) as exc:
+        raise CodexQuotaAuthError('Codex auth cache unavailable') from exc
+
+
+def _codex_rpc_response(proc, request_id: int, method: str, params: dict, deadline: float) -> dict:
+    proc.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': request_id, 'method': method, 'params': params}) + '\n')
+    proc.stdin.flush()
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([proc.stdout], [], [], min(1, deadline - time.monotonic()))
+        if not ready:
+            continue
+        line = proc.stdout.readline()
+        if not line:
+            break
+        response = json.loads(line)
+        if response.get('id') == request_id:
+            return response
+    raise CodexQuotaAuthError('Codex auth lifecycle unavailable')
+
+
+def _codex_managed_refresh(home: Path, identity: tuple[str | None, str | None]) -> dict:
+    """Ask the owning Codex CLI to rotate its cache; never handle refresh tokens here."""
+    if identity == (None, None):
+        raise CodexQuotaAuthError('Codex account identity unavailable')
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            ['codex', 'app-server', '--listen', 'stdio://'],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, bufsize=1, env={**os.environ, 'CODEX_HOME': str(home)},
+        )
+        deadline = time.monotonic() + 30
+        init = _codex_rpc_response(proc, 1, 'initialize',
+            {'clientInfo': {'name': 'ai-usage-dashboard', 'version': '1'}}, deadline)
+        if 'result' not in init:
+            raise CodexQuotaAuthError('Codex initialization failed')
+        proc.stdin.write(json.dumps({'jsonrpc': '2.0', 'method': 'initialized', 'params': {}}) + '\n')
+        proc.stdin.flush()
+        result = _codex_rpc_response(proc, 2, 'account/read', {'refreshToken': True}, deadline)
+        account = result.get('result', {}).get('account') or {}
+        if account.get('type') != 'chatgpt' or (identity[1] and account.get('email') != identity[1]):
+            raise CodexQuotaAuthError('Codex account identity changed')
+        refreshed = _load_codex_auth(home / 'auth.json')
+        if _codex_auth_identity(refreshed) != identity:
+            raise CodexQuotaAuthError('Codex auth cache identity changed')
+        if _codex_token_expiring(refreshed['tokens']['access_token']):
+            raise CodexQuotaAuthError('Codex access token remains expired')
+        return refreshed
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        raise CodexQuotaAuthError('Codex auth lifecycle unavailable') from exc
+    finally:
+        if proc is not None:
+            if proc.poll() is None:
+                proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+
+def _codex_quota_response(auth: dict):
+    tokens = auth['tokens']
+    response = requests.get(CODEEX_WHAM_USAGE_URL, headers={
+        'Authorization': f"Bearer {tokens['access_token']}",
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json',
+        **({'ChatGPT-Account-Id': tokens['account_id']} if tokens.get('account_id') else {}),
+    }, timeout=20)
+    response.raise_for_status()
+    return response.json()
+
+
 def export_codex_quota(home: Path | None = None) -> list[QuotaSnapshot]:
     """Fetch Codex plan quota from the ChatGPT wham/usage API.
 
@@ -987,19 +1097,28 @@ def export_codex_quota(home: Path | None = None) -> list[QuotaSnapshot]:
     auth_path = (home or codex_profiles()[0][2]) / 'auth.json'
     if not auth_path.exists():
         return []
-    with auth_path.open() as f:
-        auth = json.load(f)
-    token = auth.get('tokens', {}).get('access_token', '')
-    if not token:
-        return []
-    resp = requests.get(CODEEX_WHAM_USAGE_URL, headers={
-        'Authorization': f'Bearer {token}',
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': 'application/json',
-        **({'ChatGPT-Account-Id': auth['tokens']['account_id']} if auth.get('tokens', {}).get('account_id') else {}),
-    }, timeout=20)
-    resp.raise_for_status()
-    body = resp.json()
+    auth = _load_codex_auth(auth_path)
+    identity = _codex_auth_identity(auth)
+    if _codex_token_expiring(auth['tokens']['access_token']):
+        with _codex_refresh_lock:
+            latest = _load_codex_auth(auth_path)
+            if _codex_auth_identity(latest) != identity:
+                raise CodexQuotaAuthError('Codex account identity changed')
+            auth = latest if not _codex_token_expiring(latest['tokens']['access_token']) else _codex_managed_refresh(auth_path.parent, identity)
+    try:
+        body = _codex_quota_response(auth)
+    except requests.HTTPError as exc:
+        if exc.response is None or exc.response.status_code != 401:
+            raise CodexQuotaAuthError('Codex quota authorization failed') from exc
+        with _codex_refresh_lock:
+            latest = _load_codex_auth(auth_path)
+            if _codex_auth_identity(latest) != identity:
+                raise CodexQuotaAuthError('Codex account identity changed')
+            auth = latest if latest['tokens']['access_token'] != auth['tokens']['access_token'] else _codex_managed_refresh(auth_path.parent, identity)
+        try:
+            body = _codex_quota_response(auth)
+        except requests.HTTPError as retry_exc:
+            raise CodexQuotaAuthError('Codex quota authorization failed after refresh') from retry_exc
     rate_limit = body.get('rate_limit', {})
     snapshots: list[QuotaSnapshot] = []
     for slot, label_key in (('primary_window', '5h'), ('secondary_window', '7d')):
@@ -1062,7 +1181,10 @@ def load_codex_quota(start_date: str | None = None, end_date: str | None = None,
         if api_snapshots:
             return api_snapshots
     except Exception as e:
-        print(f"Failed to fetch Codex quota from wham/usage API: {e}")
+        if isinstance(e, CodexQuotaAuthError):
+            print(f"Failed to fetch Codex quota: {e}")
+            return []
+        print(f"Failed to fetch Codex quota from wham/usage API: {type(e).__name__}")
 
     # Fallback: parse local session JSONL.
     profile_home = home or codex_profiles()[0][2]
