@@ -78,7 +78,7 @@ const registry = new Map();
 });
 const sectionNotes = {
   'overview-note': 'Canonical direct NordRouter + agent usage, summed per model',
-  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter rows: crossed-out agent total → direct tokens and billed USD. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.',
+  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; the crossed-out agent total → direct figure is the account number. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.',
 };
 Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
@@ -429,11 +429,15 @@ assertEqual(registry.get('models').children.map((row) => routeName(row)).join(',
 const firstModelCell = registry.get('models').children[0].children[1];
 const firstParts = all(firstModelCell).filter((e) => e.classList.contains('part'));
 assert(firstParts.length >= 2, 'a merged row breaks its summed USD down per source');
-assert(firstParts.every((e) => e.textContent.includes(' tok · ')),
-  'each breakdown line carries its own token count and cost slot');
-assert(firstParts.some((e) => e.textContent.includes('$')),
-  'a priced source shows its USD, a NordRouter-route row stays unpriced by design');
-assert(registry.get('models-note').textContent.includes('billed USD'), 'table note explains cost provenance');
+assert(firstParts.every((e) => e.textContent.includes(' · ')),
+  'each breakdown line is a source line');
+assert(firstParts.some((e) => e.textContent.includes(' tok · ')),
+  'agent lines carry their own token count');
+const lastPart = firstParts[firstParts.length - 1].textContent;
+assert(!/NordRouter .* tok ·/.test(lastPart),
+  'a NordRouter line never claims a countable token figure');
+assert(registry.get('models-note').textContent.includes('NordRouter bills every agent'),
+  'table note explains why the account figure is not summed with the agents');
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
@@ -694,6 +698,11 @@ assertEqual(routeName(matchedRow), 'NordRouter', 'direct model source has its or
 assertEqual(routeName(rowFor('unmatched-route')), 'nordrouter', 'unmatched route source is unchanged');
 assertEqual(routeName(rowFor('other')), 'xai', 'other provider source is unchanged');
 const struck = all(matchedRow.children[6]).filter((e) => e.tagName === 'S');
+const billedParts = all(matchedRow.children[1]).filter((e) => e.classList.contains('part'));
+assertEqual(billedParts.length, 3, 'every reporting source gets its own line');
+assertEqual(billedParts[billedParts.length - 1].textContent,
+  'NordRouter · z-ai/glm-5.3 · unknown · $2.19 billed',
+  'the account figure is listed last and claims no token count: it already includes the agents');
 assertEqual(struck.length, 1, 'one crossed-out figure per model, not one per agent');
 assertEqual(struck[0].textContent, '876.7K', 'the crossed-out figure sums every agent report');
 assert(matchedRow.children[6].textContent.endsWith('1.2M'), 'direct tokens use compact formatting');

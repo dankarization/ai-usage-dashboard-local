@@ -276,7 +276,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
   </section>
 
-  <footer class="foot"><p class="note" id="models-note">One row per model: spellings that bill as one model are summed. NordRouter rows: crossed-out agent total → direct tokens and billed USD. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
+  <footer class="foot"><p class="note" id="models-note">One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; the crossed-out agent total → direct figure is the account number. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
 </main>
 
 <script>
@@ -1013,7 +1013,13 @@ function tableModels(data) {
         return { source: row.source, provider: row.provider, model: row.model,
                  tokens: (row.totals && row.totals.total) || 0, cost_usd: value,
                  cost_kind: number(row.cost_usd) ? row.cost_kind : (number(value) ? 'derived' : null) };
-      }).sort(function (a, b) { return b.tokens - a.tokens; }),
+      }).sort(function (a, b) {
+        // NordRouter bills every agent, so its token count already contains these
+        // lines: it can never be added to them. Keep it last, agents first.
+        var aBilled = a.source === 'nordrouter', bBilled = b.source === 'nordrouter';
+        if (aBilled !== bBilled) return aBilled ? 1 : -1;
+        return b.tokens - a.tokens;
+      }),
       daily: daily,
     };
   });
@@ -1089,10 +1095,15 @@ function renderModels(data) {
       if (parts.length > 1) {
         parts.forEach(function (part) {
           // Who reported this model, with their own tokens and USD, so the summed
-          // figure on the right can be checked line by line.
-          node('div', (SOURCE_LABELS[part.source] || part.source) + ' · ' + (part.model || '—') +
-            ' · ' + tokens(part.tokens) + ' tok · ' + money(part.cost_usd) +
-            (part.cost_kind ? ' ' + part.cost_kind : ''), detail).className = 'src part';
+          // figure on the right can be checked line by line. The NordRouter figure
+          // already includes every agent, so it carries no countable token number.
+          var billed = part.source === 'nordrouter';
+          var kind = part.cost_kind || (billed && number(part.cost_usd) ? 'billed' : '');
+          var line = node('div', (SOURCE_LABELS[part.source] || part.source) + ' · ' + (part.model || '—') +
+            ' · ' + (billed ? 'unknown' : tokens(part.tokens) + ' tok') +
+            ' · ' + money(part.cost_usd) + (kind ? ' ' + kind : ''), detail);
+          line.className = 'src part';
+          if (billed) line.title = 'NordRouter bills every agent, so this figure already includes the agent lines';
         });
       }
     }
