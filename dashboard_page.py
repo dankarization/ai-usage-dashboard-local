@@ -103,6 +103,13 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
   border-radius:var(--radius-xs);border:1px solid var(--line);background:var(--raised);
   font-weight:700;font-size:9px;flex:none;letter-spacing:-.02em;color:var(--muted)
 }
+.brandtile svg{display:block;width:16px;height:16px;fill:currentColor;color:var(--text)}
+.quota-title{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--text)}
+.brandmark{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;flex:none;color:var(--text)}
+.brandmark.codex{color:#10a37f}
+.brandmark svg{display:block;width:24px;height:24px;fill:currentColor}
+.plan-label{font-size:11px;font-weight:400;color:var(--muted);margin-left:auto}
+.plan-label + .chip{margin-left:0}
 .pname{font-size:13px;font-weight:600}
 .acct{font-family:var(--font-code);font-size:11px;color:var(--faint)}
 .chip{margin-left:auto;font-size:11px;font-weight:500;padding:2px 8px;border-radius:var(--pill);border:1px solid var(--line);color:var(--muted);background:var(--raised);white-space:nowrap}
@@ -112,10 +119,12 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
 .chip.unknown,.chip.not_configured,.chip.unavailable{color:var(--neutral);border-color:var(--line);background:var(--raised)}
 
 .win{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:var(--s3);align-items:center;padding:3px 0}
+#codex .win,#quotas .limit-group[data-provider="grok"] .win{grid-template-columns:58px minmax(0,1fr) auto;column-gap:8px}
 .win-label{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .track{height:8px;border-radius:var(--pill);background:#171717;border:1px solid var(--line-soft);overflow:hidden}
 .fill{height:100%;border-radius:var(--pill);transition:width 400ms ease}
 .fill.ok{background:var(--green)} .fill.warn{background:var(--amber)} .fill.danger{background:var(--red)}
+.fill.full{background:#cc2850;box-shadow:inset 0 0 0 1px #ee6e8999}
 .fill.unknown{background:repeating-linear-gradient(135deg,#3a3a3a 0 4px,#2c2c2c 4px 8px)}
 .fill.segmented{display:flex;overflow:hidden;background:none}
 .product-segment{height:100%;flex:none}
@@ -157,6 +166,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{text-align:left;padding:6px var(--s3) 6px 0;border-bottom:1px solid var(--line-soft);overflow-wrap:anywhere;vertical-align:middle}
 th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:500;white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
+.bucket-row td{vertical-align:top}
+.bucket-row td:nth-child(2){min-width:250px}
+.bucket-detail-row td{vertical-align:top}
+.bucket-detail-row td:nth-child(2){padding-left:12px}
+.bucket-day-route td:nth-child(2){padding-left:24px}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .src{font-family:var(--font-code);font-size:11px;color:var(--faint)}
 .sort-btn{appearance:none;border:0;background:none;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;padding:2px 0;cursor:pointer;white-space:nowrap}
@@ -195,6 +209,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   .win{grid-template-columns:1fr;gap:2px;padding:5px 0}
   .win-reset{grid-column:1}
   .product-legend{grid-column:1}
+  #codex .win,#quotas .limit-group[data-provider="grok"] .win{grid-template-columns:58px minmax(0,1fr);column-gap:8px}
+  #codex .win-val,#quotas .limit-group[data-provider="grok"] .win-val{grid-column:2;order:0}
+  #codex .win-reset,#quotas .limit-group[data-provider="grok"] .win-reset,
+  #quotas .limit-group[data-provider="grok"] .product-legend{grid-column:2}
   .win-val{order:2}
   svg.chart{height:260px}
   .btn{padding:8px 12px}
@@ -231,12 +249,12 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-codex">
-    <div class="sec-head"><h2 id="h-codex">Codex accounts</h2></div>
+    <div class="sec-head"><h2 id="h-codex" class="quota-title"><span id="codex-brand"></span>OpenAI (Codex login)</h2></div>
     <div class="panel flat"><div id="codex"></div></div>
   </section>
 
   <section aria-labelledby="h-grok">
-    <div class="sec-head"><h2 id="h-grok">Grok</h2></div>
+    <div class="sec-head"><h2 id="h-grok" class="quota-title"><span id="grok-brand"></span>xAI Grok</h2></div>
     <div class="panel flat"><div id="quotas"></div></div>
   </section>
 
@@ -371,16 +389,63 @@ function providerName(provider) {
   if (known[key]) return known[key];
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
-/* Compact brand mark. Inline text so the page stays asset-free. */
-function brandMark(provider) {
+var BRAND_MARKS = {
+  "codex": {
+    "label": "OpenAI (Codex)",
+    "viewBox": "100 100 411 411",
+    "paths": [
+      {
+        "fill-rule": "evenodd",
+        "clip-rule": "evenodd",
+        "d": "M252.794 108.802C289.191 99.0484 326.265 110.305 351.148 135.135C385.113 126.072 422.85 134.862 449.492 161.505C476.136 188.149 484.925 225.888 475.862 259.85V259.854C500.696 284.735 511.95 321.81 502.198 358.207C492.447 394.602 464.161 421.084 430.215 430.217C421.083 464.162 394.603 492.448 358.206 502.199C321.812 511.951 284.734 500.693 259.852 475.864C225.887 484.927 188.15 476.137 161.507 449.495C134.864 422.851 126.073 385.111 135.136 351.149C110.304 326.266 99.0496 289.192 108.801 252.795C118.552 216.4 146.84 189.918 180.784 180.785C189.917 146.841 216.396 118.553 252.794 108.802ZM374.292 407.145C374.292 411.271 372.092 415.086 368.517 417.148L283.723 466.102C302.487 480.585 327.555 486.459 352.217 479.852C386.997 470.532 410.068 439.312 410.555 405.006V317.717C410.555 315.08 409.125 312.621 406.843 311.303L374.292 292.509V407.145ZM251.868 415.897C248.296 417.959 243.893 417.959 240.317 415.897L155.526 366.942C152.366 390.436 159.811 415.08 177.866 433.136H177.863C203.325 458.594 241.896 462.962 271.85 446.232L347.449 402.586C349.735 401.268 351.148 398.8 351.148 396.163V358.579L251.868 415.897ZM368.602 220.628C366.319 219.309 363.474 219.318 361.191 220.637L328.641 239.431L427.921 296.749C431.496 298.811 433.697 302.627 433.697 306.752V404.661C455.622 395.654 473.244 376.881 479.851 352.218C489.169 317.442 473.668 281.85 444.201 264.274L368.602 220.628ZM177.303 206.34C155.377 215.348 137.756 234.122 131.148 258.783C121.832 293.561 137.331 329.153 166.799 346.727L242.398 390.373C244.68 391.692 247.525 391.684 249.807 390.366L282.357 371.572L183.078 314.253C179.504 312.189 177.303 308.375 177.303 304.251V206.34ZM259.849 279.145V331.858L305.5 358.213L351.15 331.858V279.145L305.5 252.789L259.849 279.145ZM327.276 144.9C308.512 130.418 283.445 124.543 258.782 131.15C224.002 140.471 200.931 171.691 200.445 205.995V293.286C200.445 295.923 201.875 298.381 204.158 299.7L236.707 318.493V203.856C236.707 199.731 238.909 195.916 242.483 193.853L327.276 144.9ZM433.137 177.867C407.675 152.407 369.103 148.038 339.149 164.769L263.55 208.415C261.265 209.734 259.852 212.202 259.852 214.838V252.423L359.132 195.105C362.703 193.041 367.108 193.041 370.682 195.105L455.473 244.06C458.635 220.567 451.189 195.922 433.135 177.867H433.137Z",
+        "fill": "currentColor"
+      }
+    ]
+  },
+  "grok": {
+    "label": "Grok",
+    "viewBox": "0 0 34 33",
+    "paths": [
+      {
+        "d": "M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449 0.844576C33.5314 0.730667 33.6139 0.616757 33.6964 0.5L29.1113 5.09055V5.07631L13.2343 21.0436",
+        "fill": "currentColor"
+      },
+      {
+        "d": "M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341",
+        "fill": "currentColor"
+      }
+    ]
+  }
+};
+
+/* Official SVG geometry is embedded locally; provenance: assets/vendor-marks.md. */
+function brandMark(provider, parent) {
   var key = String(provider || '').toLowerCase();
-  var marks = { codex: 'OI', grok: 'xAI', grok_bot: 'xAI', nordrouter: 'NR', glm: 'Z', ollama: 'OL',
+  var official = BRAND_MARKS[key === 'grok_bot' ? 'grok' : key];
+  var tile = node('span', undefined, parent); tile.className = official ? 'brandmark ' + (key === 'grok_bot' ? 'grok' : key) : 'brandtile';
+  tile.setAttribute('role', 'img');
+  tile.setAttribute('aria-label', official ? official.label : providerName(key));
+  if (official) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', official.viewBox);
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    official.paths.forEach(function (attributes) {
+      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      Object.keys(attributes).forEach(function (name) { path.setAttribute(name, attributes[name]); });
+      svg.append(path);
+    });
+    tile.append(svg);
+    return tile;
+  }
+  var marks = { nordrouter: 'NR', glm: 'Z', ollama: 'OL',
                 claude: 'CC', antigravity: 'AG', cursor: 'CU' };
-  return marks[key] || key.slice(0, 2).toUpperCase();
+  tile.textContent = marks[key] || key.slice(0, 2).toUpperCase();
+  return tile;
 }
 /* Bar colour follows remaining capacity: green when comfortable, amber as the
    window fills, red as it approaches exhaustion. */
-function severity(used) { return used >= 80 ? 'danger' : (used >= 50 ? 'warn' : 'ok'); }
+function severity(used) { return used === 100 ? 'full' : (used >= 80 ? 'danger' : (used >= 50 ? 'warn' : 'ok')); }
 function grokProducts(window) {
   var products = window.product_usage;
   var total = window.used_percentage;
@@ -395,6 +460,7 @@ function grokProducts(window) {
   return Math.abs(sum - total) < 0.001 ? products : null;
 }
 function productColor(level, index) {
+  if (level === 'full') return 'hsl(' + (346 + index * 5 % 12) + ' ' + (67 + index * 7 % 15) + '% ' + (48 + index * 11 % 16) + '%)';
   var family = level === 'danger' ? [0, 12] : (level === 'warn' ? [22, 27] : [135, 32]);
   var hue = family[0] + (index * 17 % family[1]);
   return 'hsl(' + hue + ' ' + (62 + index * 11 % 19) + '% ' + (43 + index * 13 % 24) + '%)';
@@ -407,7 +473,7 @@ function productLabel(item) {
 function statusClass(status) {
   var key = String(status || 'unknown').toLowerCase();
   if (key === 'ok') return 'ok';
-  if (key === 'stale') return 'stale';
+  if (key === 'stale' || key === 'cached') return 'stale';
   if (key === 'not_configured') return 'not_configured';
   if (key === 'unavailable') return 'unavailable';
   return 'unknown';
@@ -416,6 +482,7 @@ function statusText(status) {
   var key = String(status || '').toLowerCase();
   if (key === 'ok') return 'Active';
   if (key === 'stale') return 'Stale data';
+  if (key === 'cached') return 'Saved snapshot';
   if (key === 'not_configured') return 'Not configured';
   if (key === 'unavailable') return 'Unavailable';
   return key ? key : 'Unknown';
@@ -495,10 +562,15 @@ function limitGroup(group, root) {
   var status = effectiveStatus(group);
   var card = node('div', undefined, root);
   card.className = 'limit-group' + (status === 'not_configured' ? ' subdued' : '');
+  card.setAttribute('data-provider', group.provider);
   var head = node('div', undefined, card); head.className = 'limit-head';
-  node('span', brandMark(group.provider), head).className = 'brandtile';
-  node('span', providerName(group.provider), head).className = 'pname';
+  if (!((group.provider === 'codex' && root === $('codex')) || (group.provider === 'grok' && root === $('quotas')))) {
+    brandMark(group.provider, head);
+    node('span', providerName(group.provider), head).className = 'pname';
+  }
   if (group.account) node('span', group.account_label || group.account, head).className = 'acct';
+  var plan = group.provider === 'codex' ? codexPlanLabel(group.plan_type) : null;
+  if (plan) node('span', plan, head).className = 'plan-label';
   var chip = node('span', statusText(status), head);
   chip.className = 'chip ' + statusClass(status);
   group.windows.forEach(function (window) { windowRow(card, window); });
@@ -515,6 +587,11 @@ function effectiveStatus(group) {
   return hasPercentage ? 'ok' : 'unknown';
 }
 
+function codexPlanLabel(plan) {
+  var labels = { prolite: 'Pro Lite', pro: 'Pro', pro500: 'Pro500', plus: 'Plus' };
+  return Object.prototype.hasOwnProperty.call(labels, plan) ? labels[plan] : null;
+}
+
 function groupQuotas(rows) {
   var groups = new Map();
   rows.forEach(function (row) {
@@ -523,9 +600,10 @@ function groupQuotas(rows) {
     var account = row.account || '';
     var key = provider + '::' + account;
     if (!groups.has(key)) {
-      groups.set(key, { provider: provider, account: account, account_label: row.account_label, status: row.status, windows: [] });
+      groups.set(key, { provider: provider, account: account, account_label: row.account_label, plan_type: row.plan_type, status: row.status, windows: [] });
     }
     var group = groups.get(key);
+    if (group.plan_type !== row.plan_type) group.plan_type = null;
     // An explicit non-ok status (stale, not_configured, unavailable) wins; a
     // plain ok only fills in when nothing has been recorded yet.
     if (row.status && row.status !== 'ok') group.status = row.status;
@@ -557,6 +635,11 @@ function orderGroups(groups) {
 }
 
 function renderQuotas(data, models, pending) {
+  [['codex', 'codex-brand'], ['grok', 'grok-brand']].forEach(function (pair) {
+    var holder = $(pair[1]);
+    holder.replaceChildren();
+    brandMark(pair[0], holder);
+  });
   var rows = data.quotas || [];
   var root = $('quotas');
   root.replaceChildren();
@@ -933,7 +1016,7 @@ function addTotals(into, values) {
   });
   return into;
 }
-var SOURCE_LABELS = { nordrouter: 'NordRouter', openclaw: 'OpenClaw', hermes: 'Hermes' };
+var SOURCE_LABELS = { nordrouter: 'NordRouter', openclaw: 'OpenClaw', hermes: 'Hermes', omniroute: 'OmniRoute (router-wide)' };
 function displayName(name) {
   // Same model, same label: drop the routing suffix (:fjord, :saga) and the
   // context suffix (-900k) but keep the vendor prefix the sources report.
@@ -949,7 +1032,7 @@ function preferredName(rows) {
   var counts = new Map();
   rows.forEach(function (row) {
     if (!row.model) return;
-    var name = displayName(row.model);
+    var name = row.bucket_comparison || row.source === 'omniroute' ? row.model : displayName(row.model);
     counts.set(name, (counts.get(name) || 0) + 1);
   });
   var names = Array.from(counts.keys());
@@ -964,6 +1047,7 @@ function money(value) {
   return '$' + (value >= 0.01 ? value.toFixed(2) : value.toFixed(4));
 }
 function effectiveCost(row, rates) {
+  if (row.bucket_comparison) return null;
   if (number(row.cost_usd)) return row.cost_usd;
   // Hermes reports no cost; price it at the rate this model already carries.
   // The NordRouter account bills its route once, so that route stays unpriced here.
@@ -983,11 +1067,13 @@ function tableModels(data) {
   return Array.from(groups.entries()).map(function (entry) {
     var rows = entry[1];
     var direct = rows.filter(function (row) { return row.source === 'nordrouter'; });
-    var agents = rows.filter(function (row) { return row.source !== 'nordrouter'; });
+    var agents = rows.filter(function (row) { return row.source !== 'nordrouter' && row.source !== 'omniroute'; });
+    var observation = rows.find(function (row) { return row.source === 'omniroute'; });
+    var bucket = !!observation || agents.some(function (row) { return row.bucket_comparison; });
     var billed = direct.length > 0;
     // NordRouter bills the route once, so its rows are the shown figure and the
     // agent rows become the crossed-out comparison; otherwise agents are canonical.
-    var shown = billed ? direct : agents;
+    var shown = billed ? direct : agents.length ? agents : observation ? [observation] : [];
     var totals = emptyTotals();
     var comparison = emptyTotals();
     var cost = null, costKind = null, daily = [], providers = [];
@@ -1000,6 +1086,10 @@ function tableModels(data) {
       (row.daily || []).forEach(function (day) { daily.push(day); });
     });
     agents.forEach(function (row) { addTotals(comparison, row.totals); });
+    if (bucket) {
+      cost = observation ? observation.cost_usd : null;
+      costKind = observation ? observation.cost_kind : 'unknown';
+    }
     return {
       model: preferredName(rows), model_key: entry[0],
       source: billed ? 'nordrouter' : (shown[0] || {}).source,
@@ -1008,6 +1098,9 @@ function tableModels(data) {
       cost_kind: billed ? 'billed' : (costKind || (number(cost) ? 'estimated' : null)),
       comparison_total: billed && comparison.total > 0 ? comparison.total : null,
       comparison_categories: billed && comparison.total > 0 ? comparison : null,
+      bucket: bucket, bucket_usage: observation && observation.bucket_usage,
+      token_scope: bucket ? (agents.length ? 'agent-reported' : 'router-wide') : null,
+      observed_daily: observation ? observation.daily : [],
       contributors: rows.map(function (row) {
         var value = effectiveCost(row, rates);
         return { source: row.source, provider: row.provider, model: row.model,
@@ -1057,8 +1150,11 @@ function renderModels(data) {
     (meta.generated_at_utc ? time(meta.generated_at_utc) : serverTime(meta.generated_at) + ' (server time)') +
     (meta.start_date && meta.end_date ? ' · ' + dateOnly(meta.start_date) + ' → ' + dateOnly(meta.end_date) : '') +
     ' · OpenClaw ' + (meta.openclaw_status || 'unknown') +
+    (meta.openclaw_status === 'cached' && meta.openclaw_cached_at_utc
+      ? ' (saved ' + time(meta.openclaw_cached_at_utc) + ')' : '') +
     ' · Hermes ' + (meta.hermes_status || 'unknown') +
-    ' · NordRouter ' + (meta.nordrouter_status || 'unknown');
+    ' · NordRouter ' + (meta.nordrouter_status || 'unknown') +
+    ' · OmniRoute ' + (meta.omniroute_status || 'not_configured');
   var body = $('models');
   body.replaceChildren();
   var models = sortedModels(tableModels(data));
@@ -1074,6 +1170,7 @@ function renderModels(data) {
   }, 0);
   models.forEach(function (row) {
     var tr = node('tr', undefined, body);
+    if (row.bucket) tr.className = 'bucket-row';
     var srcCell = node('td', undefined, tr);
     node('span', row.source === 'nordrouter' ? 'NordRouter' : row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
@@ -1086,7 +1183,7 @@ function renderModels(data) {
     node('span', row.model || '—', modelName);
     var daily = row.daily || [];
     var parts = row.contributors || [];
-    if (daily.length || parts.length > 1) {
+    if (!row.bucket && (daily.length || parts.length > 1)) {
       var detail = node('details', undefined, modelCell);
       node('summary', daily.length ? daily.length + ' daily rows' : parts.length + ' sources', detail);
       daily.forEach(function (day) {
@@ -1133,8 +1230,96 @@ function renderModels(data) {
     }
     var costCell = node('td', number(row.cost_usd) ? '$' + row.cost_usd.toFixed(2) : '—', tr);
     costCell.className = 'num';
-    node('span', row.comparison_total && !number(row.cost_usd) ? 'no direct match'
+    if (row.bucket) {
+      var usage = row.bucket_usage;
+      node('span', usage ? 'router-wide ' + (row.cost_kind || 'unknown') : 'router usage unavailable', costCell).className = 'cost-kind';
+      if (usage && !number(row.cost_usd) && number(usage.known_cost_usd))
+        node('span', 'known ≥ ' + money(usage.known_cost_usd), costCell).className = 'cost-kind';
+      if (usage && usage.retention_limited) node('span', 'retained history only', costCell).className = 'cost-kind';
+    } else node('span', row.comparison_total && !number(row.cost_usd) ? 'no direct match'
       : row.cost_kind || 'estimated', costCell).className = 'cost-kind';
+    if (row.bucket) renderBucketDetails(row, modelCell, body);
+  });
+}
+
+function bucketDetailRow(body, totals, cost, kind) {
+  var tr = node('tr', undefined, body);
+  tr.className = 'bucket-detail-row';
+  tr.hidden = true;
+  var source = node('td', undefined, tr);
+  var model = node('td', undefined, tr);
+  ['input', 'output', 'cache_read', 'cache_write', 'total'].forEach(function (field) {
+    node('td', tokens(totals[field]), tr).className = 'num';
+  });
+  var usdCell = node('td', money(cost), tr); usdCell.className = 'num';
+  node('span', kind, usdCell).className = 'cost-kind';
+  return { row: tr, source: source, model: model };
+}
+function routeLine(route, body) {
+  var line = bucketDetailRow(body, route.totals, route.cost_usd,
+    number(route.cost_usd) ? 'router-wide estimated' : 'unknown: ' + route.unknown_reason);
+  node('span', route.nordrouter === true ? 'NordRouter' : route.provider, line.source).className = 'src';
+  node('span', route.model, line.model).className = 'src';
+  return line.row;
+}
+function servingModels(routes, date) {
+  var grouped = new Map();
+  routes.forEach(function (route) {
+    var slices = date ? (route.daily || []).filter(function (day) { return day.date === date; }) : [route];
+    slices.forEach(function (slice) {
+      var key = JSON.stringify([route.provider, route.model, route.price_id, route.nordrouter]);
+      var total = grouped.get(key);
+      if (!total) {
+        total = Object.assign({}, route, { totals: {}, cost_usd: 0 });
+        grouped.set(key, total);
+      }
+      Object.keys(slice.totals).forEach(function (field) {
+        total.totals[field] = (total.totals[field] || 0) + slice.totals[field];
+      });
+      if (!number(slice.cost_usd)) {
+        total.cost_usd = null;
+        total.unknown_reason = route.unknown_reason;
+      } else if (number(total.cost_usd)) total.cost_usd += slice.cost_usd;
+    });
+  });
+  return Array.from(grouped.values());
+}
+function renderBucketDetails(row, cell, body) {
+  node('div', row.token_scope + ' tokens', cell).className = 'cost-kind';
+  var usage = row.bucket_usage;
+  if (!usage) {
+    node('div', 'No retained router observation.', cell).className = 'src';
+    return;
+  }
+  var detail = node('details', undefined, cell);
+  var serving = servingModels(usage.routes);
+  node('summary', serving.length + (serving.length === 1 ? ' serving model' : ' serving models'), detail)
+    .setAttribute('aria-label', row.model + ': serving models');
+  var children = [];
+  function syncRows() {
+    children.forEach(function (child) { child.row.hidden = !detail.open || (child.day && !child.day.open); });
+  }
+  detail.addEventListener('toggle', syncRows);
+  serving.forEach(function (route) { children.push({ row: routeLine(route, body) }); });
+  var dates = new Map();
+  (row.daily || []).forEach(function (day) {
+    var value = dates.get(day.date) || {}; value.agent = (value.agent || 0) + day.total; dates.set(day.date, value);
+  });
+  (row.observed_daily || []).forEach(function (day) { var value = dates.get(day.date) || {}; value.observed = day; dates.set(day.date, value); });
+  Array.from(dates.keys()).sort().forEach(function (date) {
+    var value = dates.get(date), day = value.observed;
+    var line = bucketDetailRow(body, day || {}, day && day.cost_usd,
+      day ? 'router-wide ' + (number(day.cost_usd) ? 'estimated' : 'unknown') : 'router observation unavailable');
+    children.push({ row: line.row });
+    var daily = node('details', undefined, line.model);
+    node('summary', dateOnly(date) + (row.token_scope === 'agent-reported' ? ' · ' + tokens(value.agent) + ' agent tok' : ''), daily)
+      .setAttribute('aria-label', row.model + ': ' + dateOnly(date) + ' serving models');
+    daily.addEventListener('toggle', syncRows);
+    servingModels(usage.routes, date).forEach(function (route) {
+      var tr = routeLine(route, body);
+      tr.classList.add('bucket-day-route');
+      children.push({ row: tr, day: daily });
+    });
   });
 }
 
@@ -1173,10 +1358,11 @@ function agentRates(models) {
   // already carries from any priced source in this window (OpenClaw, NordRouter).
   var rates = {};
   (models || []).forEach(function (row) {
+    if (row.source === 'omniroute') return;
     var total = (row.totals && row.totals.total) || 0;
-    var cost = row.cost_usd;
+    var cost = row.bucket_comparison ? row.overview_cost_usd : row.cost_usd;
     if (cost === null || cost === undefined || !total) return;
-    var key = row.model_key || row.model;
+    var key = row.overview_model_key || row.model_key || row.model;
     if (!rates[key]) rates[key] = { cost: 0, tokens: 0 };
     rates[key].cost += cost;
     rates[key].tokens += total;
@@ -1193,9 +1379,9 @@ function priceAgents(models) {
       // The NordRouter account bills its route once, for every agent.
       if (String(row.provider || '').toLowerCase() === 'nordrouter') return;
       var total = (row.totals && row.totals.total) || 0;
-      var value = row.cost_usd;
+      var value = row.bucket_comparison ? row.overview_cost_usd : row.cost_usd;
       if (value === null || value === undefined) {
-        var rate = rates[row.model_key || row.model];
+        var rate = rates[row.overview_model_key || row.model_key || row.model];
         if (rate && rate.tokens) value = rate.cost / rate.tokens * total;
         else unpriced += 1;
       }
@@ -1206,44 +1392,64 @@ function priceAgents(models) {
   return result;
 }
 function partialModels(state) {
-  var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter, hermes = state.parts.hermes;
+  var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter, hermes = state.parts.hermes, router = state.parts.omniroute;
   var openSource = openclaw && openclaw.sources && openclaw.sources.openclaw || { complete: false };
   var hermesSource = hermes && hermes.sources && hermes.sources.hermes || { complete: false };
   var directSource = nordrouter && nordrouter.sources && nordrouter.sources.nordrouter || { complete: false };
   var agents = [openSource, hermesSource];
   var agentsComplete = agents.every(function (source) { return source.complete; });
   var merged = (openclaw ? openclaw.models : []).concat(hermes ? hermes.models : [])
-    .concat(nordrouter ? nordrouter.models : []);
+    .concat(nordrouter ? nordrouter.models : []).concat(router ? router.models : []);
   var priced = priceAgents(merged);
   return {
     meta: Object.assign({}, (nordrouter || openclaw || hermes || {}).meta || {}, {
       days: state.days,
       openclaw_status: openclaw ? openclaw.meta.openclaw_status : 'loading',
+      openclaw_cached_at_utc: openclaw ? openclaw.meta.openclaw_cached_at_utc : null,
+      openclaw_error: openclaw ? openclaw.meta.openclaw_error : null,
       hermes_status: hermes ? hermes.meta.hermes_status : 'loading',
       nordrouter_status: nordrouter ? nordrouter.meta.nordrouter_status : 'loading',
+      omniroute_status: router ? router.meta.omniroute_status : 'loading',
     }),
     totals: { total: agentsComplete && directSource.complete
       ? agents.reduce(function (sum, source) { return sum + (source.tokens || 0); }, 0) + directSource.tokens
       : null },
     sources: { openclaw: Object.assign({}, openSource, priced.openclaw),
       hermes: Object.assign({}, hermesSource, priced.hermes), nordrouter: directSource,
+      omniroute: router && router.sources.omniroute,
       openclaw_nordrouter_comparison_tokens: openclaw && openclaw.sources.openclaw_nordrouter_comparison_tokens,
       hermes_nordrouter_comparison_tokens: hermes && hermes.sources.hermes_nordrouter_comparison_tokens },
     source_daily: { nordrouter: nordrouter && nordrouter.source_daily ? nordrouter.source_daily.nordrouter : [] },
     models: merged,
   };
 }
+/* Saved OpenClaw usage is real measured data, but it is not the live window:
+   name the failure, the original successful fetch time, and the window it
+   actually describes instead of presenting it as current. */
+function savedOpenClawNotice(state) {
+  var openclaw = state.parts.openclaw;
+  var meta = openclaw && openclaw.meta;
+  if (!meta || meta.openclaw_status !== 'cached') return null;
+  var stamp = meta.openclaw_cached_at_utc ? new Date(meta.openclaw_cached_at_utc).getTime() : NaN;
+  var age = relativeAge(stamp);
+  return 'OpenClaw Gateway unavailable: ' + (meta.openclaw_error || 'live read failed') +
+    '. Showing saved OpenClaw usage from ' + time(meta.openclaw_cached_at_utc) +
+    (age ? ' (' + age + ')' : '') + ', the last successful fetch of this window; it is not live data.';
+}
 function renderAvailable(state) {
   var models = partialModels(state);
-  if (state.parts.openclaw || state.parts.nordrouter || state.parts.hermes) {
+  if (state.parts.openclaw || state.parts.nordrouter || state.parts.hermes || state.parts.omniroute) {
     renderHero(models);
     renderHistory(models);
     renderModels(models);
   }
   if (state.quotas) renderQuotas(state.quotas, models, state.quotaPending);
-  $('error').textContent = Object.keys(state.errors).map(function (source) {
+  var messages = Object.keys(state.errors).map(function (source) {
     return source + ' unavailable: ' + state.errors[source] + '. Last displayed data retained where available.';
-  }).join(' ');
+  });
+  var notice = savedOpenClawNotice(state);
+  if (notice) messages.push(notice);
+  $('error').textContent = messages.join(' ');
 }
 function mergeQuotaParts(state) {
   var cached = state.quotaParts.all || { quotas: [] };
@@ -1257,7 +1463,7 @@ function mergeQuotaParts(state) {
   state.quotas = Object.assign({}, latest || {}, { quotas: rows });
 }
 function loadSources(version, state, requested) {
-  requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'nordrouter', 'openclaw', 'hermes'];
+  requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'nordrouter', 'openclaw', 'hermes', 'omniroute'];
   requested.forEach(function (source) {
     var ticket = state.requests[source] = (state.requests[source] || 0) + 1;
     function current() { return version === loadVersion && ticket === state.requests[source]; }
@@ -1284,11 +1490,12 @@ function loadSources(version, state, requested) {
         if (!current()) return;
         if (models.meta.days !== state.days) throw new Error('period mismatch');
         if (source === 'openclaw' && models.meta.openclaw_status === 'unavailable')
-          throw new Error('Gateway usage unavailable');
+          throw new Error(models.meta.openclaw_error
+            ? 'Gateway read failed: ' + models.meta.openclaw_error : 'Gateway usage unavailable');
         if (source === 'hermes' && models.meta.hermes_status === 'unavailable')
           throw new Error('Hermes usage unavailable');
         // Every model part must describe the same window before they are combined.
-        ['openclaw', 'hermes', 'nordrouter'].forEach(function (other) {
+        ['openclaw', 'hermes', 'nordrouter', 'omniroute'].forEach(function (other) {
           if (other === source) return;
           var previous = state.parts[other];
           if (previous && (previous.meta.start_date !== models.meta.start_date ||

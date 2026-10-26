@@ -70,13 +70,29 @@ def test_page_orders_quotas_codex_then_grok_then_rest():
 
 
 def test_page_marks_brand_and_colors_by_remaining_capacity():
-    # Inline text brand marks keep the page asset-free.
+    # Official inert SVG paths stay self-contained; no runtime logo requests.
     assert 'function brandMark(' in DASHBOARD_HTML
-    assert "codex: 'OI'" in DASHBOARD_HTML
-    assert "grok: 'xAI'" in DASHBOARD_HTML
+    assert 'var BRAND_MARKS =' in DASHBOARD_HTML
+    assert "codex: 'OI'" not in DASHBOARD_HTML
+    assert "grok: 'xAI'" not in DASHBOARD_HTML
     assert 'brandtile' in DASHBOARD_HTML
     # Colour thresholds follow how close the window is to exhaustion.
     assert "used >= 80 ? 'danger' : (used >= 50 ? 'warn' : 'ok')" in DASHBOARD_HTML
+    assert "used === 100 ? 'full'" in DASHBOARD_HTML
+    assert '.fill.full{background:#cc2850' in DASHBOARD_HTML
+    assert 'grid-template-columns:58px minmax(0,1fr)' in DASHBOARD_HTML
+    assert '.track{height:8px' in DASHBOARD_HTML
+
+
+def test_quota_headings_have_bare_equal_size_vendor_marks_and_muted_plans():
+    assert 'class="quota-title"><span id="codex-brand"></span>OpenAI (Codex login)' in DASHBOARD_HTML
+    assert 'class="quota-title"><span id="grok-brand"></span>xAI Grok' in DASHBOARD_HTML
+    assert '.brandmark.codex{color:#10a37f}' in DASHBOARD_HTML
+    css = re.search(r'\.brandmark\{([^}]+)\}', DASHBOARD_HTML).group(1)
+    assert 'width:24px;height:24px' in css
+    assert not any(x in css for x in ('background', 'border', 'radius'))
+    assert '.brandmark svg{display:block;width:24px;height:24px;fill:currentColor}' in DASHBOARD_HTML
+    assert '.plan-label{font-size:11px;font-weight:400;color:var(--muted)' in DASHBOARD_HTML
 
 
 def test_page_labels_list_price_estimate_and_never_fakes_it():

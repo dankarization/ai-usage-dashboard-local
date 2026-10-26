@@ -33,6 +33,7 @@ import dsh_usage as _dsh_usage
 import grok_usage as _grok_usage
 import hermes_usage as _hermes_usage
 import nordrouter_usage as _nordrouter_usage
+import omniroute_usage as _omniroute_usage
 from pricing_config import get_pricing, calc_cost
 
 plt.rcParams['axes.unicode_minus'] = False
@@ -118,6 +119,7 @@ class GlmQuotaSnapshot(TypedDict, total=False):
 # GLM-only `glm_quota` field is kept as a backward-compat alias.
 class QuotaSnapshot(TypedDict, total=False):
     provider: str
+    plan_type: str
     label: str
     percentage: int
     next_reset_time_ms: int | None
@@ -1121,6 +1123,10 @@ def export_codex_quota(home: Path | None = None) -> list[QuotaSnapshot]:
         except requests.HTTPError as retry_exc:
             raise CodexQuotaAuthError('Codex quota authorization failed after refresh') from retry_exc
     rate_limit = body.get('rate_limit', {})
+    # Only explicit provider plan enums are public metadata. Never infer a tier
+    # from quota sizes, identity claims, or session history.
+    plan_type = body.get('plan_type')
+    plan = {'plan_type': plan_type} if isinstance(plan_type, str) and plan_type in {'prolite', 'pro', 'pro500', 'plus'} else {}
     snapshots: list[QuotaSnapshot] = []
     for slot, label_key in (('primary_window', '5h'), ('secondary_window', '7d')):
         window = rate_limit.get(slot)
@@ -1133,6 +1139,7 @@ def export_codex_quota(home: Path | None = None) -> list[QuotaSnapshot]:
         resets_ms = int(resets_at) * 1000 if isinstance(resets_at, (int, float)) else None
         snapshots.append({
             'provider': 'codex',
+            **plan,
             'label': _codex_window_label_from_seconds(window.get('limit_window_seconds')) or label_key,
             'percentage': int(round(used)),
             'next_reset_time_ms': resets_ms,
@@ -2859,16 +2866,22 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     start_str, end_str, _, _ = get_date_range(days)
     models = []
     gateway_status = 'pending'
+    gateway_cached_at_utc = None
+    gateway_error = None
     if source in ('all', 'openclaw'):
-        gateway_status = 'ok'
-        try:
-            gateway = openclaw_usage.fetch_usage(start_str, end_str)
-            models.extend(openclaw_usage.model_entries(gateway, include_daily=include_daily))
-            cache_status = (gateway.get('cacheStatus') or {}).get('status')
-            if cache_status and cache_status != 'fresh':
-                gateway_status = str(cache_status)
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-            gateway_status = 'unavailable'
+        # A failed Gateway read falls back to the snapshot this window already
+        # retained from an earlier successful live read; only such a read
+        # writes it, and no background job fills it.
+        loaded = openclaw_usage.load_with_cache(days, start_str, end_str)
+        gateway_status = loaded['status']
+        gateway_cached_at_utc = loaded['cached_at_utc']
+        gateway_error = loaded['error']
+        if loaded['response'] is not None:
+            models.extend(openclaw_usage.model_entries(loaded['response'],
+                                                       include_daily=include_daily))
+        # The Gateway's own cache state still describes a successful live read.
+        if loaded['gateway_cache_status'] and loaded['gateway_cache_status'] != 'fresh':
+            gateway_status = loaded['gateway_cache_status']
 
     hermes_status = 'pending'
     if source in ('all', 'hermes'):
@@ -2881,8 +2894,11 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             except (OSError, ValueError, sqlite3.Error):
                 hermes_status = 'unavailable'
 
+    router = (_omniroute_usage.collect(start_str, end_str, include_daily=include_daily)
+              if source in ('all', 'omniroute') else
+              {'models': [], 'daily': [], 'status': 'pending', 'source': {'tokens': 0, 'complete': False}})
     # Direct NordRouter analytics is the sole NordRouter history authority.
-    nr_status = 'pending' if source in ('openclaw', 'hermes') else 'not_configured'
+    nr_status = 'pending' if source in ('openclaw', 'hermes', 'omniroute') else 'not_configured'
     nr_daily = []
     nr_window_cost = None
     nr_window_days = None
@@ -2916,6 +2932,8 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     # rollups or the NordRouter bill): cost per token, not a second price opinion.
     rates: dict[str, list[float]] = {}
     for row in models:
+        if row['source'] == 'omniroute' or row.get('bucket_comparison'):
+            continue
         total = row['totals'].get('total') or 0
         cost = row.get('cost_usd')
         if cost is None or total <= 0:
@@ -2924,7 +2942,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
         bucket[0] += float(cost)
         bucket[1] += int(total)
     for row in models:
-        if row['source'] != 'hermes' or row.get('cost_usd') is not None:
+        if row['source'] != 'hermes' or row.get('cost_usd') is not None or row.get('bucket_comparison'):
             continue
         if row['provider'].lower() == 'nordrouter':
             continue  # the account API bills this route once for every agent
@@ -2933,6 +2951,15 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             continue
         row['cost_usd'] = bucket[0] / bucket[1] * row['totals']['total']
         row['cost_kind'] = 'estimated'
+    # Preserve the legacy overview calculation (including Hermes derivation)
+    # before introducing non-additive router observations into the model table.
+    for row in models:
+        if row['source'] in ('openclaw', 'hermes') and _omniroute_usage.is_bucket(row):
+            row.update(overview_cost_usd=row.get('cost_usd'), overview_model_key=row['model_key'],
+                       cost_usd=None, cost_kind='unknown', bucket_comparison=True,
+                       model_key=_omniroute_usage.bucket_key(row['model']))
+    models.extend(router['models'])
+    models.sort(key=lambda row: row['totals']['total'], reverse=True)
     # Both agents are canonical for every route except NordRouter, which the
     # account API bills once for all of them.
     agent_models = [m for m in models if m['source'] in ('openclaw', 'hermes')
@@ -2940,16 +2967,28 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
 
     def agent_source(name: str) -> dict:
         rows = [m for m in agent_models if m['source'] == name]
-        priced = [m for m in rows if m['cost_usd'] is not None]
+        def overview_cost(row):
+            return row.get('overview_cost_usd') if row.get('bucket_comparison') else row.get('cost_usd')
+        priced = [m for m in rows if overview_cost(m) is not None]
         return {'tokens': sum(m['totals']['total'] for m in rows),
-                'estimated_cost_usd': sum(m['cost_usd'] for m in priced) if priced else None,
+                'estimated_cost_usd': sum(overview_cost(m) for m in priced) if priced else None,
                 'priced_models': len(priced),
                 'unpriced_models': len(rows) - len(priced)}
 
     openclaw_source = agent_source('openclaw')
     hermes_source = agent_source('hermes')
-    openclaw_source['complete'] = gateway_status not in ('unavailable', 'pending')
+    # A saved snapshot is not current: the Gateway kept accruing while it was
+    # unreachable, so it stays incomplete and never becomes the canonical total.
+    openclaw_source['complete'] = gateway_status not in ('unavailable', 'pending', 'cached')
     hermes_source['complete'] = hermes_status not in ('unavailable', 'pending')
+    router_source = router['source']
+    router_keys = {m['model_key'] for m in router['models']}
+    # An unobserved bucket can be outside retention, renamed, or unavailable.
+    # Never substitute today's fallback membership for that missing history.
+    unmatched = {m['model_key'] for m in models if m.get('bucket_comparison')} - router_keys
+    router_source['unmatched_buckets'] = sorted(unmatched)
+    if unmatched:
+        router_source['complete'] = False
     detailed = [m['totals'] for m in agent_models]
     def amount(field):
         return sum(t.get(field) or 0 for t in detailed)
@@ -2961,7 +3000,10 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             'generated_at_utc': _now_utc_iso(), 'start_date': start_str,
             'end_date': end_str, 'days': days,
             'openclaw_status': gateway_status, 'hermes_status': hermes_status,
+            'openclaw_cached_at_utc': gateway_cached_at_utc,
+            'openclaw_error': gateway_error,
             'nordrouter_status': nr_status,
+            'omniroute_status': router['status'],
         },
         'totals': {
             'input': total_input, 'output': total_output, 'cache_read': cache_read,
@@ -2974,10 +3016,11 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             'input_output_ratio': round(total_input / total_output, 2) if total_output else None,
             'cache_hit_rate': round(cache_read / (total_input + cache_read), 4) if total_input + cache_read else None,
         },
-        'source_daily': {'nordrouter': nr_daily if include_daily else []},
+        'source_daily': {'nordrouter': nr_daily if include_daily else [], 'omniroute': router['daily']},
         'sources': {
             'openclaw': openclaw_source,
             'hermes': hermes_source,
+            'omniroute': router_source,
             'nordrouter': {'tokens': sum(day['tokens'] for day in nr_daily) if nr_daily else None,
                            'billed_cost_usd': nr_window_cost if nr_window_days == days else None,
                            'window_days': nr_window_days, 'complete': nr_complete},

@@ -12,7 +12,7 @@ serializes without dropping fields. The service serializes with
 its minimal shape.
 """
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -88,6 +88,7 @@ class GlmQuotaSnapshot(BaseModel):
 class AccountMetrics(BaseModel):
     account: Optional[str] = Field(default=None, description='Stable Codex profile identity: codex_1 or codex_2.')
     account_label: Optional[str] = Field(default=None, description='Display name of the local Codex profile, when available.')
+    plan_type: Optional[Literal['prolite', 'pro', 'pro500', 'plus']] = Field(default=None, description='Explicit Codex plan_type from the existing ChatGPT wham/usage response; unknown or historical fallback plans are omitted. Generic pro does not imply pro500.')
     status: Optional[str] = Field(default=None, description='ok, stale, unavailable, or not_configured.')
     balance_usd: Optional[float] = Field(default=None, description='NordRouter prepaid balance in USD.')
     spend_today_usd: Optional[float] = Field(default=None, description='Today spend; see today_basis and today_complete.')
@@ -180,19 +181,26 @@ class ModelDailyEntry(BaseModel):
     cache_read: Optional[int] = Field(default=None, description='Cache-read input tokens for this day. None when the source does not provide per-category breakdown.')
     cache_write: Optional[int] = Field(default=None, description='Cache-write input tokens for this day. None when the source does not provide per-category breakdown.')
     total: int = Field(default=0, description='Total tokens for this day.')
+    cost_usd: Optional[float] = Field(default=None, description='Sum of priced serving routes for this day; null when any route is unpriced.')
+    known_cost_usd: Optional[float] = Field(default=None, description='Known retained cost, a lower bound when routes are unpriced.')
+    unpriced_requests: Optional[int] = Field(default=None, description='Retained serving attempts without a known price.')
 
 
 class ModelBreakdownEntry(BaseModel):
     """Per-model token usage from one data source."""
 
-    cost_usd: Optional[float] = Field(default=None, description="Reported provider spend for this model and window.")
+    cost_usd: Optional[float] = Field(default=None, description="Reported or estimated spend for this model and window. OmniRoute observations sum retained serving routes at current tariffs; null for incomplete pricing, never an agent allocation.")
 
     cost_kind: Optional[str] = Field(default=None, description="Provenance of cost_usd: billed (provider invoice), reported (source-recorded estimate), or estimated (priced locally from tokens). Absent when the source has no price for this model, and for comparison-only NordRouter rows.")
+    bucket_usage: Optional[dict] = Field(default=None, description='Non-additive router-wide bucket observation: exact historical serving routes with tokens, estimated USD and daily drilldown; pricing freshness and retention coverage. Never a per-agent allocation or historical invoice.')
+    bucket_comparison: bool = Field(default=False, description='Agent bucket tokens retained for comparison; USD is unknown without a matching router observation.')
+    overview_cost_usd: Optional[float] = Field(default=None, description='Legacy source estimate used only to preserve the unchanged overview formula; never used as the displayed bucket price.')
+    overview_model_key: Optional[str] = Field(default=None, description='Legacy rate-matching key used only for the unchanged overview estimate, including Hermes derivation.')
 
-    source: str = Field(description='Data source: openclaw, hermes, or direct nordrouter. Agent NordRouter-route rows are comparison-only and excluded from totals.')
+    source: str = Field(description='Data source: openclaw, hermes, direct nordrouter, or non-additive omniroute bucket observations. Agent NordRouter-route rows are comparison-only and excluded from totals.')
     provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')
     model: str = Field(description='Model identifier reported by the source; names alone do not prove account identity.')
-    model_key: Optional[str] = Field(default=None, description='Display key shared by every spelling that bills as one model: NordRouter routing variants (:fjord, :saga), provider prefixes, and -900k context variants collapse into one key. Group rows by this key to show and sum one model.')
+    model_key: Optional[str] = Field(default=None, description='Display grouping key. Regular model spellings collapse routing/context aliases. OmniRoute bucket keys use omniroute/<exact bucket name> and never merge with serving/account model IDs; serving tariffs retain exact IDs separately.')
     totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window.')
     daily: list[ModelDailyEntry] = Field(default_factory=list, description='Per-day token entries for this model, ordered by date. Empty when ?daily=false is passed.')
 
@@ -217,9 +225,12 @@ class ModelBreakdownMeta(BaseModel):
     start_date: Optional[str] = Field(default=None, description='Inclusive start date, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date, YYYY-MM-DD.')
     days: Optional[int] = Field(default=None, description='Number of days covered, inclusive of both endpoints.')
-    openclaw_status: Optional[str] = Field(default=None, description='Gateway usage rollup status: fresh/refreshing/stale/unavailable; pending when this source was not requested.')
+    openclaw_status: Optional[str] = Field(default=None, description='Gateway usage rollup status: fresh/refreshing/stale/unavailable from the Gateway itself, cached when the last successful saved window was served after a failed live read, or pending when this source was not requested.')
+    openclaw_cached_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp of the original successful Gateway fetch that produced the saved snapshot currently displayed. Set only when openclaw_status is cached; the value never advances on a failed read.')
+    openclaw_error: Optional[str] = Field(default=None, description='Bounded, non-secret failure summary for the most recent failed live Gateway read; null after a successful read. Displayed in the dashboard warning banner.')
     hermes_status: Optional[str] = Field(default=None, description='Hermes native session usage status: ok, not_configured when no Hermes state database exists, or unavailable when none could be read; pending when this source was not requested.')
     nordrouter_status: Optional[str] = Field(default=None, description='Direct NordRouter analytics status; pending when this source was not requested.')
+    omniroute_status: Optional[str] = Field(default=None, description='Read-only retained router snapshot status: ok/stale/unavailable/not_configured/pending. Does not affect overview availability.')
 
 
 class ModelBreakdownResponse(BaseModel):
@@ -228,8 +239,8 @@ class ModelBreakdownResponse(BaseModel):
     meta: ModelBreakdownMeta = Field(default_factory=ModelBreakdownMeta, description='Metadata describing the generation run.')
     totals: ModelBreakdownTotals = Field(default_factory=ModelBreakdownTotals, description='Aggregate token totals across all models.')
     models: list[ModelBreakdownEntry] = Field(default_factory=list, description='Per-model entries, ordered by total tokens descending.')
-    source_daily: Optional[dict] = Field(default=None, description='Source-level daily rows, currently direct NordRouter account buckets; not per-model splits.')
-    sources: Optional[dict] = Field(default=None, description='Canonical source totals and cost provenance keyed by source (openclaw, hermes, nordrouter), plus per-agent NordRouter comparison token totals; every agent NordRouter comparison row is excluded.')
+    source_daily: Optional[dict] = Field(default=None, description='Source-level daily rows: NordRouter account buckets and non-additive OmniRoute observations, never to be summed together.')
+    sources: Optional[dict] = Field(default=None, description='Existing overview sources (openclaw, hermes, nordrouter), per-agent comparison counts, and optional omniroute observations marked additive=false. Router coverage/cost never changes overview totals.')
 
 
 class AntigravityIngestRequest(BaseModel):

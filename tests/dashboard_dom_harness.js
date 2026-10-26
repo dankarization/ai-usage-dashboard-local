@@ -71,7 +71,7 @@ class Element {
 }
 
 const registry = new Map();
-['hero', 'quotas', 'history', 'history-scale', 'codex', 'metrics', 'today', 'week', 'selected-top-label',
+['hero', 'quotas', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
  'period-30', 'period-7', 'period-1', 'overview-note', 'models-note'].forEach((id) => {
   registry.set(id, new Element('div'));
@@ -116,7 +116,7 @@ const initialPressed = [7, 30].map((days) => registry.get('period-' + days).getA
 const QUOTAS = {
   generated_at: '2026-10-03T03:37:51',
   quotas: [
-    { account: 'codex_1', account_label: 'first@example.test', status: 'ok', provider: 'codex', label: '7d',
+    { account: 'codex_1', account_label: 'first@example.test', plan_type: 'prolite', status: 'ok', provider: 'codex', label: '7d',
       used_percentage: 10, remaining_percentage: 90, next_reset_time_ms: 1791580259000,
       next_reset_iso: '2026-10-10T01:10:59', usage: null, remaining: null },
     { account: 'codex_2', account_label: 'second@example.test', status: 'not_configured', provider: 'codex', label: 'Codex Secondary',
@@ -202,14 +202,29 @@ function chartColor(name) {
 /* ---------------- pure helpers ---------------- */
 assertEqual(severity(10), 'ok', 'severity(10)');
 assertEqual(severity(50), 'warn', 'severity(50)');
-assertEqual(severity(100), 'danger', 'severity(100)');
+assertEqual(severity(100), 'full', 'only exact 100% uses the exhausted colour');
+assertEqual(severity(81), 'danger', '81% retains the near-full warning colour');
+assertEqual(severity(99.99), 'danger', 'rounding must not turn partial usage into exhausted');
+assertEqual(severity(0), 'ok', 'zero is not exhausted');
 assertEqual(statusClass('not_configured'), 'not_configured', 'statusClass(not_configured)');
 assertEqual(statusClass('stale'), 'stale', 'statusClass(stale)');
+assertEqual(statusClass('cached'), 'stale', 'a saved snapshot uses the stale colour');
+assertEqual(statusText('cached'), 'Saved snapshot', 'a saved snapshot is labelled, never rendered as active data');
 assertEqual(providerName('codex'), 'Codex', 'providerName(codex)');
 assertEqual(providerName('grok'), 'Grok', 'providerName(grok)');
-assertEqual(brandMark('codex'), 'OI', 'brandMark(codex) is the Codex login mark');
-assertEqual(brandMark('grok'), 'xAI', 'brandMark(grok) is the xAI mark');
-assertEqual(brandMark('nordrouter'), 'NR', 'brandMark(nordrouter)');
+for (const [provider, label, paths] of [['codex', 'OpenAI (Codex)', 1], ['grok', 'Grok', 2], ['grok_bot', 'Grok', 2]]) {
+  const mark = brandMark(provider);
+  assertEqual(mark.textContent, '', 'official mark is not a text approximation');
+  assertEqual(mark.getAttribute('role'), 'img', 'logo has an accessible image role');
+  assertEqual(mark.getAttribute('aria-label'), label, 'logo identifies its provider without visible repetition');
+  const svg = mark.children[0];
+  assertEqual(svg.tagName, 'SVG', 'brand mark is actual inline SVG');
+  assertEqual(svg.getAttribute('aria-hidden'), 'true', 'SVG does not duplicate the tile accessible name');
+  assertEqual(svg.children.length, paths, 'official path count is preserved');
+  assert(svg.children.every((p) => p.tagName === 'PATH' && p.getAttribute('d').length > 100), 'logo uses real nonempty paths');
+  assert(all(svg).every((e) => !['SCRIPT', 'IMAGE', 'FOREIGNOBJECT', 'USE'].includes(e.tagName)), 'SVG contains only inert local geometry');
+}
+assertEqual(brandMark('nordrouter').textContent, 'NR', 'other sources keep their existing mark');
 assertEqual(tokens(1029393251), '1.03B', 'tokens(1.03B)');
 assertEqual(tokens(61934392), '61.9M', 'tokens(61.9M)');
 assertEqual(usd(null), '—', 'usd(null) is unknown, not $0');
@@ -243,9 +258,28 @@ assert(codexRows[0].textContent.includes('first@example.test'), 'first account d
 assert(codexRows[1].textContent.includes('second@example.test'), 'second account display name must render');
 assert(!codexRoot.textContent.includes('codex_1') && !codexRoot.textContent.includes('codex_2'),
   'internal account IDs must not be shown when display names are available');
-// Each row carries a brand mark.
-assertEqual(all(codexRows[0]).filter((e) => e.classList.contains('brandtile'))[0].textContent, 'OI',
-  'Codex rows must carry the OI brand mark');
+assertEqual(all(registry.get('codex-brand')).filter((e) => e.classList.contains('brandmark')).length, 1,
+  'OpenAI logo renders once in its section heading');
+assertEqual(all(registry.get('grok-brand')).filter((e) => e.classList.contains('brandmark')).length, 1,
+  'Grok logo renders once in its section heading');
+assert(!all(codexRoot).some((e) => e.classList.contains('brandmark') || e.classList.contains('brandtile')),
+  'account rows do not repeat provider logos');
+assertEqual(all(codexRows[0]).find((e) => e.classList.contains('plan-label')).textContent, 'Pro Lite',
+  'confirmed plan is attached to its own account');
+assert(!all(codexRows[1]).some((e) => e.classList.contains('plan-label')), 'unknown plan is omitted');
+for (const [raw, label] of [['prolite', 'Pro Lite'], ['plus', 'Plus'], ['pro', 'Pro'], ['pro500', 'Pro500'],
+  ['unknown', null], [null, null], ['toString', null]]) {
+  const q = {quotas: [{...QUOTAS.quotas[0], plan_type: raw}]};
+  renderQuotas(q, MODELS);
+  const labels = all(codexRoot).filter(e => e.classList.contains('plan-label'));
+  assertEqual(labels.length, label ? 1 : 0, 'only explicit plan enums render');
+  if (label) assertEqual(labels[0].textContent, label, 'exact plan display, no inferred Pro500');
+}
+renderQuotas({quotas: [{...QUOTAS.quotas[0], plan_type:'plus'}, {...QUOTAS.quotas[0], plan_type:'pro'}]}, MODELS);
+assert(!all(codexRoot).some(e => e.classList.contains('plan-label')), 'conflicting account plans are not guessed');
+renderQuotas(QUOTAS, MODELS);
+assert(codexRows.every((row) => !all(row).some((e) => e.classList.contains('pname'))),
+  'account headers do not repeat the enclosing Codex heading');
 // A not-configured account is a subdued single row, not a large empty card.
 assert(codexRows[1].classList.contains('subdued'),
   'an unconfigured account must render as a subdued row');
@@ -278,7 +312,7 @@ assert(grokCard, 'Grok card missing from the quota grid');
 const grokBars = withRole(grokCard, 'progressbar');
 assertEqual(grokBars.length, 2, 'Grok and Grok Bot must have separate bars in one provider group');
 const grokFill = all(grokBars[0]).find((e) => e.classList.contains('fill'));
-assert(grokFill.classList.contains('danger'), 'Grok at 100% must be colour-coded danger');
+assert(grokFill.classList.contains('full'), 'Grok at 100% uses the distinct exhausted burgundy family');
 assertEqual(grokFill.style.width, '100%', 'Grok fill width');
 assert(grokCard.textContent.includes('100% used'), 'Grok must show 100% used');
 assert(grokCard.textContent.includes('Grok Build: 100%'), 'Grok must show the verified product name and percentage');
@@ -289,10 +323,10 @@ assert(grokCard.textContent.includes('0% left'), 'Grok must show 0% left');
 // it must read as Active, not as Unknown.
 assert(grokCard.textContent.includes('Active'), 'a window with a real percentage must read as Active');
 assert(!grokCard.textContent.includes('Unknown'), 'a live window must not be labelled Unknown');
-assertEqual(all(grokCard).filter((e) => e.classList.contains('brandtile')).length, 1,
-  'the Grok group must have one icon');
-assertEqual(all(grokCard).filter((e) => e.classList.contains('pname')).map((e) => e.textContent).join(','), 'Grok',
-  'the Grok group must have one provider title');
+assertEqual(all(grokCard).filter((e) => e.classList.contains('brandmark') || e.classList.contains('brandtile')).length, 0,
+  'the Grok group does not repeat its section logo');
+assertEqual(all(grokCard).filter((e) => e.classList.contains('pname')).length, 0,
+  'the Grok group must not duplicate its enclosing section title');
 assertEqual(all(grokCard).filter((e) => e.classList.contains('chip')).length, 1,
   'the Grok group must have one status badge');
 const grokWindows = all(grokCard).filter((e) => e.classList.contains('win'));
@@ -337,7 +371,7 @@ assert(liveGrok.segments[0].style.backgroundColor !== liveGrok.segments[1].style
   'products are visually distinguishable');
 assert(!liveGrok.root.textContent.includes('shared credits'), 'unwanted suffix is absent');
 
-for (const [total, level] of [[3, 'ok'], [60, 'warn'], [90, 'danger']]) {
+for (const [total, level] of [[3, 'ok'], [60, 'warn'], [90, 'danger'], [100, 'full']]) {
   const amounts = Array.from({ length: 12 }, () => total / 12);
   const many = renderedGrok(total, amounts.map((amount, index) =>
     ({ product: index, label: 'Product ' + index, usage_percent: amount })));
@@ -351,6 +385,16 @@ for (const [total, level] of [[3, 'ok'], [60, 'warn'], [90, 'danger']]) {
     many.entries[many.segments.indexOf(s)].children[0].style.backgroundColor),
   level + ' swatches match the segments');
 }
+const exhausted = renderedGrok(100, [{ product: 2, label: 'Grok Build', usage_percent: 97 },
+  { product: 4, label: 'Grok Chat', usage_percent: 3 }]);
+const nearFull = renderedGrok(81, [{ product: 2, label: 'Grok Build', usage_percent: 78 },
+  { product: 4, label: 'Grok Chat', usage_percent: 3 }]);
+assertEqual(exhausted.fill.style.width, '100%', 'exhausted styling never changes the percentage geometry');
+assertEqual(exhausted.segments.map((s) => s.style.width).join(','), '97%,3%', 'exhausted product math is unchanged');
+assert(exhausted.segments.every((s, i) => s.style.backgroundColor !== nearFull.segments[i].style.backgroundColor),
+  'exhausted products differ from near-full reds');
+assert(!nearFull.fill.classList.contains('full') && !renderedGrok(0, null).fill.classList.contains('full'),
+  'near-full and zero do not get the exhausted class');
 const tiny = renderedGrok(0.2, [
   { product: 2, label: '', usage_percent: 0.1 },
   { product: null, usage_percent: 0 },
@@ -870,6 +914,91 @@ assert(!code.includes('innerHTML'), 'dashboard script must not use innerHTML');
 assert(!code.includes('insertAdjacentHTML'), 'dashboard script must not use insertAdjacentHTML');
 assert(!code.includes('document.write'), 'dashboard script must not use document.write');
 
+// Router bucket USD and drilldowns are observations, never account allocations.
+const ROUTER_FIXTURE = {
+  source: 'omniroute', provider: 'omniroute', model: 'nr-bucket', model_key: 'omniroute/nr-bucket',
+  totals: { total: 1000 }, cost_usd: 0.75, cost_kind: 'estimated',
+  daily: [{ date: '2026-10-23', total: 600, cost_usd: 0.25 }, { date: '2026-10-22', total: 400, cost_usd: 0.5 }],
+  bucket_usage: { known_cost_usd: 0.75, status: 'ok', retention_limited: true, routes: [
+    { provider: 'nr-route', model: 'vendor/a:fjord', route_path: 'parent/ref:child/0', totals: { total: 400 }, cost_usd: 0.125,
+      daily: [{ date: '2026-10-23', totals: { total: 400 }, cost_usd: 0.125 }] },
+    { provider: 'nr-route', model: 'vendor/a:fjord', route_path: 'parent/ref:child/0@execution-uuid', totals: { total: 200 }, cost_usd: 0.125,
+      daily: [{ date: '2026-10-23', totals: { total: 200 }, cost_usd: 0.125 }] },
+    { provider: 'nr-route', model: 'vendor/a:saga', totals: { total: 400 }, cost_usd: 0.5,
+      daily: [{ date: '2026-10-22', totals: { total: 400 }, cost_usd: 0.5 }] },
+  ] },
+};
+const bucketAgent = { source: 'openclaw', provider: 'omniroute', model: 'nr-bucket', model_key: 'omniroute/nr-bucket',
+  bucket_comparison: true, overview_cost_usd: 0, cost_usd: null, totals: { total: 99 },
+  daily: [{ date: '2026-10-23', total: 99 }] };
+const mixedBucketRows = [bucketAgent, ROUTER_FIXTURE,
+  { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a:fjord', model_key: 'a', totals: { total: 5000 }, cost_usd: 3, daily: [] }];
+const bucketTable = tableModels({ models: mixedBucketRows });
+const parentBucket = bucketTable.find((row) => row.bucket);
+assertEqual(parentBucket.totals.total, 99, 'router counts do not replace agent bucket tokens');
+assertEqual(parentBucket.cost_usd, 0.75, 'parent USD equals its serving route USD, not whole account USD');
+assertEqual(parentBucket.token_scope, 'agent-reported', 'agent token provenance is explicit');
+assertEqual(bucketTable.find((row) => row.source === 'nordrouter').totals.total, 5000, 'mixed direct NR account row stays separate');
+assertEqual(priceAgents(mixedBucketRows).openclaw.estimated_cost_usd, 0, 'bucket observations never change upper Estimated cost');
+assertEqual(priceAgents([bucketAgent]).openclaw.unpriced_models, 0, 'router outage does not add overview partial coverage');
+assertEqual(priceAgents([bucketAgent, { ...bucketAgent, source: 'hermes', overview_cost_usd: null }]).hermes.estimated_cost_usd, 0,
+  'Hermes legacy zero rate derivation survives independent source merging');
+const nordMetricsBefore = registry.get('metrics').textContent;
+renderModels({ models: mixedBucketRows });
+const bucketRendered = registry.get('models').children.find((row) => row.textContent.includes('nr-bucket'));
+assert(bucketRendered.textContent.includes('$0.75') && bucketRendered.textContent.includes('router-wide estimated'), 'bucket parent USD is rendered with scope');
+const bucketDisclosure = all(bucketRendered.children[1]).find((item) => item.tagName === 'DETAILS');
+const detailRows = registry.get('models').children.filter((row) => row.classList.contains('bucket-detail-row'));
+assertEqual(bucketDisclosure.children[0].textContent, '2 serving models', 'bucket control contains only the model count');
+assertEqual(bucketDisclosure.children[0].getAttribute('aria-label'), 'nr-bucket: serving models', 'disclosure has a bucket-specific accessible name');
+assert(detailRows.every((row) => row.hidden), 'model and day rows start collapsed');
+bucketDisclosure.open = true;
+bucketDisclosure.listeners.toggle[0]();
+assert(detailRows.filter((row) => !row.classList.contains('bucket-day-route')).every((row) => !row.hidden),
+  'opening the bucket reveals model and day rows');
+assert(detailRows.filter((row) => row.classList.contains('bucket-day-route')).every((row) => row.hidden),
+  'day models remain collapsed independently');
+const servingRows = detailRows.filter((row) => row.children[1].textContent === 'vendor/a:fjord');
+assertEqual(servingRows.length, 2, 'exact serving model is summed once for the bucket and once for its day');
+assert(servingRows.every((row) => row.children[6].textContent === '600' && row.children[7].textContent.includes('$0.25')),
+  'different execution paths sum their model tokens and own USD in the numeric columns');
+assert(detailRows.some((row) => row.children[1].textContent === 'vendor/a:saga'), 'serving IDs keep exact routing suffixes');
+const bucketRows = [bucketRendered, ...detailRows];
+assert(bucketRows.every((row) => !/Router-wide observation;|Non-additive to overview|Current tariffs, not historical invoices|retained history; gaps unknown/.test(row.textContent)),
+  'removed explanatory boilerplate stays absent from every bucket and day column');
+assert(bucketRows.every((row) => !/\$|USD|estimate|tariffs|invoices|allocation|Non-additive|gaps unknown/i.test(row.children[1].textContent)),
+  'all parent, model and day labels are free of currency, cost scope and explanatory boilerplate');
+assert(bucketRows.every((row) => !row.textContent.includes('parent/ref:child/0')), 'execution path UUIDs stay out of the model drilldown');
+assert(all(bucketRendered).some((item) => item.tagName === 'SUMMARY' && item.textContent.includes('2 serving models')),
+  'serving count represents exact models rather than execution paths');
+const dayRow = detailRows.find((row) => row.children[1].textContent.includes('23.10.2026'));
+const dayDetail = dayRow.children[1].children[0];
+assert(!dayDetail.children[0].textContent.includes('$'), 'day control never repeats its USD');
+assert(dayRow.children[7].textContent.includes('$0.25'), 'day USD remains in the right-hand column');
+dayDetail.open = true;
+dayDetail.listeners.toggle[0]();
+const visibleDayModels = detailRows.filter((row) => row.classList.contains('bucket-day-route') && !row.hidden);
+assertEqual(visibleDayModels.length, 1, 'day drilldown includes only that day\'s serving model');
+assertEqual(visibleDayModels[0].children[1].textContent, 'vendor/a:fjord', 'day model identity is exact');
+assertEqual(visibleDayModels[0].children[6].textContent, '600', 'day model tokens are preserved');
+assert(visibleDayModels[0].children[7].textContent.includes('$0.25'), 'day model own USD remains on the right');
+bucketDisclosure.open = false;
+bucketDisclosure.listeners.toggle[0]();
+assert(detailRows.every((row) => row.hidden), 'closing a bucket also hides its open day models');
+assert(bucketRendered.textContent.includes('retained history only'), 'retention coverage is visible on the parent row');
+assertEqual(registry.get('metrics').textContent, nordMetricsBefore, 'NordRouter section remains unchanged');
+renderModels({ models: [bucketAgent, { ...ROUTER_FIXTURE, cost_usd: null }] });
+const partialBucket = registry.get('models').children.find((row) => row.classList.contains('bucket-row'));
+assert(!/\$|USD|unknown|estimate/.test(partialBucket.children[1].textContent), 'unknown and partial USD never leak into the left label');
+assert(partialBucket.children[7].textContent.includes('known ≥ $0.75'), 'known subtotal stays in the right USD cell');
+renderModels({ models: [{ ...ROUTER_FIXTURE, cost_usd: 0 }] });
+const zeroBucket = registry.get('models').children.find((row) => row.classList.contains('bucket-row'));
+assert(zeroBucket.children[7].textContent.startsWith('$0.00'), 'a real zero price remains visible on the right');
+const missingBucket = tableModels({ models: [bucketAgent] })[0];
+assert(missingBucket.cost_usd === null, 'Gateway zero cost table is not free bucket usage');
+renderModels({ models: [bucketAgent] });
+assert(registry.get('models').textContent.includes('router usage unavailable'), 'missing router does not fabricate a bucket price');
+
 console.log('OK: dashboard DOM contract holds');
 selectedDays = initialSelectedDays;
 setPeriodButtons();
@@ -901,7 +1030,7 @@ async function waitForReload() {
       .map((row) => row.provider === 'codex' && row.account === 'codex_1'
         ? { ...row, used_percentage: used, remaining_percentage: 100 - used } : row) };
   };
-  const sourceOf = (url) => url.includes('nordrouter') ? 'nordrouter'
+  const sourceOf = (url) => url.includes('source=omniroute') ? 'omniroute' : url.includes('nordrouter') ? 'nordrouter'
     : (url.includes('source=hermes') ? 'hermes' : 'openclaw');
   const answer = (entry, days) => reply(entry, entry.url.startsWith('/api/v1/quotas')
     ? quotaResponse(entry.url) : modelFor(days, sourceOf(entry.url)));
@@ -911,8 +1040,9 @@ async function waitForReload() {
     meta: { ...MODELS.meta, start_date: date, end_date: date, days,
       openclaw_status: source === 'openclaw' ? 'ok' : 'pending',
       hermes_status: source === 'hermes' ? 'ok' : 'pending',
-      nordrouter_status: source === 'nordrouter' ? 'ok' : 'pending' },
-    sources: source === 'nordrouter'
+      nordrouter_status: source === 'nordrouter' ? 'ok' : 'pending',
+      omniroute_status: source === 'omniroute' ? 'ok' : 'pending' },
+    sources: source === 'omniroute' ? { omniroute: { complete: false, additive: false } } : source === 'nordrouter'
       ? { nordrouter: { tokens: days, billed_cost_usd: 0.125, complete: true },
           openclaw_nordrouter_comparison_tokens: 0 }
       : source === 'hermes'
@@ -924,7 +1054,7 @@ async function waitForReload() {
     models: source === 'nordrouter'
       ? [{ source, provider: source, model: 'direct-' + days + 'd', cost_usd: 0.125,
           totals: { total: days }, daily: [] }]
-      : source === 'hermes' ? []
+      : source === 'hermes' || source === 'omniroute' ? []
       : [{ source, provider: 'xai', model: 'grok-' + days + 'd', cost_usd: 0.03,
           totals: { total: 2 }, daily: [{ date, total: 2 }] }],
   });
@@ -960,6 +1090,7 @@ async function waitForReload() {
   assert(cardFor(codexRoot, 'first@example.test')[0].textContent.includes('10% used'),
     'late stale cache cannot overwrite fresh Codex quota');
   reply(request(urlFor(7, 'nordrouter')), modelFor(7, 'nordrouter'));
+  reply(request(urlFor(7, 'omniroute')), modelFor(7, 'omniroute'));
   reply(request(urlFor(7, 'hermes')), modelFor(7, 'hermes'));
   await settle();
   assert(registry.get('models').textContent.includes('direct-7d'), 'direct model renders before OpenClaw');
@@ -985,6 +1116,7 @@ async function waitForReload() {
     'period switch avoids provider refresh');
   reply(request(urlFor(1, 'openclaw'), beforeOne), modelFor(1, 'openclaw'));
   reply(request(urlFor(1, 'hermes'), beforeOne), modelFor(1, 'hermes'));
+  reply(request(urlFor(1, 'omniroute'), beforeOne), modelFor(1, 'omniroute'));
   reply(request(quotaFor('grok'), beforeOne), quotaResponse(quotaFor('grok')));
   await settle();
   assert(registry.get('quotas').textContent.includes('Grok Build'), 'Grok renders while Codex is pending');
@@ -1052,7 +1184,7 @@ async function waitForReload() {
   });
   pendingFetches.slice(beforeSuccessfulRefresh).filter((entry) =>
     entry.url.startsWith('/api/v1/quotas') || entry.url === urlFor(7, 'nordrouter') ||
-    entry.url === urlFor(7, 'hermes'))
+    entry.url === urlFor(7, 'hermes') || entry.url === urlFor(7, 'omniroute'))
     .forEach((entry) => answer(entry, 7));
   await settle();
   assert(!registry.get('error').textContent.includes('current Gateway failure'),
@@ -1097,5 +1229,56 @@ async function waitForReload() {
   assert(all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 32')),
     'thirty-day history renders');
   assertEqual(historyScale, 'linear', 'progressive loads preserve linear scale default');
+  // A failed live Gateway read is served from the last successful saved window
+  // with an explicit stale label, the original fetch time, and the failure
+  // text; the canonical total stays unavailable instead of pretending to be
+  // current, and a later success clears the warning.
+  let savedOpenClaw = true;
+  const savedStamp = '2026-10-03T03:49:55+00:00';
+  const savedError = 'CalledProcessError: command failed with exit status 1';
+  const savedModel = 'grok-saved-' + selectedDays + 'd';
+  const liveModel = 'grok-' + selectedDays + 'd';
+  const openclawBody = (days) => savedOpenClaw
+    ? { ...modelFor(days, 'openclaw'),
+        meta: { ...modelFor(days, 'openclaw').meta, openclaw_status: 'cached',
+          openclaw_cached_at_utc: savedStamp, openclaw_error: savedError },
+        sources: { openclaw: { tokens: 2, estimated_cost_usd: 0.03, complete: false },
+          openclaw_nordrouter_comparison_tokens: 0 },
+        models: [{ source: 'openclaw', provider: 'xai', model: savedModel, cost_usd: 0.03,
+          totals: { total: 2 }, daily: [{ date: '2026-10-03', total: 2 }] }] }
+    : modelFor(days, 'openclaw');
+  global.fetch = (url) => {
+    if (url === '/api/v1/display/update') return Promise.resolve({ ok: true, json: () => Promise.resolve(PAYLOAD) });
+    if (url.startsWith('/api/v1/quotas')) return Promise.resolve({ ok: true, json: () => Promise.resolve(quotaResponse(url)) });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(
+      url.includes('openclaw') ? openclawBody(selectedDays) : modelFor(selectedDays, sourceOf(url))) });
+  };
+  registry.get('refresh').listeners.click[0]();
+  await waitForReload();
+  await settle();
+  assert(registry.get('models').textContent.includes(savedModel),
+    'the saved OpenClaw window is still shown');
+  assert(registry.get('error').textContent.includes('Showing saved OpenClaw usage from ' + time(savedStamp)),
+    'the warning names the original successful fetch time');
+  assert(registry.get('error').textContent.includes(savedError),
+    'the warning names the live failure');
+  assert(registry.get('error').textContent.includes('not live data'),
+    'the saved window is never presented as current');
+  assert(registry.get('model-stamp').textContent.includes('OpenClaw cached (saved ' + time(savedStamp) + ')'),
+    'the models stamp repeats the saved fetch time');
+  assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'),
+    'a saved window never becomes the canonical total');
+  assert(!registry.get('hero').textContent.includes('0 tokens'),
+    'a stale read is never rendered as zero usage');
+  savedOpenClaw = false;
+  registry.get('refresh').listeners.click[0]();
+  await waitForReload();
+  await settle();
+  assert(!registry.get('error').textContent.includes('Showing saved OpenClaw usage'),
+    'a successful live read clears the saved-window warning');
+  assert(registry.get('models').textContent.includes(liveModel), 'live OpenClaw rows replace the saved ones');
+  assert(!registry.get('models').textContent.includes(savedModel),
+    'the saved row is replaced, not duplicated');
+
   console.log('OK: independent sources render progressively and preserve period/scale state');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

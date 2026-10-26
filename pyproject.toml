@@ -28,6 +28,7 @@ py-modules = [
     "antigravity_usage",
     "auto_usage",
     "nordrouter_usage",
+    "omniroute_usage",
     "codex_usage",
     "dashboard_models",
     "dashboard_page",

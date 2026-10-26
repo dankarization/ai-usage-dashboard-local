@@ -148,6 +148,7 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot'] = 'all') -> dict[
         used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
         quota_items.append({
             **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis", "product_usage") if k in item},
+            **({'plan_type': item['plan_type']} if item.get('provider') == 'codex' and isinstance(item.get('plan_type'), str) and item['plan_type'] in {'prolite', 'pro', 'pro500', 'plus'} else {}),
             "provider": item.get("provider", "unknown"),
             "label": item.get("label", "unknown"),
             "used_percentage": used_percentage,
@@ -169,9 +170,9 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot'] = 'all') -> dict[
     "/api/v1/model-breakdown",
     response_model=ModelBreakdownResponse,
     summary="Return per-model token usage breakdown",
-    description="Returns OpenClaw Gateway usage plus Hermes native session usage, including comparison-only NordRouter-route rows from both agents, and canonical direct NordRouter analytics. Use source=openclaw, source=hermes, or source=nordrouter to read one source independently; the default source=all preserves the combined response. Agent model-day rows have total tokens only; provider account identity is not included. Direct NordRouter model totals are window aggregates, its daily rows account-wide. Canonical totals exclude every agent NordRouter duplicate. Pass ?daily=false to omit daily entries.",
+    description="Returns OpenClaw Gateway usage, Hermes native usage, canonical NordRouter analytics and optional non-additive router-wide bucket observations. source=openclaw|hermes|nordrouter|omniroute reads one independently. Bucket prices sum retained serving attempts at exact current tariffs; bucket_usage includes route/day drilldown and coverage. Agent bucket tokens are preserved; router-wide USD is not an agent allocation and never enters overview/account totals. Direct NordRouter model totals are account-window aggregates including mixed direct/router usage. Pass ?daily=false to omit daily entries.",
 )
-def model_breakdown(days: int = 30, daily: bool = True, source: Literal['all', 'openclaw', 'hermes', 'nordrouter'] = 'all') -> dict[str, Any]:
+def model_breakdown(days: int = 30, daily: bool = True, source: Literal['all', 'openclaw', 'hermes', 'nordrouter', 'omniroute'] = 'all') -> dict[str, Any]:
     days = max(1, min(days, 90))
     # Reads Gateway aggregates and NordRouter's independently locked cache;
     # do not queue a period switch behind an unrelated full provider refresh.

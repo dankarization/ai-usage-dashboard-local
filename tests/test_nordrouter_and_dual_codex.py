@@ -415,3 +415,40 @@ def test_one_day_window_rolls_over_at_local_midnight(monkeypatch):
     assert usage.get_date_range(1)[:2] == ('2026-10-08', '2026-10-08')
     Clock.current = datetime(2026, 10, 9, 0, 0, 0)
     assert usage.get_date_range(1)[:2] == ('2026-10-09', '2026-10-09')
+
+
+@pytest.mark.parametrize('plan', ['prolite', 'pro', 'pro500', 'plus', 'unknown', None, {'unexpected': 'secret'}])
+def test_codex_plan_metadata_is_allowlisted_and_preserves_quota(monkeypatch, tmp_path, plan):
+    home = tmp_path / 'profile'
+    home.mkdir()
+    (home / 'auth.json').write_text(json.dumps({'tokens': {'access_token': 'fake', 'account_id': 'test'}}))
+    body = {'plan_type': plan, 'private': 'must-not-escape', 'rate_limit': {
+        'primary_window': {'used_percent': 29, 'reset_at': 1800000000, 'limit_window_seconds': 18000},
+        'secondary_window': {'used_percent': 82, 'reset_at': 1800010000, 'limit_window_seconds': 604800}}}
+    monkeypatch.setattr(usage, '_codex_quota_response', lambda auth: body)
+    result = usage.export_codex_quota(home)
+    body.pop('plan_type')
+    baseline = usage.export_codex_quota(home)
+    assert [{k: v for k, v in row.items() if k != 'plan_type'} for row in result] == baseline
+    expected = plan if isinstance(plan, str) and plan in {'prolite', 'pro', 'pro500', 'plus'} else None
+    assert all(row.get('plan_type') == expected for row in result)
+    assert 'must-not-escape' not in json.dumps(result) and 'fake' not in json.dumps(result)
+
+
+def test_quota_api_additive_plan_isolation_and_unknown_omission(monkeypatch):
+    items = [
+        {'provider': 'codex', 'account': 'codex_1', 'label': '7d', 'percentage': 82, 'plan_type': 'prolite'},
+        {'provider': 'codex', 'account': 'codex_2', 'label': '5h', 'percentage': 29, 'plan_type': 'plus'},
+        {'provider': 'codex', 'account': 'codex_3', 'label': '7d', 'percentage': 10, 'plan_type': 'future'},
+        {'provider': 'grok', 'label': 'Weekly', 'percentage': 2, 'plan_type': 'pro'},
+    ]
+    monkeypatch.setattr(service, '_cached_payload', {'meta': {}, 'quotas': items})
+    client = TestClient(service.app)
+    response = client.get('/api/v1/quotas')
+    assert response.status_code == 200
+    rows = response.json()['quotas']
+    assert [row.get('plan_type') for row in rows] == ['prolite', 'plus', None, None]
+    for item in items:
+        item.pop('plan_type')
+    baseline = client.get('/api/v1/quotas').json()['quotas']
+    assert [{k: v for k, v in row.items() if k != 'plan_type'} for row in rows] == baseline

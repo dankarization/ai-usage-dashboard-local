@@ -5,6 +5,7 @@ Analytics windows are server-defined; today is selected by Tbilisi calendar date
 """
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -21,13 +22,25 @@ CACHE_DIR = Path(__file__).resolve().parent / "data" / "nordrouter"
 TZ = ZoneInfo("Asia/Tbilisi")
 CACHE_RETENTION_SECONDS = 2 * 24 * 60 * 60
 CACHE_VARIANT_LIMIT = 64
-_CACHE_NAME = re.compile(r"(?:analytics|balance|usage)-[A-Za-z0-9_-]+\.(?:json|tmp)\Z")
+_CACHE_NAME = re.compile(r"(?:analytics|balance|usage|pricing)-[A-Za-z0-9_-]*\.(?:json|tmp)\Z")
 _PINNED = {"analytics-days_7.json", "analytics-days_30.json",
            "analytics-days_90.json", "balance-.json",
-           "analytics-budget.json", "usage-budget.json"}
+           "analytics-budget.json", "usage-budget.json", "pricing-.json", "pricing-budget.json"}
 
 
 def _sanitize(endpoint, body):
+    if endpoint == "pricing":
+        rows = []
+        for row in body["data"]:
+            if row.get("unit") != "USD per 1M tokens" or row.get("billing_scheme") != "tokens":
+                continue
+            price = {"id": str(row["id"])}
+            for field in ("input_usd", "output_usd", "cache_read_usd", "cache_write_usd"):
+                value = row.get(field)
+                price[field] = (float(value) if isinstance(value, (float, int))
+                                and not isinstance(value, bool) and math.isfinite(value) and value >= 0 else None)
+            rows.append(price)
+        return {"generated_at": str(body["generated_at"]), "data": rows}
     if endpoint == "balance":
         return {"balance_usd": float(body["balance_usd"]), "currency": body["currency"]}
     if endpoint == "analytics":
@@ -56,7 +69,7 @@ class Client:
 
     def get(self, endpoint, **params):
         """At most one attempt per TTL, including failures. Return stale on errors."""
-        allowed = {"balance": set(), "analytics": {"days"},
+        allowed = {"balance": set(), "pricing": set(), "analytics": {"days"},
                    "usage": {"days", "limit", "page"}}
         if (endpoint not in allowed or not set(params) <= allowed[endpoint]
                 or any(type(value) is not int or value < 0 for value in params.values())):
@@ -76,7 +89,7 @@ class Client:
             now = time.time()
             if now >= cache.get("retry_at", 0):
                 # Global family budget also bounds different window/page queries.
-                budget_path = self.root / ("usage-budget.json" if endpoint == "usage" else "analytics-budget.json")
+                budget_path = self.root / (endpoint + "-budget.json" if endpoint in ("usage", "pricing") else "analytics-budget.json")
                 try:
                     budget = json.loads(budget_path.read_text())
                 except (OSError, ValueError):

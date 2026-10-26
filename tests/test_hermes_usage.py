@@ -229,7 +229,10 @@ def test_hermes_rows_are_priced_at_the_rate_another_source_reports(monkeypatch, 
     ])
     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
-    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {})
+    # A well-formed (empty) Gateway aggregate: the projector is patched below,
+    # but the reader still validates the live response before projecting it.
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage',
+                        lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
     monkeypatch.setattr(openclaw_usage, 'model_entries', lambda *a, **k: [
         {'source': 'openclaw', 'provider': 'openai', 'model': 'gpt-6-sol',
          'totals': {'input': 9_000, 'output': 0, 'cache_read': 0, 'cache_write': 0, 'total': 9_000},
