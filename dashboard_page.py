@@ -730,7 +730,8 @@ function renderHero(payload) {
   stripItem(root, 'NordRouter billed cost', usd(direct.billed_cost_usd),
     null, !number(direct.billed_cost_usd));
   stripItem(root, 'Estimated cost', usd(agentCost),
-    unpriced ? 'partial: ' + unpriced + ' unpriced models' : null, !number(agentCost));
+    'API estimate · standard rates, short-context baseline' +
+      (unpriced ? ' · partial: ' + unpriced + ' models with unknown pricing' : ''), !number(agentCost));
   if (full) {
     var pills = node('div', undefined, root); pills.className = 'pillrow';
     node('span', 'direct NordRouter ' + tokens(direct.tokens), pills).className = 'pill';
@@ -1046,15 +1047,11 @@ function money(value) {
   if (!number(value)) return '—';
   return '$' + (value >= 0.01 ? value.toFixed(2) : value.toFixed(4));
 }
-function effectiveCost(row, rates) {
+function effectiveCost(row) {
+  // Costs are priced on the server from disjoint token categories. A partial
+  // native rate must never price another source or a missing category.
   if (row.bucket_comparison) return null;
-  if (number(row.cost_usd)) return row.cost_usd;
-  // Hermes reports no cost; price it at the rate this model already carries.
-  // The NordRouter account bills its route once, so that route stays unpriced here.
-  if (String(row.provider || '').toLowerCase() === 'nordrouter') return null;
-  var rate = rates[row.model_key || row.model];
-  if (!rate || !rate.tokens) return null;
-  return rate.cost / rate.tokens * ((row.totals && row.totals.total) || 0);
+  return number(row.cost_usd) ? row.cost_usd : null;
 }
 function tableModels(data) {
   var groups = new Map();
@@ -1063,7 +1060,6 @@ function tableModels(data) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   });
-  var rates = agentRates(data.models || []);
   return Array.from(groups.entries()).map(function (entry) {
     var rows = entry[1];
     var direct = rows.filter(function (row) { return row.source === 'nordrouter'; });
@@ -1076,15 +1072,17 @@ function tableModels(data) {
     var shown = billed ? direct : agents.length ? agents : observation ? [observation] : [];
     var totals = emptyTotals();
     var comparison = emptyTotals();
-    var cost = null, costKind = null, daily = [], providers = [];
+    var cost = null, costKind = null, incompletePrice = false, daily = [], providers = [];
     shown.forEach(function (row) {
       addTotals(totals, row.totals);
-      var rowCost = effectiveCost(row, rates);
+      var rowCost = effectiveCost(row);
       if (number(rowCost)) cost = (cost || 0) + rowCost;
+      if (!number(rowCost) || row.cost_kind === 'partial') incompletePrice = true;
       if (!costKind && row.cost_kind) costKind = row.cost_kind;
       if (row.provider && providers.indexOf(row.provider) < 0) providers.push(row.provider);
       (row.daily || []).forEach(function (day) { daily.push(day); });
     });
+    if (!billed && incompletePrice && number(cost)) costKind = 'partial';
     agents.forEach(function (row) { addTotals(comparison, row.totals); });
     if (bucket) {
       cost = observation ? observation.cost_usd : null;
@@ -1102,7 +1100,7 @@ function tableModels(data) {
       token_scope: bucket ? (agents.length ? 'agent-reported' : 'router-wide') : null,
       observed_daily: observation ? observation.daily : [],
       contributors: rows.map(function (row) {
-        var value = effectiveCost(row, rates);
+        var value = effectiveCost(row);
         return { source: row.source, provider: row.provider, model: row.model,
                  tokens: (row.totals && row.totals.total) || 0, cost_usd: value,
                  cost_kind: number(row.cost_usd) ? row.cost_kind : (number(value) ? 'derived' : null) };
@@ -1353,44 +1351,6 @@ function renderPeriod(models, quotas) {
   renderHistory(models);
   renderModels(models);
 }
-function agentRates(models) {
-  // Hermes reports no cost of its own; borrow the per-token rate the same model
-  // already carries from any priced source in this window (OpenClaw, NordRouter).
-  var rates = {};
-  (models || []).forEach(function (row) {
-    if (row.source === 'omniroute') return;
-    var total = (row.totals && row.totals.total) || 0;
-    var cost = row.bucket_comparison ? row.overview_cost_usd : row.cost_usd;
-    if (cost === null || cost === undefined || !total) return;
-    var key = row.overview_model_key || row.model_key || row.model;
-    if (!rates[key]) rates[key] = { cost: 0, tokens: 0 };
-    rates[key].cost += cost;
-    rates[key].tokens += total;
-  });
-  return rates;
-}
-function priceAgents(models) {
-  var rates = agentRates(models);
-  var result = {};
-  ['openclaw', 'hermes'].forEach(function (name) {
-    var priced = 0, unpriced = 0, cost = 0;
-    (models || []).forEach(function (row) {
-      if (row.source !== name) return;
-      // The NordRouter account bills its route once, for every agent.
-      if (String(row.provider || '').toLowerCase() === 'nordrouter') return;
-      var total = (row.totals && row.totals.total) || 0;
-      var value = row.bucket_comparison ? row.overview_cost_usd : row.cost_usd;
-      if (value === null || value === undefined) {
-        var rate = rates[row.overview_model_key || row.model_key || row.model];
-        if (rate && rate.tokens) value = rate.cost / rate.tokens * total;
-        else unpriced += 1;
-      }
-      if (value !== null && value !== undefined) { cost += value; priced += 1; }
-    });
-    result[name] = { estimated_cost_usd: priced ? cost : null, unpriced_models: unpriced };
-  });
-  return result;
-}
 function partialModels(state) {
   var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter, hermes = state.parts.hermes, router = state.parts.omniroute;
   var openSource = openclaw && openclaw.sources && openclaw.sources.openclaw || { complete: false };
@@ -1400,7 +1360,6 @@ function partialModels(state) {
   var agentsComplete = agents.every(function (source) { return source.complete; });
   var merged = (openclaw ? openclaw.models : []).concat(hermes ? hermes.models : [])
     .concat(nordrouter ? nordrouter.models : []).concat(router ? router.models : []);
-  var priced = priceAgents(merged);
   return {
     meta: Object.assign({}, (nordrouter || openclaw || hermes || {}).meta || {}, {
       days: state.days,
@@ -1414,8 +1373,8 @@ function partialModels(state) {
     totals: { total: agentsComplete && directSource.complete
       ? agents.reduce(function (sum, source) { return sum + (source.tokens || 0); }, 0) + directSource.tokens
       : null },
-    sources: { openclaw: Object.assign({}, openSource, priced.openclaw),
-      hermes: Object.assign({}, hermesSource, priced.hermes), nordrouter: directSource,
+    sources: { openclaw: openSource,
+      hermes: hermesSource, nordrouter: directSource,
       omniroute: router && router.sources.omniroute,
       openclaw_nordrouter_comparison_tokens: openclaw && openclaw.sources.openclaw_nordrouter_comparison_tokens,
       hermes_nordrouter_comparison_tokens: hermes && hermes.sources.hermes_nordrouter_comparison_tokens },

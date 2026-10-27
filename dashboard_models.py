@@ -172,7 +172,16 @@ class ModelTokenTotals(BaseModel):
     total: int = Field(default=0, description='Total tokens for this model (input + output + cache_read + cache_write). Always present even when per-category breakdown is not.')
 
 
-class ModelDailyEntry(BaseModel):
+class ApiEstimateFields(BaseModel):
+    """Coverage of a standard API-equivalent category estimate, never an invoice."""
+
+    priced_tokens: Optional[int] = Field(default=None, description='Tokens with a known exact model/category tariff.')
+    unpriced_tokens: Optional[int] = Field(default=None, description='Tokens without a known category or exact model tariff; never treated as free.')
+    unpriced_categories: Optional[list[str]] = Field(default=None, description='Missing token categories, tariffs, or inconsistent/unclassified counts.')
+    api_pricing: Optional[dict] = Field(default=None, description='Exact pricing identity, rates, USD/million_tokens unit, reference and standard short-context assumption.')
+
+
+class ModelDailyEntry(ApiEstimateFields):
     """One day of token usage for one model."""
 
     date: str = Field(description='Calendar date, YYYY-MM-DD.')
@@ -181,21 +190,23 @@ class ModelDailyEntry(BaseModel):
     cache_read: Optional[int] = Field(default=None, description='Cache-read input tokens for this day. None when the source does not provide per-category breakdown.')
     cache_write: Optional[int] = Field(default=None, description='Cache-write input tokens for this day. None when the source does not provide per-category breakdown.')
     total: int = Field(default=0, description='Total tokens for this day.')
-    cost_usd: Optional[float] = Field(default=None, description='Sum of priced serving routes for this day; null when any route is unpriced.')
+    cost_usd: Optional[float] = Field(default=None, description='Agent rows use the same API policy as window totals; null when daily category counts are unavailable. Router observations retain their separate serving-route pricing semantics.')
+    cost_kind: Optional[str] = Field(default=None, description='Agent API estimate coverage: estimated, partial or unknown. Router serving costs retain their existing scope.')
     known_cost_usd: Optional[float] = Field(default=None, description='Known retained cost, a lower bound when routes are unpriced.')
     unpriced_requests: Optional[int] = Field(default=None, description='Retained serving attempts without a known price.')
 
 
-class ModelBreakdownEntry(BaseModel):
+class ModelBreakdownEntry(ApiEstimateFields):
     """Per-model token usage from one data source."""
 
-    cost_usd: Optional[float] = Field(default=None, description="Reported or estimated spend for this model and window. OmniRoute observations sum retained serving routes at current tariffs; null for incomplete pricing, never an agent allocation.")
+    cost_usd: Optional[float] = Field(default=None, description="Agent rows: API-equivalent known-category estimate, independent of native stored costs; may be partial. Direct NordRouter remains billed spend. OmniRoute observations sum retained serving routes at current tariffs; null for incomplete pricing, never an agent allocation.")
 
-    cost_kind: Optional[str] = Field(default=None, description="Provenance of cost_usd: billed (provider invoice), reported (source-recorded estimate), or estimated (priced locally from tokens). Absent when the source has no price for this model, and for comparison-only NordRouter rows.")
+    cost_kind: Optional[str] = Field(default=None, description="Provenance of cost_usd: billed (provider invoice), estimated (standard API rates), partial (known category subtotal), or unknown. Comparison-only NordRouter rows retain their source provenance but are excluded from agent estimates.")
     bucket_usage: Optional[dict] = Field(default=None, description='Non-additive router-wide bucket observation: exact historical serving routes with tokens, estimated USD and daily drilldown; pricing freshness and retention coverage. Never a per-agent allocation or historical invoice.')
     bucket_comparison: bool = Field(default=False, description='Agent bucket tokens retained for comparison; USD is unknown without a matching router observation.')
-    overview_cost_usd: Optional[float] = Field(default=None, description='Legacy source estimate used only to preserve the unchanged overview formula; never used as the displayed bucket price.')
-    overview_model_key: Optional[str] = Field(default=None, description='Legacy rate-matching key used only for the unchanged overview estimate, including Hermes derivation.')
+    overview_cost_usd: Optional[float] = Field(default=None, description='Agent API estimate retained for overview only; never substituted for the non-additive router-wide bucket price.')
+    overview_cost_kind: Optional[str] = Field(default=None, description='API estimate coverage kind retained for a non-additive agent bucket comparison.')
+    overview_model_key: Optional[str] = Field(default=None, description='Agent model identity retained separately from the exact router bucket display key.')
 
     source: str = Field(description='Data source: openclaw, hermes, direct nordrouter, or non-additive omniroute bucket observations. Agent NordRouter-route rows are comparison-only and excluded from totals.')
     provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')

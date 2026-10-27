@@ -1,13 +1,21 @@
 """
 Model pricing config: lookup official API prices by model name, independent of source.
 Reference: docs/rfc.md
-Updated: 2026-09 (full pricing audit 2026-09-15; evidence in workspace tmp/pricing_audit_20260915/;
+API baseline extension: 2026-10-27 (OpenAI official pricing; see new GPT entries).
+Existing table: 2026-09 (full pricing audit 2026-09-15; evidence in workspace tmp/pricing_audit_20260915/;
 2026-09-24: OpenRouter Qwen3.8 27B rates, ollama-cloud / llamacpp / mtplx and
 zai/glm-5.3-flash gaps closed from a 30-day usage audit)
 """
 import re
+import math
 # model name -> official price ($/M tokens)
 MODEL_PRICING = {
+    # OpenAI standard short-context API baseline, verified 2026-10-27:
+    # https://developers.openai.com/api/docs/pricing (USD per million tokens).
+    # Aggregates cannot establish request-level long-context or fast tiers.
+    "gpt-6.1-sol": {"input": 2.0, "output": 10.0, "cached": 0.1, "cache_write": 2.5},
+    "gpt-6-sol": {"input": 2.0, "output": 10.0, "cached": 0.2, "cache_write": 2.5},
+    "gpt-6-luna": {"input": 0.1, "output": 0.5, "cached": 0.01, "cache_write": 0.125},
     # GPT-5.6 promotional pricing (at least through 2026-11-21); long context >272K doubles input.
     "gpt-5.6-sol": {"input": 4.0, "cached": 0.4, "cache_write": 5.0, "output": 20.0},
     "gpt-5.6-terra": {"input": 2.0, "cached": 0.2, "cache_write": 2.5, "output": 12.0},
@@ -107,6 +115,12 @@ MODEL_PRICING = {
 
 # modelID variants -> canonical model names
 MODEL_ALIASES = {
+    # Exact spellings already supported by legacy exporters; keep them explicit
+    # in the API estimator rather than using broad family-prefix guesses.
+    "qwen-3.8-27b": "qwen3.8-27b",
+    "composer-2.5": "cursor-composer-2.5",
+    "composer-2.5-fast": "cursor-composer-2.5-fast",
+    "antigravity-gemini-3-pro": "gemini-3-pro",
     "antigravity-gemini-3-flash": "gemini-3-flash",
     "deepseek-chat": "deepseek-v4-flash",
     "deepseek-reasoner": "deepseek-v4-flash",
@@ -310,3 +324,106 @@ def calc_cost(
         + output_tokens * out / 1_000_000
     )
     return cost
+
+
+API_PRICE_BASIS = 'API estimate · standard rates, short-context baseline'
+API_PRICE_REFERENCE = 'https://developers.openai.com/api/docs/pricing'
+_API_PREFIXES = {'openai', 'anthropic', 'google', 'z-ai', 'zai', 'xai', 'x-ai',
+                 'openrouter', 'opencode', 'ollama-cloud'}
+# Explicit multipliers verified in the same OpenAI pricing table. Do not infer
+# a fast price for an arbitrary model, or apply the old universal 2x rule to 5.5.
+_API_FAST_MULTIPLIERS = {'gpt-6-astra': 2, 'gpt-6.1-sol': 2, 'gpt-6-sol': 2,
+                         'gpt-6-luna': 2, 'gpt-5.6-sol': 2, 'gpt-5.6-terra': 2,
+                         'gpt-5.6-luna': 2, 'gpt-5.5': 2.5, 'gpt-5.4': 2,
+                         'gpt-5.4-mini': 2, 'gpt-5.2': 2}
+_API_CATEGORIES = {'input': 'input', 'output': 'output',
+                   'cache_read': 'cache_read', 'cache_write': 'cache_write'}
+
+
+def api_pricing(model: str, provider: str = '') -> tuple[str, Pricing | None]:
+    """Exact table identity, explicit aliases and context-only suffixes, not family guesses.
+
+    Keep legacy get_pricing/calc_cost unchanged for existing exporters. Here input
+    is uncached already and an absent cache rate is unknown, not an inferred discount.
+    """
+    key = (model or '').strip().lower()
+    if provider.lower() in {'local', 'llamacpp', 'lmstudio', 'mtplx'} or key.startswith(
+            ('llamacpp/', 'lmstudio/', 'mtplx/')):
+        return 'local-free', MODEL_PRICING['local-free'].copy()
+    if key in MODEL_ALIASES:
+        key = MODEL_ALIASES[key]
+    if '/' in key:
+        prefix, bare = key.split('/', 1)
+        if prefix in _API_PREFIXES:
+            key = bare
+    # Hermes' -900k is a context capacity, not proof of a long-context request.
+    key = re.sub(r'-\d+k$', '', key)
+    key = MODEL_ALIASES.get(key, key)
+    price = MODEL_PRICING.get(key)
+    if key.endswith('-fast') and key[:-5] in _API_FAST_MULTIPLIERS:
+        base = key[:-5]
+        price = {k: v * _API_FAST_MULTIPLIERS[base] for k, v in MODEL_PRICING[base].items()}
+    elif price is None and key.startswith('gpt-'):
+        base = re.sub(r'-(low|medium|high)$', '', key)
+        if base != key:
+            price = MODEL_PRICING.get(base)
+    return key, price.copy() if price is not None else None
+
+
+def estimate_api_tokens(model: str, totals: dict, provider: str = '') -> dict:
+    """Price each known disjoint category once; preserve unknown coverage explicitly.
+
+    Source-recorded dollars are deliberately not an input: OAuth placeholders and
+    partial native estimates cannot price the rest of a model's tokens. A total
+    without categories never becomes input tokens or a borrowed effective rate.
+    """
+    key, price = api_pricing(model, provider)
+    total = totals.get('total', 0)
+    def valid_count(n):
+        return isinstance(n, int) and not isinstance(n, bool) and n >= 0
+    total = total if valid_count(total) else 0
+    result = {'cost_usd': None, 'cost_kind': 'unknown', 'priced_tokens': 0,
+              'unpriced_tokens': total, 'unpriced_categories': [],
+              'api_pricing': {'model': key, 'basis': API_PRICE_BASIS,
+                              'currency': 'USD', 'unit': 'million_tokens',
+                              'reference': API_PRICE_REFERENCE if key.startswith('gpt-') else
+                              'pricing_config.MODEL_PRICING (existing audited rates)',
+                              'rates': price}}
+    if price is None:
+        result['unpriced_categories'] = ['tariff']
+        return result
+    if key == 'local-free':
+        return dict(result, cost_usd=0.0, cost_kind='estimated', priced_tokens=total,
+                    unpriced_tokens=0)
+    cost, covered, observed, known = 0.0, 0, 0, False
+    missing = []
+    for category, rate_key in _API_CATEGORIES.items():
+        count = totals.get(category)
+        if not valid_count(count):
+            missing.append(category)
+            continue
+        observed += count
+        rate = price.get(rate_key)
+        if category == 'cache_read' and rate is None:
+            rate = price.get('cached')
+        if count == 0:
+            known = True
+        elif not isinstance(rate, (int, float)) or not math.isfinite(rate) or rate < 0:
+            missing.append(category)
+            continue
+        else:
+            known = True
+            cost += count * rate / 1_000_000
+            covered += count
+    if observed > total:
+        result['unpriced_categories'] = ['inconsistent_totals']
+        return result
+    if observed < total:
+        missing.append('unclassified')
+    # Known zero categories alone do not establish a $0 price for unknown tokens.
+    if covered or (known and not missing):
+        result['cost_usd'] = cost
+    result.update(cost_kind='partial' if missing else 'estimated',
+                  priced_tokens=covered, unpriced_tokens=total - covered,
+                  unpriced_categories=missing)
+    return result

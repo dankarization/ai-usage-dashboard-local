@@ -34,7 +34,7 @@ import grok_usage as _grok_usage
 import hermes_usage as _hermes_usage
 import nordrouter_usage as _nordrouter_usage
 import omniroute_usage as _omniroute_usage
-from pricing_config import get_pricing, calc_cost
+from pricing_config import get_pricing, calc_cost, estimate_api_tokens, API_PRICE_BASIS
 
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -2924,39 +2924,21 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
                     'cost_usd': float(model['amount_usd']),
                 })
 
+    # One API-equivalent policy for all agent categories, independent of native
+    # cost availability and subscription route. Account invoices remain separate.
     for row in models:
         row.setdefault('model_key', model_key(row['model']))
-    models.sort(key=lambda row: row['totals']['total'], reverse=True)
-    # Hermes records no cost of its own. Instead of leaving its rows blank, price
-    # them at the rate the same model already carries in this window (OpenClaw
-    # rollups or the NordRouter bill): cost per token, not a second price opinion.
-    rates: dict[str, list[float]] = {}
-    for row in models:
-        if row['source'] == 'omniroute' or row.get('bucket_comparison'):
+        if row['source'] not in ('openclaw', 'hermes') or row['provider'].lower() == 'nordrouter':
             continue
-        total = row['totals'].get('total') or 0
-        cost = row.get('cost_usd')
-        if cost is None or total <= 0:
-            continue
-        bucket = rates.setdefault(row['model_key'], [0.0, 0])
-        bucket[0] += float(cost)
-        bucket[1] += int(total)
-    for row in models:
-        if row['source'] != 'hermes' or row.get('cost_usd') is not None or row.get('bucket_comparison'):
-            continue
-        if row['provider'].lower() == 'nordrouter':
-            continue  # the account API bills this route once for every agent
-        bucket = rates.get(row['model_key'])
-        if not bucket or not bucket[1]:
-            continue
-        row['cost_usd'] = bucket[0] / bucket[1] * row['totals']['total']
-        row['cost_kind'] = 'estimated'
-    # Preserve the legacy overview calculation (including Hermes derivation)
-    # before introducing non-additive router observations into the model table.
+        row.update(estimate_api_tokens(row['model'], row['totals'], row['provider']))
+        for day in row.get('daily', []):
+            # Gateway daily rows contain only total tokens, not category counts.
+            # Never keep their partial native dollars or invent a daily split.
+            day.update(estimate_api_tokens(row['model'], day, row['provider']))
     for row in models:
         if row['source'] in ('openclaw', 'hermes') and _omniroute_usage.is_bucket(row):
             row.update(overview_cost_usd=row.get('cost_usd'), overview_model_key=row['model_key'],
-                       cost_usd=None, cost_kind='unknown', bucket_comparison=True,
+                       cost_usd=None, overview_cost_kind=row.get('cost_kind'), cost_kind='unknown', bucket_comparison=True,
                        model_key=_omniroute_usage.bucket_key(row['model']))
     models.extend(router['models'])
     models.sort(key=lambda row: row['totals']['total'], reverse=True)
@@ -2973,7 +2955,12 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
         return {'tokens': sum(m['totals']['total'] for m in rows),
                 'estimated_cost_usd': sum(overview_cost(m) for m in priced) if priced else None,
                 'priced_models': len(priced),
-                'unpriced_models': len(rows) - len(priced)}
+                'unpriced_models': sum(m.get('overview_cost_kind', m.get('cost_kind')) in ('partial', 'unknown') or
+                                       overview_cost(m) is None for m in rows),
+                'partial_models': sum(m.get('overview_cost_kind', m.get('cost_kind')) == 'partial' for m in rows),
+                'priced_tokens': sum(m.get('priced_tokens', 0) for m in rows),
+                'unpriced_tokens': sum(m.get('unpriced_tokens', m['totals']['total']) for m in rows),
+                'cost_basis': API_PRICE_BASIS}
 
     openclaw_source = agent_source('openclaw')
     hermes_source = agent_source('hermes')

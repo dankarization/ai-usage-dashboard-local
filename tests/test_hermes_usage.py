@@ -165,9 +165,9 @@ def test_priced_models_use_the_shared_table_and_unpriced_stay_unpriced(tmp_path)
     priced = {entry['model']: entry for entry in entries}
     assert priced['z-ai/glm-5.3']['cost_usd'] == pytest.approx(1.4)
     assert priced['z-ai/glm-5.3']['cost_kind'] == 'estimated'
-    # No audited rate for this model id: report unknown, never a zero price.
-    assert priced['gpt-6-sol-900k']['cost_usd'] is None
-    assert priced['gpt-6-sol-900k']['cost_kind'] is None
+    # Context capacity aliases use the exact model's standard API baseline.
+    assert priced['gpt-6-sol-900k']['cost_usd'] == pytest.approx(2.0)
+    assert priced['gpt-6-sol-900k']['cost_kind'] == 'estimated'
 
 
 def test_empty_databases_yield_no_entries(tmp_path):
@@ -213,12 +213,8 @@ def test_breakdown_adds_hermes_and_keeps_nordrouter_comparison_only(monkeypatch,
     assert result['sources']['openclaw_nordrouter_comparison_tokens'] == 0
 
 
-def test_hermes_rows_are_priced_at_the_rate_another_source_reports(monkeypatch, tmp_path):
-    """Hermes reports no cost, so its rows borrow the per-token rate of the same model.
-
-    OpenClaw bills gpt-6-sol at a known amount for a known token count; Hermes
-    usage of the same model is priced at that ratio instead of staying blank.
-    """
+def test_hermes_uses_api_categories_not_another_sources_effective_cost(monkeypatch, tmp_path):
+    """A partial/native rate cannot determine another source's API estimate."""
     import auto_usage
     import openclaw_usage
 
@@ -244,8 +240,8 @@ def test_hermes_rows_are_priced_at_the_rate_another_source_reports(monkeypatch, 
     result = auto_usage.build_model_breakdown(days=1, source='all')
 
     rows = {row['model']: row for row in result['models'] if row['source'] == 'hermes'}
-    # 1_000 tokens at the 9.0 / 9_000 rate OpenClaw reports for the same model.
-    assert rows['gpt-6-sol']['cost_usd'] == pytest.approx(1.0)
+    # 1,000 uncached input tokens at $2/M, regardless of OpenClaw's $9.
+    assert rows['gpt-6-sol']['cost_usd'] == pytest.approx(0.002)
     assert rows['gpt-6-sol']['cost_kind'] == 'estimated'
     # A model nobody priced stays unknown rather than guessed.
     assert rows['unknown-model']['cost_usd'] is None

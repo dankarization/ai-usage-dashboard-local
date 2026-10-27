@@ -198,18 +198,18 @@ def test_integration_preserves_overview_and_direct_nr_separately(monkeypatch):
     _, today, *_ = usage.get_date_range(1)
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [
         {'provider': 'omniroute', 'model': 'parent', 'totals': {'totalTokens': 99, 'totalCost': 0}},
-        {'provider': 'xai', 'model': 'grok', 'totals': {'totalTokens': 5, 'totalCost': 0.2}}], 'modelDaily': []}})
+        {'provider': 'xai', 'model': 'grok-4.7', 'totals': {'input': 5, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 5, 'totalCost': 0.2}}], 'modelDaily': []}})
     monkeypatch.setattr(nr.Client, 'get', lambda *a, **kw: ({'window_days': 1, 'daily': [{'date': today, 'tokens': 1000, 'amount_usd': 3}],
         'totals': {'amount_usd': 3}, 'top_models': [{'id': 'vendor/a:fjord', 'tokens': 1000, 'amount_usd': 3}]}, False))
     observation = om.aggregate(snapshot(), prices(), '2026-10-23', '2026-10-23')
     monkeypatch.setattr(om, 'collect', lambda *a, **kw: deepcopy(observation))
     result = usage.build_model_breakdown(1)
     assert result['totals']['total'] == 1104  # unchanged legacy overview; no router tokens added
-    assert result['sources']['openclaw']['estimated_cost_usd'] == 0.2
-    assert result['sources']['openclaw']['unpriced_models'] == 0
+    assert result['sources']['openclaw']['estimated_cost_usd'] == pytest.approx(0.00001)
+    assert result['sources']['openclaw']['unpriced_models'] == 1
     bucket = next(m for m in result['models'] if m['source'] == 'openclaw' and m['provider'] == 'omniroute')
     assert bucket['totals']['total'] == 99 and bucket['cost_usd'] is None
-    assert bucket['overview_cost_usd'] == 0
+    assert bucket['overview_cost_usd'] is None
     direct = next(m for m in result['models'] if m['source'] == 'nordrouter')
     assert direct['totals']['total'] == 1000 and direct['cost_usd'] == 3
     monkeypatch.setattr(usage._hermes_usage, 'state_dbs', lambda: ['fixture'])
@@ -217,8 +217,8 @@ def test_integration_preserves_overview_and_direct_nr_separately(monkeypatch):
         {'source': 'hermes', 'provider': 'omniroute', 'model': 'parent', 'totals': {'total': 10},
          'cost_usd': None, 'daily': []}])
     with_hermes = usage.build_model_breakdown(1)
-    assert with_hermes['sources']['hermes']['estimated_cost_usd'] == 0
-    assert with_hermes['sources']['hermes']['unpriced_models'] == 0
+    assert with_hermes['sources']['hermes']['estimated_cost_usd'] is None
+    assert with_hermes['sources']['hermes']['unpriced_models'] == 1
     monkeypatch.setattr(usage._hermes_usage, 'state_dbs', lambda: [])
     # Router outage/retention must not make unrelated overview partial.
     monkeypatch.setattr(om, 'collect', lambda *a, **kw: {'models': [], 'daily': [], 'status': 'unavailable', 'source': {'complete': False}})

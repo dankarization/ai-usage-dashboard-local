@@ -53,7 +53,49 @@ The collector writes a private `token_usage_eink.json` cache used by the web ser
 | `POST /api/v1/display/update` | Serialized full refresh; the page uses it on open, every five minutes, and on Refresh |
 | `POST /api/v1/antigravity/ingest` | Optional cross-machine Antigravity entry ingest |
 
-The page shares a 1d/7d/30d selector across overview, history, and model usage (7d by default). Usage history opens with a linear token axis; its Scale button can switch to balanced visual weighting. The page requests cached quotas, live Codex/Grok/Grok Bot quotas, direct NordRouter usage, and OpenClaw usage independently so ready sections appear before the full provider refresh finishes; a failed source leaves already displayed data intact. The 1d view covers the current local calendar day, from midnight to now; NordRouter's selected-window billed spend comes from the matching model-breakdown response. Quota reset windows and today's NordRouter figures retain their own periods. ### OpenClaw saved window
+The page shares a 1d/7d/30d selector across overview, history, and model usage (7d by default). Usage history opens with a linear token axis; its Scale button can switch to balanced visual weighting. The page requests cached quotas, live Codex/Grok/Grok Bot quotas, direct NordRouter usage, and OpenClaw usage independently so ready sections appear before the full provider refresh finishes; a failed source leaves already displayed data intact. The 1d view covers the current local calendar day, from midnight to now; NordRouter's selected-window billed spend comes from the matching model-breakdown response. Quota reset windows and today's NordRouter figures retain their own periods.
+
+### API-equivalent estimates
+
+**Estimated cost** answers “what would these agent tokens cost at API rates?”,
+not what a subscription or OAuth account was charged. The server prices each
+model's uncached input, output, cache reads and cache writes once, using the exact
+shared tariff in `pricing_config.py`. Stored Gateway dollar estimates (including
+positive partial costs and zero placeholders) never replace this calculation.
+Hermes uses its own token categories, not another source's average cost per token.
+The browser displays the server results without a second pricing formula.
+
+For aggregated usage without request-level billing tiers the policy is **standard
+rates, short-context baseline**. Summing many requests past a context threshold
+never selects a more expensive tier. A context capacity suffix such as `-900k`
+does not prove that any request used long context. Explicit recognized fast model
+IDs retain their documented tariff; unknown model variants are not guessed.
+OpenAI baseline rates were checked against
+[official API pricing](https://developers.openai.com/api/docs/pricing) on 2026-10-27;
+the new exact GPT-6/6.1 IDs extend the existing audited table. Recognized OpenAI
+fast variants use explicitly verified multipliers (including GPT-5.5 at 2.5x);
+GPT-5.4-mini-fast uses the now-published $1.50/$9/$0.15 API rates rather than
+the older exporter alias's standard price. Legacy exporters remain unchanged.
+
+API rows expose `api_pricing` (identity, rates, reference, USD/million-token unit,
+baseline), `priced_tokens`, `unpriced_tokens`, and `unpriced_categories`.
+`cost_usd` is the known API-priced category sum; `cost_kind=partial` identifies
+incomplete coverage, and it is null when nothing is priceable. A row with a known
+subtotal counts in both `priced_models` and `unpriced_models`; source `complete`
+continues to mean data availability, not complete tariff coverage. Unknown tariffs
+or categories never mean free usage; explicit local/free routes can still cost $0.
+
+Gateway model-day records expose only total tokens, not daily token categories.
+Their daily API dollars are therefore unavailable; no partial native dollars or
+invented average-rate split is mixed into the window estimate. Hermes daily
+categories can be priced. Token history and saved raw usage remain unchanged.
+
+NordRouter remains a separate **billed** account total. Its agent comparison
+rows and non-additive OmniRoute router-wide observations are never added to the
+agent estimate. An unidentified agent bucket is unpriced, not a false $0;
+router-wide serving prices are not allocated to an individual agent.
+
+### OpenClaw saved window
 
 A page load or a manual Refresh still attempts the live Gateway read first. When
 that read succeeds, the requested window (1d, 7d, or 30d with its local calendar
@@ -151,9 +193,8 @@ historical invoice. A bucket without an agent row is labelled router-wide.
 These observations are non-additive: the existing NordRouter account/model
 rows remain separate and unchanged, including mixed direct/router traffic.
 Do not sum those account rows with bucket observations or subtract estimates
-from billed account spend. Overview cards, including **Estimated cost**, keep
-their existing formula and availability; router prices/coverage are never
-added to them.
+from billed account spend. Overview **Estimated cost** uses the API-equivalent policy above;
+router prices/coverage are never added to them.
 
 Only retained historical `combo_name`/execution paths establish bucket
 membership: current fallback candidates never reconstruct past membership or

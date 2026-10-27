@@ -795,8 +795,8 @@ assertEqual(flashRow.children[6].textContent, '30150', 'both billed spellings ar
 assertEqual(flashRow.children[7].textContent, '$1.50billed', 'billed cost of both spellings is summed');
 const solRow = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'gpt-6-sol');
 assertEqual(solRow.children[6].textContent, '10', 'agent rows of one model are summed');
-assertEqual(solRow.children[7].textContent, '$0.33estimated',
-  'Hermes tokens are priced at the rate OpenClaw reports for the same model');
+assertEqual(solRow.children[7].textContent, '$0.10partial',
+  'missing Hermes price stays unknown and cannot borrow an effective rate');
 const m3Row = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'minimax/minimax-m3');
 assertEqual(m3Row.children[1].children[0].textContent, 'minimax/minimax-m3',
   'the most common spelling labels the row even when a bare alias is shorter');
@@ -814,7 +814,7 @@ assertEqual(registry.get('models').children.map((row) => row.children[1].childre
   'deepseek/deepseek-v4-flash,gpt-6-sol',
   'routing and context suffixes never leak into the model label');
 
-/* Hermes cost is derived when the page loads each source separately. */
+/* Source-by-source loading preserves server prices and coverage without repricing. */
 const partialState = {
   days: 7, quotaParts: {}, quotas: null, quotaPending: {}, errors: {}, requests: {}, parts: {
     openclaw: { meta: { days: 7, openclaw_status: 'ok', start_date: 'p', end_date: 'q' },
@@ -831,10 +831,10 @@ const partialState = {
 };
 renderAvailable(partialState);
 const partialHero = registry.get('hero').textContent;
-assert(partialHero.includes('Estimated cost') && partialHero.includes('$10.00'),
-  'a Hermes row borrows the rate its model already reports from OpenClaw');
-assert(!partialHero.includes('unpriced'),
-  'a derived rate clears the unpriced marker instead of leaving cost blank');
+assert(partialHero.includes('Estimated cost') && partialHero.includes('$9.00'),
+  'hero uses server estimates without borrowing another source rate');
+assert(partialHero.includes('1 models with unknown pricing'),
+  'unknown Hermes coverage remains visible');
 
 const SORT_MODELS = { ...MODELS, models: [
   { source: 'openclaw', provider: 'xai', model: 'Alpha', account: 'unknown', cost_usd: 1,
@@ -939,10 +939,10 @@ assertEqual(parentBucket.totals.total, 99, 'router counts do not replace agent b
 assertEqual(parentBucket.cost_usd, 0.75, 'parent USD equals its serving route USD, not whole account USD');
 assertEqual(parentBucket.token_scope, 'agent-reported', 'agent token provenance is explicit');
 assertEqual(bucketTable.find((row) => row.source === 'nordrouter').totals.total, 5000, 'mixed direct NR account row stays separate');
-assertEqual(priceAgents(mixedBucketRows).openclaw.estimated_cost_usd, 0, 'bucket observations never change upper Estimated cost');
-assertEqual(priceAgents([bucketAgent]).openclaw.unpriced_models, 0, 'router outage does not add overview partial coverage');
-assertEqual(priceAgents([bucketAgent, { ...bucketAgent, source: 'hermes', overview_cost_usd: null }]).hermes.estimated_cost_usd, 0,
-  'Hermes legacy zero rate derivation survives independent source merging');
+assertEqual(effectiveCost(bucketAgent), null, 'comparison bucket never adds router-wide dollars');
+assertEqual(partialModels({ days: 7, parts: { openclaw: { meta: {}, sources: {
+  openclaw: { estimated_cost_usd: null, unpriced_models: 1 } }, models: [bucketAgent] }
+} }).sources.openclaw.estimated_cost_usd, null, 'server unknown is not replaced with a placeholder zero');
 const nordMetricsBefore = registry.get('metrics').textContent;
 renderModels({ models: mixedBucketRows });
 const bucketRendered = registry.get('models').children.find((row) => row.textContent.includes('nr-bucket'));
@@ -1280,5 +1280,28 @@ async function waitForReload() {
   assert(!registry.get('models').textContent.includes(savedModel),
     'the saved row is replaced, not duplicated');
 
+  if (process.argv[3]) {
+    const actual = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+    const parts = {};
+    ['openclaw', 'hermes', 'nordrouter', 'omniroute'].forEach((source) => {
+      parts[source] = { ...actual, models: actual.models.filter((m) => m.source === source),
+        sources: { [source]: actual.sources[source] } };
+    });
+    const merged = partialModels({ days: actual.meta.days, parts });
+    assertEqual(JSON.stringify(merged.sources.openclaw), JSON.stringify(actual.sources.openclaw),
+      'independent-source UI must preserve the exact server estimate and coverage');
+    assertEqual(JSON.stringify(merged.sources.hermes), JSON.stringify(actual.sources.hermes),
+      'Hermes uses its own category estimate, not a borrowed OpenClaw rate');
+    const sum = ['openclaw', 'hermes'].reduce((v, k) => v + (actual.sources[k].estimated_cost_usd || 0), 0);
+    renderHero(merged);
+    assert(registry.get('hero').textContent.includes(usd(sum)), 'hero renders API agent estimate');
+    assert(registry.get('hero').textContent.includes('standard rates, short-context baseline'), 'baseline is explained once');
+    const canonical = tableModels(merged).filter((r) => !r.bucket && r.source !== 'nordrouter');
+    const tableSum = canonical.reduce((v, r) => v + (r.cost_usd || 0), 0);
+    assert(Math.abs(tableSum - sum) < 1e-9, 'model table and hero use identical API dollars');
+    renderHistory(merged);
+    assert(registry.get('history').textContent.length > 0, 'token history survives API repricing');
+    console.log('OK: server/API/hero/model rows agree on category estimates');
+  }
   console.log('OK: independent sources render progressively and preserve period/scale state');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

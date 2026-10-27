@@ -20,14 +20,14 @@ REPO = Path(__file__).resolve().parent.parent
 START, END = '2026-10-01', '2026-10-07'
 AGGREGATE = {
     'byModel': [
-        {'provider': 'xai', 'model': 'grok-test',
+        {'provider': 'xai', 'model': 'grok-4.7',
          'totals': {'input': 5, 'output': 3, 'cacheRead': 2, 'cacheWrite': 0,
                     'totalTokens': 10, 'totalCost': 0.2}},
         {'provider': 'nordrouter', 'model': 'nr-model',
          'totals': {'totalTokens': 21, 'totalCost': 0.5}},
     ],
     'modelDaily': [
-        {'date': '2026-10-07', 'provider': 'xai', 'model': 'grok-test',
+        {'date': '2026-10-07', 'provider': 'xai', 'model': 'grok-4.7',
          'tokens': 10, 'cost': 0.2},
         {'date': '2026-10-07', 'provider': 'nordrouter', 'model': 'nr-model',
          'tokens': 21, 'cost': 0.5},
@@ -164,13 +164,15 @@ def test_openclaw_modeled_cost_completeness(total_cost, missing, expected_cost, 
     assert row['cost_kind'] == expected_kind
 
 
-def test_breakdown_counts_partial_openclaw_cost_as_priced(monkeypatch):
+def test_breakdown_reprices_all_categories_despite_partial_native_cost(monkeypatch):
     response = {'aggregates': {'byModel': [
         {'provider': 'openai', 'model': 'gpt-6.1-sol', 'totals': {
+            'input': 90, 'output': 10, 'cacheRead': 0, 'cacheWrite': 0,
             'totalTokens': 100, 'totalCost': 70.6175, 'missingCostEntries': 326}},
         {'provider': 'openai', 'model': 'gpt-5.6-terra', 'totals': {
+            'input': 15, 'output': 5, 'cacheRead': 0, 'cacheWrite': 0,
             'totalTokens': 20, 'totalCost': 0.1262, 'missingCostEntries': 0}},
-        {'provider': 'local', 'model': 'unpriced-test', 'totals': {
+        {'provider': 'custom', 'model': 'unpriced-test', 'totals': {
             'totalTokens': 10, 'totalCost': 0, 'missingCostEntries': 2}},
         {'provider': 'nordrouter', 'model': 'nr-model', 'totals': {
             'totalTokens': 50, 'totalCost': 0, 'missingCostEntries': 7}},
@@ -181,19 +183,19 @@ def test_breakdown_counts_partial_openclaw_cost_as_priced(monkeypatch):
     })
     result = build_model_breakdown(days=7, source='openclaw')
     rows = {row['model']: row for row in result['models']}
-    assert rows['gpt-6.1-sol']['cost_usd'] == 70.6175
-    assert rows['gpt-6.1-sol']['cost_kind'] == 'partial'
+    assert rows['gpt-6.1-sol']['cost_usd'] == pytest.approx(0.00028)
+    assert rows['gpt-6.1-sol']['cost_kind'] == 'estimated'
     assert rows['nr-model']['cost_usd'] is None
     assert rows['nr-model']['cost_kind'] is None
     source = result['sources']['openclaw']
-    assert source['estimated_cost_usd'] == pytest.approx(70.6175 + 0.1262)
+    assert source['estimated_cost_usd'] == pytest.approx(0.00028 + 0.00009)
     assert source['priced_models'] == 2
     assert source['unpriced_models'] == 1
 
 
 def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *_: {'aggregates': {
-        'byModel': [{'provider': 'xai', 'model': 'grok-test',
+        'byModel': [{'provider': 'xai', 'model': 'grok-4.7',
                      'totals': {'input': 5, 'output': 3, 'cacheRead': 2,
                                 'cacheWrite': 0, 'totalTokens': 10, 'totalCost': 0.2}},
                     {'provider': 'local', 'model': 'local-test',
@@ -201,7 +203,7 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
                     {'provider': 'nordrouter', 'model': 'nr-model',
                      'totals': {'totalTokens': 21, 'totalCost': 0.5}}],
         'modelDaily': [{'date': '2026-10-07', 'provider': 'xai',
-                        'model': 'grok-test', 'tokens': 10, 'cost': 0.2},
+                        'model': 'grok-4.7', 'tokens': 10, 'cost': 0.2},
                        {'date': '2026-10-07', 'provider': 'nordrouter',
                         'model': 'nr-model', 'tokens': 21, 'cost': 0.5}],
     }})
@@ -227,8 +229,8 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     assert all('account' not in row for row in result['models'])
     assert result['source_daily']['nordrouter'][0]['tokens'] == 20
     assert result['totals']['total'] == 32
-    assert result['sources']['openclaw']['estimated_cost_usd'] == 0.2
-    assert result['sources']['openclaw']['unpriced_models'] == 1
+    assert result['sources']['openclaw']['estimated_cost_usd'] == pytest.approx(0.000029)
+    assert result['sources']['openclaw']['unpriced_models'] == 0
     assert result['sources']['nordrouter']['billed_cost_usd'] == 0.4
     assert result['sources']['nordrouter']['complete'] is True
     assert result['sources']['openclaw_nordrouter_comparison_tokens'] == 21

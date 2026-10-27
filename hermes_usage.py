@@ -18,7 +18,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pricing_config import calc_cost, get_pricing
+from pricing_config import estimate_api_tokens
 
 # Routes that bill through an aggregator the dashboard already reads directly.
 # Their tokens are counted once by that account, so rows here stay comparison-only.
@@ -111,25 +111,8 @@ def _row_date(first_seen: float | None, last_seen: float | None) -> date | None:
 
 
 def _estimate_cost(model: str, tokens: dict[str, int]) -> float | None:
-    """Price tokens from the shared table, which also prices OpenClaw rows.
-
-    Hermes records no cost of its own. Rather than invent a rate, reuse the same
-    audited table the other agent rollups are priced with, so an overlapping
-    model carries one consistent estimate across both agents. An unpriced model
-    stays unpriced.
-    """
-    pricing = get_pricing(model)
-    if not pricing and '/' in model:
-        pricing = get_pricing(model.split('/', 1)[1])
-    if not pricing:
-        return None
-    return calc_cost(
-        pricing,
-        input_tokens=tokens['input'] + tokens['cache_read'],
-        output_tokens=tokens['output'],
-        cached_tokens=tokens['cache_read'],
-        cache_write_tokens=tokens['cache_write'],
-    )
+    """Use the same exact-model, disjoint-category API baseline as the overview."""
+    return estimate_api_tokens(model, tokens)['cost_usd']
 
 
 def model_entries(start_date: str, end_date: str, *, include_daily: bool = True,
