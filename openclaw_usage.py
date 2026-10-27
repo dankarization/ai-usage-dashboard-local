@@ -469,13 +469,18 @@ def model_entries(response: dict, *, include_daily: bool) -> list[dict]:
         daily = sorted(days.get((provider, model), []), key=lambda d: d['date'])
         raw_totals = row.get('totals') or {}
         modeled_cost = raw_totals.get('totalCost')
-        if raw_totals.get('missingCostEntries') or not isinstance(modeled_cost, (int, float)):
+        missing_cost = (raw_totals.get('missingCostEntries') or 0) > 0
+        cost_kind = None
+        if not isinstance(modeled_cost, (int, float)) or (missing_cost and modeled_cost <= 0):
             modeled_cost = None
+        else:
+            cost_kind = 'partial' if missing_cost else 'reported'
         entries.append({
             'source': 'openclaw', 'provider': provider, 'model': model,
             'totals': totals,
             'daily': daily if include_daily else [],
             # Gateway cost is a model-price estimate, not a provider invoice.
             'cost_usd': modeled_cost,
+            'cost_kind': cost_kind,
         })
     return entries

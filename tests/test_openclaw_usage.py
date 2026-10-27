@@ -144,6 +144,53 @@ def test_openclaw_model_projection_includes_comparison_route_without_account():
     assert rows[1]['daily'][0]['total'] == 20
 
 
+@pytest.mark.parametrize('total_cost,missing,expected_cost,expected_kind', [
+    (70.6175, 326, 70.6175, 'partial'),
+    (0, 7, None, None),
+    (-1, 7, None, None),
+    (0.1262, 0, 0.1262, 'reported'),
+    (0, 0, 0, 'reported'),
+    (None, 0, None, None),
+    ('0.2', 0, None, None),
+])
+def test_openclaw_modeled_cost_completeness(total_cost, missing, expected_cost, expected_kind):
+    response = {'aggregates': {'byModel': [{
+        'provider': 'openai', 'model': 'gpt-6.1-sol',
+        'totals': {'totalTokens': 100, 'totalCost': total_cost,
+                   'missingCostEntries': missing},
+    }]}}
+    row, = openclaw_usage.model_entries(response, include_daily=False)
+    assert row['cost_usd'] == expected_cost
+    assert row['cost_kind'] == expected_kind
+
+
+def test_breakdown_counts_partial_openclaw_cost_as_priced(monkeypatch):
+    response = {'aggregates': {'byModel': [
+        {'provider': 'openai', 'model': 'gpt-6.1-sol', 'totals': {
+            'totalTokens': 100, 'totalCost': 70.6175, 'missingCostEntries': 326}},
+        {'provider': 'openai', 'model': 'gpt-5.6-terra', 'totals': {
+            'totalTokens': 20, 'totalCost': 0.1262, 'missingCostEntries': 0}},
+        {'provider': 'local', 'model': 'unpriced-test', 'totals': {
+            'totalTokens': 10, 'totalCost': 0, 'missingCostEntries': 2}},
+        {'provider': 'nordrouter', 'model': 'nr-model', 'totals': {
+            'totalTokens': 50, 'totalCost': 0, 'missingCostEntries': 7}},
+    ]}}
+    monkeypatch.setattr(openclaw_usage, 'load_with_cache', lambda *_: {
+        'response': response, 'status': 'ok', 'cached_at_utc': None,
+        'error': None, 'gateway_cache_status': 'fresh',
+    })
+    result = build_model_breakdown(days=7, source='openclaw')
+    rows = {row['model']: row for row in result['models']}
+    assert rows['gpt-6.1-sol']['cost_usd'] == 70.6175
+    assert rows['gpt-6.1-sol']['cost_kind'] == 'partial'
+    assert rows['nr-model']['cost_usd'] is None
+    assert rows['nr-model']['cost_kind'] is None
+    source = result['sources']['openclaw']
+    assert source['estimated_cost_usd'] == pytest.approx(70.6175 + 0.1262)
+    assert source['priced_models'] == 2
+    assert source['unpriced_models'] == 1
+
+
 def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *_: {'aggregates': {
         'byModel': [{'provider': 'xai', 'model': 'grok-test',
