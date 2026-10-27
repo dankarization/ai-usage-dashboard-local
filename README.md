@@ -3,7 +3,7 @@
 A self-hosted dashboard for AI token usage, provider quotas, and costs, based on
 [grapeot/ai_usage_dashboard](https://github.com/grapeot/ai_usage_dashboard).
 
-![Dashboard with account email addresses redacted](assets/dashboard-redacted.png)
+![Dashboard with account email addresses redacted](assets/dashboard-20261027-342844e234ae.png)
 
 ## What it shows
 
