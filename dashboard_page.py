@@ -19,6 +19,7 @@ these invariants:
   in the viewer's own timezone with a relative age, and marks a stale snapshot
   instead of presenting it as current.
 """
+from table_sort import TABLE_SORT_JS
 
 DASHBOARD_HTML = r'''<!doctype html>
 <html lang="en">
@@ -1123,22 +1124,19 @@ function modelSortValue(row, key) {
 }
 function sortedModels(rows) {
   var key = modelSort.direction === 'default' ? 'total' : modelSort.key;
-  var direction = modelSort.direction === 'ascending' ? 1 : -1;
-  return rows.map(function (row, index) { return { row: row, index: index }; }).sort(function (a, b) {
-    var av = modelSortValue(a.row, key), bv = modelSortValue(b.row, key);
-    if (av === null || bv === null) return av === null && bv === null ? a.index - b.index : av === null ? 1 : -1;
-    var comparison = typeof av === 'string' ? av.localeCompare(bv, undefined, { sensitivity: 'base' }) : av - bv;
-    return comparison ? comparison * direction : a.index - b.index;
-  }).map(function (item) { return item.row; });
+  var direction = modelSort.direction === 'default' ? 'descending' : modelSort.direction;
+  return TableSort.sortRows(rows, direction, function (row) { return modelSortValue(row, key); });
 }
 function syncModelSortHeaders() {
-  var active = modelSort.direction === 'default' ? 'total' : modelSort.key;
   modelSortColumns.forEach(function (key) {
-    var direction = key === active ? (modelSort.direction === 'ascending' ? 'ascending' : 'descending') : 'none';
-    $('model-sort-head-' + key).setAttribute('aria-sort', direction);
-    $('model-sort-mark-' + key).textContent = direction === 'none' ? '↕' : direction === 'ascending' ? '↑' : '↓';
-    $('model-sort-' + key).title = key === modelSort.key && modelSort.direction === 'descending' ? 'Sort ascending'
-      : key === modelSort.key && modelSort.direction === 'ascending' ? 'Reset to total tokens descending' : 'Sort descending';
+    var view = TableSort.headerView(modelSort, key, {
+      defaultKey: 'total',
+      defaultDirection: 'descending',
+      resetTitle: 'Reset to total tokens descending'
+    });
+    $('model-sort-head-' + key).setAttribute('aria-sort', view.ariaSort);
+    $('model-sort-mark-' + key).textContent = view.mark;
+    $('model-sort-' + key).title = view.title;
   });
 }
 function renderModels(data) {
@@ -1513,9 +1511,7 @@ $('history-scale').addEventListener('click', function () {
 });
 modelSortColumns.forEach(function (key) {
   $('model-sort-' + key).addEventListener('click', function () {
-    modelSort = key !== modelSort.key || modelSort.direction === 'default' ? { key: key, direction: 'descending' }
-      : modelSort.direction === 'descending' ? { key: key, direction: 'ascending' }
-      : { key: 'total', direction: 'default' };
+    modelSort = TableSort.nextState(modelSort, key, 'total');
     syncModelSortHeaders();
     if (lastModelsData) renderModels(lastModelsData);
   });
@@ -1535,3 +1531,5 @@ setInterval(function () { reload(false); }, 5 * 60000);
 </script>
 </body>
 </html>'''
+
+DASHBOARD_HTML = DASHBOARD_HTML.replace('<script>', '<script>\n' + TABLE_SORT_JS, 1)
