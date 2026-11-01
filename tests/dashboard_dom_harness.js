@@ -78,7 +78,7 @@ const registry = new Map();
 });
 const sectionNotes = {
   'overview-note': 'Canonical direct NordRouter + agent usage, summed per model',
-  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.',
+  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the account total is listed once and the incomplete bucket is not repeated. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.',
 };
 Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
@@ -1060,6 +1060,70 @@ assert(!reportedSegments.some((entry) => segmentLabel(entry).includes('651.6M'))
   'agent bucket comparison is not stacked on top of the account day');
 assert(registry.get('history').textContent.includes('unmatched NordRouter serving 1.4M not deducted'),
   'chart states the undeducted serving alias');
+// Covered window above stays residual + bucket. An incomplete 30-day window must
+// not list the residual, the agent part, and the bucket as separate token figures.
+const incomplete30 = {
+  meta: { omniroute_status: 'ok' },
+  source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 2716253133 }] },
+  models: [
+    { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash:fjord',
+      model_key: 'deepseek-v4.1-flash', totals: { total: 1921235252 }, cost_usd: 12.87, daily: [] },
+    { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
+      model_key: 'deepseek-v4.1-flash', totals: { total: 244042474 }, cost_usd: 6.74, daily: [] },
+    { source: 'openclaw', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
+      model_key: 'deepseek-v4.1-flash', totals: { input: 74800000, output: 2700000, cache_read: 359200000, total: 436700000 }, daily: [] },
+    { source: 'openclaw', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+      bucket_comparison: true, totals: { total: 932500000 }, daily: [] },
+    { source: 'omniroute', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+      totals: { total: 925451748 }, cost_usd: 9.90, cost_kind: 'estimated',
+      bucket_usage: { retention_limited: true, routes: [
+        { model: 'deepseek-v4.1-flash:fjord', nordrouter: true, totals: { total: 924060625 },
+          daily: [{ date: '2026-10-03', totals: { total: 924060625 } }] },
+        { model: 'deepseek-v4.1-flash-1017', nordrouter: true, totals: { total: 1391123 },
+          daily: [{ date: '2026-10-03', totals: { total: 1391123 } }] },
+      ] } },
+    { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3-flash',
+      model_key: 'glm-5.3-flash', totals: { total: 311091778 }, cost_usd: 6.29, daily: [] },
+    { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3-flash:fjord',
+      model_key: 'glm-5.3-flash', totals: { total: 239883629 }, cost_usd: 2.43, daily: [] },
+    { source: 'openclaw', provider: 'nordrouter', model: 'z-ai/glm-5.3-flash',
+      model_key: 'glm-5.3-flash', totals: { total: 15000000 }, daily: [] },
+    { source: 'openclaw', provider: 'omniroute', model: 'nr-glm-53-flash', model_key: 'omniroute/nr-glm-53-flash',
+      bucket_comparison: true, totals: { total: 230500000 }, daily: [] },
+    { source: 'omniroute', provider: 'omniroute', model: 'nr-glm-53-flash', model_key: 'omniroute/nr-glm-53-flash',
+      totals: { total: 230947922 }, cost_usd: 1.40, cost_kind: 'estimated',
+      bucket_usage: { retention_limited: true, routes: [
+        { model: 'glm-5.3-flash:fjord', nordrouter: true, totals: { total: 230775027 },
+          daily: [{ date: '2026-10-03', totals: { total: 230775027 } }] },
+        { model: 'glm-5.3-flash', nordrouter: true, totals: { total: 54011 },
+          daily: [{ date: '2026-10-03', totals: { total: 54011 } }] },
+      ] } },
+  ],
+};
+const incompleteRows = tableModels(incomplete30);
+const deepseek30 = incompleteRows.find((row) => row.model_key === 'deepseek-v4.1-flash');
+const glm30 = incompleteRows.find((row) => row.model_key === 'glm-5.3-flash');
+assertEqual(incompleteRows.filter((row) => row.model_key === 'deepseek-v4.1-flash' || row.model === 'nr-deepseek-41f').length, 1,
+  '30d DeepSeek is one listing, not residual plus bucket');
+assertEqual(incompleteRows.filter((row) => row.model_key === 'glm-5.3-flash' || row.model === 'nr-glm-53-flash').length, 1,
+  '30d GLM Flash is one listing, not residual plus bucket');
+assertEqual(deepseek30.totals.total, 2165277726, '30d DeepSeek lists the account total once');
+assertEqual(deepseek30.comparison_total, null, '30d DeepSeek does not keep the agent part beside the total');
+assertEqual(glm30.totals.total, 550975407, '30d GLM Flash lists the account total once');
+assertEqual(glm30.comparison_total, null, '30d GLM Flash does not keep the agent part beside the total');
+renderModels(incomplete30);
+const deepseekRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek/deepseek-v4.1-flash') && !row.classList.contains('bucket-detail-row'));
+const glmRow = registry.get('models').children.find((row) => row.textContent.includes('z-ai/glm-5.3-flash') && !row.classList.contains('bucket-detail-row'));
+assert(deepseekRow.children[6].textContent.includes('2.17B'), '30d DeepSeek token cell is the account total');
+assert(!deepseekRow.children[6].textContent.includes('1.24B'), '30d DeepSeek token cell is not the residual-or-combined figure');
+assert(!deepseekRow.children[6].textContent.includes('436.7M'), '30d DeepSeek token cell does not repeat the agent part');
+assert(glmRow.children[6].textContent.includes('551.0M'), '30d GLM token cell is the account total');
+assert(!glmRow.children[6].textContent.includes('320.1M'), '30d GLM token cell is not the residual');
+assert(!glmRow.children[6].textContent.includes('15.0M'), '30d GLM token cell does not repeat the agent part');
+assert(!registry.get('models').textContent.includes('932.5M'), '30d DeepSeek bucket tokens are not a second listing');
+assert(!registry.get('models').textContent.includes('230.5M'), '30d GLM bucket tokens are not a second listing');
+assert(!registry.get('models').textContent.includes('nr-deepseek-41f'), '30d matched DeepSeek bucket row is omitted');
+assert(!registry.get('models').textContent.includes('nr-glm-53-flash'), '30d matched GLM bucket row is omitted');
 const aliasPayload = {
   meta: { omniroute_status: 'ok' },
   source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 140 }] },

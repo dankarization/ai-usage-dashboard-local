@@ -295,7 +295,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
   </section>
 
-  <footer class="foot"><p class="note" id="models-note">One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
+  <footer class="foot"><p class="note" id="models-note">One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the account total is listed once and the incomplete bucket is not repeated. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
 </main>
 
 <script>
@@ -1210,7 +1210,7 @@ function tableModels(data) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   });
-  return Array.from(groups.entries()).map(function (entry) {
+  var grouped = Array.from(groups.entries()).map(function (entry) {
     var rows = entry[1];
     var direct = rows.filter(function (row) { return row.source === 'nordrouter'; });
     var agents = rows.filter(function (row) { return row.source !== 'nordrouter' && row.source !== 'omniroute'; });
@@ -1238,9 +1238,9 @@ function tableModels(data) {
     });
     if (!billed && incompletePrice && number(cost)) costKind = 'partial';
     agents.forEach(function (row) { addTotals(comparison, row.totals); });
-    var accountBilledTokens = null, accountBilledCost = null, proven = 0, unreconciled = 0, unknownTokens = 0, exclusiveStatus = null;
+    var accountBilledTokens = null, accountBilledCost = null, proven = 0, unreconciled = 0, unknownTokens = 0, exclusiveStatus = null, accountOnce = false, matchedBuckets = [];
     if (exclusive) {
-      totals.total = directNotes.reduce(function (sum, note) { return sum + note.exclusive_tokens; }, 0);
+      var residual = directNotes.reduce(function (sum, note) { return sum + note.exclusive_tokens; }, 0);
       proven = directNotes.reduce(function (sum, note) { return sum + (note.overlap_proven_tokens || 0); }, 0);
       unreconciled = directNotes.reduce(function (sum, note) { return sum + (note.overlap_unreconciled_tokens || 0); }, 0);
       accountBilledTokens = directNotes.reduce(function (sum, note) { return sum + (note.account_billed_tokens || 0); }, 0);
@@ -1248,15 +1248,30 @@ function tableModels(data) {
       var familyIds = direct.map(function (row) { return String(row.model || ''); });
       var familyBuckets = {};
       familyIds.forEach(function (id) {
-        Object.keys(overlap.matchedBuckets[id] || {}).forEach(function (bucket) { familyBuckets[bucket] = true; });
+        Object.keys(overlap.matchedBuckets[id] || {}).forEach(function (bucketName) { familyBuckets[bucketName] = true; });
       });
       unknownTokens = overlap.unknown.reduce(function (sum, item) {
         return item.reason === 'unmatched' && familyBuckets[item.bucket] ? sum + item.tokens : sum;
       }, 0);
       exclusiveStatus = directNotes.some(function (note) { return note.exclusive_status === 'partial_retention'; }) ? 'partial_retention' : 'partitioned';
-      if (proven > 0) {
-        cost = null;
-        costKind = 'unpartitioned';
+      // Incomplete retention cannot split a model into residual + bucket without
+      // also showing their sum. List the account total once and drop that bucket.
+      accountOnce = exclusiveStatus === 'partial_retention' && proven > 0;
+      if (accountOnce) {
+        totals.total = accountBilledTokens;
+        cost = accountBilledCost;
+        costKind = 'billed';
+        matchedBuckets = Object.keys(familyBuckets);
+        proven = 0;
+        unreconciled = 0;
+        unknownTokens = 0;
+        exclusiveStatus = null;
+      } else {
+        totals.total = residual;
+        if (proven > 0) {
+          cost = null;
+          costKind = 'unpartitioned';
+        }
       }
     } else if (directNotes.some(function (note) { return note && note.exclusive_status === 'no_route_map'; })) {
       exclusiveStatus = 'no_route_map';
@@ -1273,8 +1288,10 @@ function tableModels(data) {
       provider: billed ? 'nordrouter' : (providers[0] || 'unknown'),
       totals: totals, cost_usd: cost,
       cost_kind: billed ? (exclusive && proven > 0 ? 'unpartitioned' : 'billed') : (costKind || (number(cost) ? 'estimated' : null)),
-      comparison_total: billed && comparison.total > 0 ? comparison.total : null,
-      comparison_categories: billed && comparison.total > 0 ? comparison : null,
+      comparison_total: !accountOnce && billed && comparison.total > 0 ? comparison.total : null,
+      comparison_categories: !accountOnce && billed && comparison.total > 0 ? comparison : null,
+      listing: accountOnce ? 'account' : null,
+      matched_buckets: matchedBuckets,
       bucket: bucket, bucket_usage: observation && observation.bucket_usage,
       token_scope: bucket ? (agents.length ? 'agent-reported' : 'router-wide') : null,
       exclusive_status: exclusiveStatus, overlap_proven_tokens: proven, overlap_unreconciled_tokens: unreconciled,
@@ -1295,6 +1312,16 @@ function tableModels(data) {
       }),
       daily: daily,
     };
+  });
+  var hiddenBuckets = {};
+  grouped.forEach(function (row) {
+    (row.matched_buckets || []).forEach(function (name) { hiddenBuckets[name] = true; });
+  });
+  return grouped.filter(function (row) {
+    if (!row.bucket) return true;
+    if (hiddenBuckets[row.model]) return false;
+    var key = String(row.model_key || '');
+    return !(key.indexOf('omniroute/') === 0 && hiddenBuckets[key.slice('omniroute/'.length)]);
   });
 }
 function modelSortValue(row, key) {
@@ -1358,7 +1385,9 @@ function renderModels(data) {
       swatch.setAttribute('aria-hidden', 'true');
     }
     node('span', row.model || '—', modelName);
-    if (row.exclusive_status === 'partial_retention')
+    if (row.listing === 'account')
+      node('div', 'retained router history incomplete; account total listed once', modelCell).className = 'cost-kind';
+    else if (row.exclusive_status === 'partial_retention')
       node('div', 'partial retention; residual may include older bucket traffic', modelCell).className = 'cost-kind';
     else if (row.overlap_proven_tokens)
       node('div', 'direct residual', modelCell).className = 'cost-kind';
