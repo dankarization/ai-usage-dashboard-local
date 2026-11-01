@@ -1127,6 +1127,88 @@ assert(!/436\.7M[\s\S]*1\.24B|1\.24B[\s\S]*436\.7M/.test(deepseekRow.children[6]
 assert(glmRow.children[6].textContent.includes('551.0M'), '30d GLM token cell is the account total');
 assert(!glmRow.children[6].textContent.includes('320.1M'), '30d GLM token cell is not the residual');
 assert(!glmRow.children[6].textContent.includes('15.0M'), '30d GLM token cell does not also show the agent part');
+function intersectionPayload(spec) {
+  return {
+    meta: { omniroute_status: 'ok' },
+    source_daily: { nordrouter: [{ date: '2026-10-03', tokens: spec.account }] },
+    models: [
+      { source: 'nordrouter', provider: 'nordrouter', model: spec.accountModel, model_key: spec.key,
+        totals: { total: spec.account }, cost_usd: 1, daily: [] },
+      { source: 'openclaw', provider: 'nordrouter', model: spec.accountModel, model_key: spec.key,
+        totals: { total: spec.agent }, daily: [] },
+      { source: 'openclaw', provider: 'omniroute', model: spec.bucket, model_key: 'omniroute/' + spec.bucket,
+        bucket_comparison: true, totals: { total: spec.bucketTokens }, daily: [] },
+      { source: 'omniroute', provider: 'omniroute', model: spec.bucket, model_key: 'omniroute/' + spec.bucket,
+        totals: { total: spec.bucketTokens }, cost_usd: 0.4,
+        bucket_usage: { retention_limited: spec.limited, routes: [
+          { model: spec.serving, nordrouter: true, totals: { total: spec.proven },
+            daily: [{ date: '2026-10-03', totals: { total: spec.proven } }] },
+        ] } },
+    ],
+  };
+}
+function assertIncompleteIntersection(label, spec) {
+  const rows = tableModels(intersectionPayload(Object.assign({ limited: true }, spec)));
+  const account = rows.find((row) => row.source === 'nordrouter' && row.model_key === spec.key);
+  const bucket = rows.find((row) => row.model === spec.bucket);
+  assert(bucket && bucket.bucket, label + ' incomplete window still lists the omniroute bucket');
+  assertEqual(bucket.totals.total, spec.bucketTokens, label + ' bucket tokens are not replaced by the account total');
+  assertEqual(account.listing, 'account', label + ' account row is one billed figure');
+  assertEqual(account.totals.total, spec.account, label + ' account row is not the residual');
+  assertEqual(account.comparison_total, null, label + ' cell is not residual plus combined');
+  assertEqual(rows.filter((row) => row.model === spec.bucket).length, 1, label + ' bucket name appears once');
+}
+function assertCoveredIntersection(label, spec) {
+  const rows = tableModels(intersectionPayload(Object.assign({ limited: false }, spec)));
+  const account = rows.find((row) => row.source === 'nordrouter' && row.model_key === spec.key);
+  const bucket = rows.find((row) => row.model === spec.bucket);
+  assert(bucket && bucket.bucket, label + ' covered window keeps the bucket row');
+  assertEqual(account.listing, null, label + ' covered window is not collapsed to the account total');
+  assertEqual(account.totals.total, spec.account - spec.proven, label + ' covered window keeps the residual');
+  assertEqual(account.comparison_total, spec.agent, label + ' covered window keeps the agent comparison');
+  assertEqual(bucket.totals.total, spec.bucketTokens, label + ' covered bucket tokens stay');
+}
+const genericFamily = {
+  key: 'widget', accountModel: 'vendor/widget', serving: 'widget', bucket: 'nr-widget',
+  account: 1000, proven: 400, agent: 250, bucketTokens: 400,
+};
+const qwenFamily = {
+  key: 'qwen3.8-max', accountModel: 'qwen/qwen3.8-max', serving: 'qwen3.8-max', bucket: 'nr-qwen',
+  account: 5000000, proven: 2000000, agent: 800000, bucketTokens: 2000000,
+};
+const mimoFamily = {
+  key: 'mimo-v2.5-pro', accountModel: 'xiaomi/mimo-v2.5-pro', serving: 'mimo-v2.5-pro', bucket: 'nr-mimo',
+  account: 8000000, proven: 3000000, agent: 900000, bucketTokens: 3000000,
+};
+[genericFamily, qwenFamily, mimoFamily].forEach((spec) => {
+  assertIncompleteIntersection(spec.bucket, spec);
+  assertCoveredIntersection(spec.bucket, spec);
+});
+const mixedFamilies = {
+  meta: { omniroute_status: 'ok' },
+  source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 14000000 }] },
+  models: [].concat(
+    intersectionPayload(Object.assign({ limited: true }, qwenFamily)).models,
+    intersectionPayload(Object.assign({ limited: true }, mimoFamily)).models,
+    [{ source: 'omniroute', provider: 'omniroute', model: 'nr-unmatched', model_key: 'omniroute/nr-unmatched',
+      totals: { total: 77 }, bucket_usage: { retention_limited: true, routes: [
+        { model: 'not-on-the-account', nordrouter: false, totals: { total: 77 },
+          daily: [{ date: '2026-10-03', totals: { total: 77 } }] },
+      ] } }],
+  ),
+};
+const mixedRows = tableModels(mixedFamilies);
+['nr-qwen', 'nr-mimo', 'nr-unmatched'].forEach((name) => {
+  assert(mixedRows.some((row) => row.model === name && row.bucket), 'every payload bucket stays listed: ' + name);
+});
+renderModels(mixedFamilies);
+const qwenCell = registry.get('models').children.find((row) => row.textContent.includes('qwen/qwen3.8-max') && !row.classList.contains('bucket-row'));
+assert(qwenCell.children[6].textContent.includes('5.0M'), 'qwen account cell is the billed total');
+assert(!qwenCell.children[6].textContent.includes('3.0M'), 'qwen cell does not also show the residual');
+assert(!qwenCell.children[6].textContent.includes('800.0K'), 'qwen cell does not also show the agent part');
+assert(registry.get('models').textContent.includes('nr-qwen'), 'rendered qwen bucket name stays');
+assert(registry.get('models').textContent.includes('nr-mimo'), 'rendered mimo bucket name stays');
+assert(registry.get('models').textContent.includes('nr-unmatched'), 'rendered unmatched bucket stays');
 const aliasPayload = {
   meta: { omniroute_status: 'ok' },
   source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 140 }] },
