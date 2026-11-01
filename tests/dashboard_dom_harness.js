@@ -78,7 +78,7 @@ const registry = new Map();
 });
 const sectionNotes = {
   'overview-note': 'Canonical direct NordRouter + agent usage, summed per model',
-  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the account row shows the account total once, not a residual beside a combined figure, and the bucket row stays. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.',
+  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the NordRouter cell is the exclusive residual only, the bucket row stays, and those two are not joined by a combined figure. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.',
 };
 Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
@@ -1109,10 +1109,13 @@ assert(deepseekBucket && deepseekBucket.bucket, '30d still lists nr-deepseek-41f
 assert(glmBucket && glmBucket.bucket, '30d still lists nr-glm-53-flash');
 assertEqual(deepseekBucket.totals.total, 932500000, '30d DeepSeek bucket keeps its own token figure');
 assertEqual(glmBucket.totals.total, 230500000, '30d GLM bucket keeps its own token figure');
-assertEqual(deepseek30.totals.total, 2165277726, '30d DeepSeek account row is the billed total, not the 1.24B combined residual');
-assertEqual(deepseek30.comparison_total, null, '30d DeepSeek cell is not residual plus combined');
-assertEqual(glm30.totals.total, 550975407, '30d GLM Flash account row is the billed total');
-assertEqual(glm30.comparison_total, null, '30d GLM cell is not residual plus combined');
+assertEqual(deepseek30.totals.total, 1241217101, '30d DeepSeek NordRouter cell is the exclusive residual');
+assertEqual(deepseek30.comparison_total, null, '30d DeepSeek cell has no combined third figure');
+assertEqual(deepseek30.totals.total + deepseekBucket.totals.total, 2173717101, '30d DeepSeek residual plus bucket is near the unique account, not account plus bucket');
+assert(deepseek30.totals.total + deepseekBucket.totals.total < 2165277726 + 932500000, '30d DeepSeek does not add the full account to the bucket');
+assertEqual(glm30.totals.total, 320146369, '30d GLM Flash NordRouter cell is the exclusive residual');
+assertEqual(glm30.comparison_total, null, '30d GLM cell has no combined third figure');
+assertEqual(glm30.totals.total + glmBucket.totals.total, 550646369, '30d GLM residual plus bucket is the unique total, not 551M plus 230.5M');
 renderModels(incomplete30);
 const deepseekRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek/deepseek-v4.1-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
 const glmRow = registry.get('models').children.find((row) => row.textContent.includes('z-ai/glm-5.3-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
@@ -1120,12 +1123,11 @@ const deepseekBucketRow = registry.get('models').children.find((row) => row.text
 const glmBucketRow = registry.get('models').children.find((row) => row.textContent.includes('nr-glm-53-flash') && row.classList.contains('bucket-row'));
 assert(deepseekBucketRow, 'rendered 30d keeps the nr-deepseek-41f name');
 assert(glmBucketRow, 'rendered 30d keeps the nr-glm-53-flash name');
-assert(deepseekRow.children[6].textContent.includes('2.17B'), '30d DeepSeek token cell is the account total');
-assert(!deepseekRow.children[6].textContent.includes('1.24B'), '30d DeepSeek token cell is not the combined residual');
+assert(deepseekRow.children[6].textContent.includes('1.24B'), '30d DeepSeek token cell is the residual');
+assert(!deepseekRow.children[6].textContent.includes('2.17B'), '30d DeepSeek token cell is not the full account beside the bucket');
 assert(!deepseekRow.children[6].textContent.includes('436.7M'), '30d DeepSeek token cell does not also show the agent part');
-assert(!/436\.7M[\s\S]*1\.24B|1\.24B[\s\S]*436\.7M/.test(deepseekRow.children[6].textContent), '30d DeepSeek cell is not a residual/combined pair');
-assert(glmRow.children[6].textContent.includes('551.0M'), '30d GLM token cell is the account total');
-assert(!glmRow.children[6].textContent.includes('320.1M'), '30d GLM token cell is not the residual');
+assert(glmRow.children[6].textContent.includes('320.1M'), '30d GLM token cell is the residual');
+assert(!glmRow.children[6].textContent.includes('551.0M'), '30d GLM token cell is not the full account beside the bucket');
 assert(!glmRow.children[6].textContent.includes('15.0M'), '30d GLM token cell does not also show the agent part');
 function intersectionPayload(spec) {
   return {
@@ -1152,10 +1154,11 @@ function assertIncompleteIntersection(label, spec) {
   const account = rows.find((row) => row.source === 'nordrouter' && row.model_key === spec.key);
   const bucket = rows.find((row) => row.model === spec.bucket);
   assert(bucket && bucket.bucket, label + ' incomplete window still lists the omniroute bucket');
-  assertEqual(bucket.totals.total, spec.bucketTokens, label + ' bucket tokens are not replaced by the account total');
-  assertEqual(account.listing, 'account', label + ' account row is one billed figure');
-  assertEqual(account.totals.total, spec.account, label + ' account row is not the residual');
+  assertEqual(bucket.totals.total, spec.bucketTokens, label + ' bucket tokens stay full size');
+  assertEqual(account.listing, 'residual', label + ' NordRouter cell is the exclusive residual');
+  assertEqual(account.totals.total, spec.account - spec.proven, label + ' NordRouter cell is not the full account');
   assertEqual(account.comparison_total, null, label + ' cell is not residual plus combined');
+  assertEqual(account.totals.total + bucket.totals.total, spec.account - spec.proven + spec.bucketTokens, label + ' residual plus bucket is not account plus bucket');
   assertEqual(rows.filter((row) => row.model === spec.bucket).length, 1, label + ' bucket name appears once');
 }
 function assertCoveredIntersection(label, spec) {
@@ -1203,8 +1206,8 @@ const mixedRows = tableModels(mixedFamilies);
 });
 renderModels(mixedFamilies);
 const qwenCell = registry.get('models').children.find((row) => row.textContent.includes('qwen/qwen3.8-max') && !row.classList.contains('bucket-row'));
-assert(qwenCell.children[6].textContent.includes('5.0M'), 'qwen account cell is the billed total');
-assert(!qwenCell.children[6].textContent.includes('3.0M'), 'qwen cell does not also show the residual');
+assert(qwenCell.children[6].textContent.includes('3.0M'), 'qwen cell is the exclusive residual');
+assert(!qwenCell.children[6].textContent.includes('5.0M'), 'qwen cell is not the full account beside the bucket');
 assert(!qwenCell.children[6].textContent.includes('800.0K'), 'qwen cell does not also show the agent part');
 assert(registry.get('models').textContent.includes('nr-qwen'), 'rendered qwen bucket name stays');
 assert(registry.get('models').textContent.includes('nr-mimo'), 'rendered mimo bucket name stays');
