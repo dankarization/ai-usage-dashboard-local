@@ -239,3 +239,159 @@ def collect(start, end, *, include_daily=True, client=None, price_client=None):
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         return {'models': [], 'daily': [], 'status': 'unavailable',
                 'source': {'tokens': 0, 'complete': False, 'status': 'unavailable'}}
+
+
+def match_account_model(serving, account_ids):
+    """Exact account id, or one unambiguous catalog tail. Never strip route suffixes."""
+    serving = str(serving or '')
+    if serving in account_ids:
+        return serving
+    tails = [item for item in account_ids if item.rsplit('/', 1)[-1] == serving]
+    return tails[0] if len(tails) == 1 else None
+
+
+def _token_total(totals):
+    value = (totals or {}).get('total')
+    return value if type(value) is int and value >= 0 else None
+
+
+def _window_tokens(route, nr_dates):
+    """Tokens that can overlap this account window. Outside dates are not deducted."""
+    total = _token_total(route.get('totals'))
+    if not total:
+        return 0
+    days = route.get('daily') or []
+    if nr_dates is None:
+        return total
+    if not days:
+        return 0
+    return sum(_token_total(day.get('totals')) or 0 for day in days if day.get('date') in nr_dates)
+
+
+def account_overlap(models, *, router_status=None, nr_daily=None):
+    """Residual of NordRouter account models after proven bucket overlap.
+
+    Account billed tokens and dollars stay on the row. ``exclusive_tokens`` is
+    only the part not proven to be inside a NordRouter-origin serving route.
+    A larger router observation cannot make the residual negative: the excess
+    is ``overlap_unreconciled_tokens`` and remains on the bucket. Routes whose
+    origin or id does not match an account model are not deducted. Suffix
+    normalisation is not a match. Missing router data is not treated as zero
+    overlap. Day residuals are omitted unless every moved route has daily
+    totals that sum to its window total; no proportional day split is invented.
+    """
+    account_rows = [row for row in models if row.get('source') == 'nordrouter']
+    account_ids = [str(row.get('model') or '') for row in account_rows]
+    router_rows = [row for row in models if row.get('source') == 'omniroute' and row.get('bucket_usage')]
+    nr_dates = None if nr_daily is None else {day.get('date') for day in nr_daily}
+    has_router = bool(router_rows)
+    retention_limited = any(row['bucket_usage'].get('retention_limited') for row in router_rows)
+    proven = defaultdict(int)
+    matched_buckets = defaultdict(set)
+    unknown = []
+    movable = []
+    for row in router_rows:
+        for route in row['bucket_usage'].get('routes') or []:
+            tokens = _window_tokens(route, nr_dates)
+            if not tokens:
+                continue
+            origin = route.get('nordrouter')
+            if origin is True:
+                match = match_account_model(route.get('model'), account_ids)
+                if match is None:
+                    unknown.append({'bucket': row.get('model'), 'model': route.get('model'),
+                                    'tokens': tokens, 'reason': 'unmatched'})
+                    continue
+                proven[match] += tokens
+                matched_buckets[match].add(row.get('model'))
+                movable.append((route, row, 'matched'))
+            elif origin is False:
+                movable.append((route, row, 'other'))
+            else:
+                unknown.append({'bucket': row.get('model'), 'model': route.get('model'),
+                                'tokens': tokens, 'reason': 'no_route_map'})
+    seen = set()
+    annotations = []
+    unmapped = any(item['reason'] == 'no_route_map' for item in unknown)
+    for row in account_rows:
+        model = str(row.get('model') or '')
+        account = _token_total(row.get('totals'))
+        billed = row.get('cost_usd') if isinstance(row.get('cost_usd'), (int, float)) and type(row.get('cost_usd')) is not bool else None
+        note = {'account_billed_tokens': account, 'account_billed_cost_usd': billed}
+        if account is None:
+            note.update(exclusive_status='unavailable', exclusive_tokens=None,
+                        overlap_proven_tokens=0, overlap_unreconciled_tokens=0, overlap_unknown_tokens=0)
+        elif not has_router:
+            clean = router_status in ('ok', 'stale')
+            note.update(exclusive_status='partitioned' if clean else 'unavailable',
+                        exclusive_tokens=account if clean else None,
+                        overlap_proven_tokens=0, overlap_unreconciled_tokens=0, overlap_unknown_tokens=0)
+        elif model in seen:
+            note.update(exclusive_status='duplicate', exclusive_tokens=0,
+                        overlap_proven_tokens=0, overlap_unreconciled_tokens=0, overlap_unknown_tokens=0)
+        elif not proven and unmapped:
+            note.update(exclusive_status='no_route_map', exclusive_tokens=None,
+                        overlap_proven_tokens=0, overlap_unreconciled_tokens=0, overlap_unknown_tokens=0)
+        else:
+            seen.add(model)
+            matched = proven.get(model, 0)
+            deducted = min(account, matched)
+            unknown_tokens = sum(item['tokens'] for item in unknown
+                                 if item['reason'] == 'unmatched' and item['bucket'] in matched_buckets.get(model, ()))
+            note.update(exclusive_status='partial_retention' if retention_limited else 'partitioned',
+                        exclusive_tokens=account - deducted, overlap_proven_tokens=deducted,
+                        overlap_unreconciled_tokens=max(0, matched - account),
+                        overlap_unknown_tokens=unknown_tokens)
+            seen.add(model)
+        annotations.append(note)
+    days_ready = False
+    daily = None
+    if has_router and movable:
+        days_ready = True
+        matched_by_date = defaultdict(int)
+        for route, _row, kind in movable:
+            days = route.get('daily') or []
+            covered = sum(_token_total(day.get('totals')) or 0 for day in days)
+            if not days or (nr_dates is None and covered != _token_total(route.get('totals'))):
+                days_ready = False
+                break
+            if kind == 'matched':
+                for day in days:
+                    if nr_dates is not None and day.get('date') not in nr_dates:
+                        continue
+                    value = _token_total(day.get('totals')) or 0
+                    if value:
+                        matched_by_date[day['date']] += value
+        if days_ready:
+            daily = []
+            for day in nr_daily or []:
+                account = day.get('tokens')
+                if type(account) is not int or account < 0:
+                    days_ready = False
+                    daily = None
+                    break
+                matched = matched_by_date.get(day['date'], 0)
+                subtracted = min(account, matched)
+                daily.append({'date': day['date'], 'tokens': account - subtracted,
+                              'subtracted': subtracted, 'unreconciled': max(0, matched - account)})
+    proven_tokens = sum(note.get('overlap_proven_tokens') or 0 for note in annotations)
+    unreconciled_tokens = sum(note.get('overlap_unreconciled_tokens') or 0 for note in annotations)
+    statuses = {note.get('exclusive_status') for note in annotations}
+    if not account_rows:
+        status = 'empty'
+    elif statuses <= {'partitioned', 'duplicate'} and not retention_limited:
+        status = 'partitioned'
+    elif 'partial_retention' in statuses:
+        status = 'partial_retention'
+    elif statuses <= {'no_route_map'}:
+        status = 'no_route_map'
+    elif 'unavailable' in statuses and 'partitioned' not in statuses and 'partial_retention' not in statuses:
+        status = 'unavailable'
+    else:
+        status = 'partial'
+    exclusive_values = [note.get('exclusive_tokens') for note in annotations]
+    return {'annotations': annotations, 'status': status, 'has_router': has_router,
+            'retention_limited': retention_limited, 'unknown': unknown, 'days_ready': days_ready,
+            'daily': daily, 'proven_tokens': proven_tokens, 'unreconciled_tokens': unreconciled_tokens,
+            'unknown_tokens': sum(item['tokens'] for item in unknown),
+            'exclusive_tokens': None if any(value is None for value in exclusive_values) else sum(exclusive_values)}

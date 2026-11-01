@@ -2962,6 +2962,11 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
                 'unpriced_tokens': sum(m.get('unpriced_tokens', m['totals']['total']) for m in rows),
                 'cost_basis': API_PRICE_BASIS}
 
+    # Account billed totals stay intact. Exclusive fields are the residual
+    # after proven NordRouter-origin bucket routes; they are not a second invoice.
+    overlap = _omniroute_usage.account_overlap(models, router_status=router['status'], nr_daily=nr_daily)
+    for row, note in zip((row for row in models if row.get('source') == 'nordrouter'), overlap['annotations']):
+        row.update(note)
     openclaw_source = agent_source('openclaw')
     hermes_source = agent_source('hermes')
     # A saved snapshot is not current: the Gateway kept accruing while it was
@@ -3010,7 +3015,10 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             'omniroute': router_source,
             'nordrouter': {'tokens': sum(day['tokens'] for day in nr_daily) if nr_daily else None,
                            'billed_cost_usd': nr_window_cost if nr_window_days == days else None,
-                           'window_days': nr_window_days, 'complete': nr_complete},
+                           'window_days': nr_window_days, 'complete': nr_complete,
+                           'overlap': {key: overlap[key] for key in (
+                               'status', 'proven_tokens', 'unreconciled_tokens', 'unknown_tokens',
+                               'exclusive_tokens', 'days_ready', 'daily', 'retention_limited')}},
             'openclaw_nordrouter_comparison_tokens': sum(m['totals']['total'] for m in models
                 if m['source'] == 'openclaw' and m['provider'].lower() == 'nordrouter'),
             'hermes_nordrouter_comparison_tokens': sum(m['totals']['total'] for m in models

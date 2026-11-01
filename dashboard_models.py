@@ -212,7 +212,14 @@ class ModelBreakdownEntry(ApiEstimateFields):
     provider: Optional[str] = Field(default=None, description='Provider/route identifier reported by the source; not necessarily an account identity.')
     model: str = Field(description='Model identifier reported by the source; names alone do not prove account identity.')
     model_key: Optional[str] = Field(default=None, description='Display grouping key. Regular model spellings collapse routing/context aliases. OmniRoute bucket keys use omniroute/<exact bucket name> and never merge with serving/account model IDs; serving tariffs retain exact IDs separately.')
-    totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window.')
+    exclusive_tokens: Optional[int] = Field(default=None, description='Direct NordRouter tokens outside proven NordRouter-origin bucket routes, plus any unpartitioned residual. Null when overlap cannot be proven. Never negative.')
+    exclusive_status: Optional[str] = Field(default=None, description='partitioned, partial_retention, no_route_map, unavailable, or duplicate. partial_retention still subtracts only observed matches and may include older bucket traffic in the residual.')
+    overlap_proven_tokens: Optional[int] = Field(default=None, description='NordRouter-origin serving tokens matched to this exact account model and removed from exclusive_tokens, capped at the account total.')
+    overlap_unreconciled_tokens: Optional[int] = Field(default=None, description='Matched serving tokens above the account total. Kept on the bucket; not deducted twice and not shown as a negative residual.')
+    overlap_unknown_tokens: Optional[int] = Field(default=None, description='Same-bucket NordRouter serving tokens with no exact account-model match. Not deducted.')
+    account_billed_tokens: Optional[int] = Field(default=None, description='Unchanged NordRouter account-model token total. Not a residual and not added to bucket observations.')
+    account_billed_cost_usd: Optional[float] = Field(default=None, description='Unchanged NordRouter account-model billed USD. Not split into a residual invoice and not added to router-wide estimates.')
+    totals: ModelTokenTotals = Field(default_factory=ModelTokenTotals, description='Token totals for this model across the full date window. Direct NordRouter totals remain the account billed count; exclusive_tokens is the non-overlapping residual.')
     daily: list[ModelDailyEntry] = Field(default_factory=list, description='Per-day token entries for this model, ordered by date. Empty when ?daily=false is passed.')
 
 

@@ -78,7 +78,7 @@ const registry = new Map();
 });
 const sectionNotes = {
   'overview-note': 'Canonical direct NordRouter + agent usage, summed per model',
-  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; the crossed-out agent total → direct figure is the account number. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.',
+  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on that row are agent comparisons, not direct token types. Model rows are not account totals.',
 };
 Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
@@ -998,6 +998,128 @@ const missingBucket = tableModels({ models: [bucketAgent] })[0];
 assert(missingBucket.cost_usd === null, 'Gateway zero cost table is not free bucket usage');
 renderModels({ models: [bucketAgent] });
 assert(registry.get('models').textContent.includes('router usage unavailable'), 'missing router does not fabricate a bucket price');
+
+/* NordRouter bucket overlap is removed from the direct family, not from the bucket. */
+historyScale = 'linear';
+const reportedDirect = [
+  { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash:fjord',
+    model_key: 'deepseek-v4.1-flash', totals: { total: 743977604 }, cost_usd: 5.660827, daily: [] },
+  { source: 'nordrouter', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
+    model_key: 'deepseek-v4.1-flash', totals: { total: 45870232 }, cost_usd: 1.327571, daily: [] },
+  { source: 'openclaw', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
+    model_key: 'deepseek-v4.1-flash', totals: { total: 36500000 }, daily: [{ date: '2026-11-01', total: 36500000 }] },
+  { source: 'openclaw', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+    bucket_comparison: true, totals: { total: 651600000 }, daily: [{ date: '2026-11-01', total: 651600000 }] },
+  { source: 'omniroute', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+    totals: { total: 671329015 }, cost_usd: 7.71, cost_kind: 'estimated',
+    daily: [{ date: '2026-11-01', total: 671329015 }],
+    bucket_usage: { retention_limited: false, routes: [
+      { model: 'deepseek-v4.1-flash:fjord', nordrouter: true, totals: { total: 669937892 },
+        daily: [{ date: '2026-11-01', totals: { total: 669937892 } }] },
+      { model: 'deepseek-v4.1-flash-1017', nordrouter: true, totals: { total: 1391123 },
+        daily: [{ date: '2026-11-01', totals: { total: 1391123 } }] },
+    ] } },
+];
+const reportedPayload = {
+  meta: { omniroute_status: 'ok' },
+  totals: { total: 999 },
+  sources: { nordrouter: { tokens: 789847836, billed_cost_usd: 6.988398, complete: true },
+    openclaw: { tokens: 1, complete: true }, hermes: { tokens: 0, complete: true } },
+  source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 789847836 }] },
+  models: reportedDirect,
+};
+const reportedTable = tableModels(reportedPayload);
+const family = reportedTable.find((row) => row.model_key === 'deepseek-v4.1-flash');
+const reportedBucket = reportedTable.find((row) => row.bucket);
+assertEqual(family.totals.total, 119909944, 'direct family keeps only residual outside proven bucket overlap');
+assertEqual(family.comparison_total, 36500000, 'crossed-out comparison stays the non-bucket agent count');
+assertEqual(family.cost_usd, null, 'residual does not invent a partitioned invoice');
+assert(Math.abs(family.account_billed_cost_usd - 6.988398) < 1e-9, 'account billed dollars stay distinguishable');
+assertEqual(family.overlap_unknown_tokens, 1391123, 'dated serving alias is not deducted');
+assertEqual(reportedBucket.totals.total, 651600000, 'bucket agent tokens are not replaced or reduced');
+assertEqual(reportedBucket.cost_usd, 7.71, 'bucket keeps its router-wide estimate');
+renderHero(reportedPayload);
+assert(registry.get('hero').textContent.includes('$6.99') || registry.get('hero').textContent.includes('$6.9884'),
+  'hero billed cost remains the account invoice');
+renderModels(reportedPayload);
+const familyRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek-v4.1-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
+assert(familyRow.textContent.includes('119.9M'), 'table shows the residual, not 789.8M, as the direct figure');
+assert(!familyRow.children[6].textContent.includes('789.8M'), 'token cell is not the full account amount');
+assert(familyRow.children[6].textContent.includes('36.5M'), 'agent comparison remains visible');
+assert(familyRow.children[7].textContent.startsWith('\u2014'), 'USD cell is not an additive residual price');
+assert(!familyRow.children[7].textContent.includes('$6.99'), 'account dollars are not repeated as a second price in the USD cell');
+assert(familyRow.textContent.includes('unmatched serving 1.4M not deducted'), 'unknown overlap stays explicit');
+assert(familyRow.textContent.includes('account billed unpartitioned'), 'account bill is labeled rather than allocated');
+const bucketRow = registry.get('models').children.find((row) => row.classList.contains('bucket-row'));
+assert(bucketRow.textContent.includes('$7.71'), 'bucket estimate remains beside the residual');
+renderHistory(reportedPayload);
+const reportedSegments = all(registry.get('history')).filter((entry) => entry.tagName === 'RECT');
+assert(reportedSegments.some((entry) => segmentLabel(entry).includes('day total 789.8M')),
+  'chart day conserves the account daily total after moving proven overlap into the bucket series');
+assert(!reportedSegments.some((entry) => segmentLabel(entry).includes('651.6M')),
+  'agent bucket comparison is not stacked on top of the account day');
+assert(registry.get('history').textContent.includes('unmatched NordRouter serving 1.4M not deducted'),
+  'chart states the undeducted serving alias');
+const aliasPayload = {
+  meta: { omniroute_status: 'ok' },
+  source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 140 }] },
+  models: [
+    { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a:fjord', model_key: 'a', totals: { total: 100 }, cost_usd: 1.5 },
+    { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', model_key: 'a', totals: { total: 40 }, cost_usd: 0.5 },
+    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'omniroute/one', totals: { total: 30 }, cost_usd: 0.2,
+      bucket_usage: { routes: [{ model: 'a:fjord', nordrouter: true, totals: { total: 30 }, daily: [{ date: '2026-11-01', totals: { total: 30 } }] }] } },
+  ],
+};
+assertEqual(tableModels(aliasPayload).find((row) => row.model_key === 'a').totals.total, 110,
+  'base is not reduced by a :fjord serving match');
+const multiPayload = {
+  meta: { omniroute_status: 'ok' },
+  source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 100 }] },
+  models: [
+    { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', model_key: 'a', totals: { total: 100 }, cost_usd: 2 },
+    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'omniroute/one', totals: { total: 60 },
+      bucket_usage: { routes: [{ model: 'a', nordrouter: true, totals: { total: 60 }, daily: [{ date: '2026-11-01', totals: { total: 60 } }] }] } },
+    { source: 'omniroute', provider: 'omniroute', model: 'two', model_key: 'omniroute/two', totals: { total: 50 },
+      bucket_usage: { routes: [{ model: 'a', nordrouter: true, totals: { total: 50 }, daily: [{ date: '2026-11-01', totals: { total: 50 } }] }] } },
+  ],
+};
+const multi = tableModels(multiPayload).find((row) => row.source === 'nordrouter');
+assertEqual(multi.totals.total, 0, 'two buckets deduct the account model once');
+assertEqual(multi.overlap_unreconciled_tokens, 10, 'excess overlap stays explicit');
+assertEqual(tableModels(multiPayload).filter((row) => row.bucket).reduce((sum, row) => sum + row.bucket_usage.routes[0].totals.total, 0), 110,
+  'neither bucket is reduced to hide the excess');
+const otherWindow = {
+  meta: { omniroute_status: 'ok' },
+  source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 100 }] },
+  models: [
+    { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', model_key: 'a', totals: { total: 100 }, cost_usd: 1 },
+    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'omniroute/one', totals: { total: 40 },
+      bucket_usage: { routes: [{ model: 'a', nordrouter: true, totals: { total: 40 }, daily: [{ date: '2026-10-01', totals: { total: 40 } }] }] } },
+  ],
+};
+assertEqual(tableModels(otherWindow).find((row) => row.source === 'nordrouter').totals.total, 100,
+  'a bucket day outside the account window is not deducted');
+const chartPayload = {
+  meta: { omniroute_status: 'ok' },
+  source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 100 }] },
+  models: [
+    { source: 'openclaw', provider: 'xai', model: 'grok', model_key: 'grok', totals: { total: 5 }, daily: [{ date: '2026-11-01', total: 5 }] },
+    { source: 'openclaw', provider: 'omniroute', model: 'bucket', model_key: 'omniroute/bucket', bucket_comparison: true,
+      totals: { total: 50 }, daily: [{ date: '2026-11-01', total: 50 }] },
+    { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', model_key: 'a', totals: { total: 100 }, cost_usd: 1 },
+    { source: 'omniroute', provider: 'omniroute', model: 'bucket', model_key: 'omniroute/bucket', totals: { total: 70 }, cost_usd: 0.4,
+      bucket_usage: { routes: [
+        { model: 'a', nordrouter: true, totals: { total: 60 }, daily: [{ date: '2026-11-01', totals: { total: 60 } }] },
+        { model: 'other', nordrouter: false, totals: { total: 10 }, daily: [{ date: '2026-11-01', totals: { total: 10 } }] },
+      ] } },
+  ],
+};
+renderHistory(chartPayload);
+assert(all(registry.get('history')).some((entry) => entry.tagName === 'RECT' && segmentLabel(entry).includes('day total 115')),
+  'chart conserves agent outside + account daily + non-NordRouter bucket');
+assert(!all(registry.get('history')).some((entry) => entry.tagName === 'RECT' && segmentLabel(entry).includes('50')),
+  'agent bucket tokens are not added again');
+historyScale = 'balanced';
 
 console.log('OK: dashboard DOM contract holds');
 selectedDays = initialSelectedDays;

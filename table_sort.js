@@ -202,7 +202,7 @@
     return table._tableSort;
   }
 
-  root.TableSort = {
+  var api = {
     parseValue: parseValue,
     compareValues: compareValues,
     nextState: nextState,
@@ -210,4 +210,8 @@
     sortRows: sortRows,
     bind: bind
   };
+  root.TableSort = api;
+  // Browsers use window as the global object. A DOM shim's window is not,
+  // so the page's bare TableSort reference also needs the real global.
+  if (typeof globalThis !== "undefined") globalThis.TableSort = api;
 })(typeof window !== "undefined" ? window : this);

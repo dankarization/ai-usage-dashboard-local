@@ -118,7 +118,8 @@ def test_history_owns_model_table_and_note_is_in_footer():
     assert 'id="model-table"' in history.group(1)
     note = ('One row per model: spellings that bill as one model are summed. '
             'NordRouter bills every agent, so its per-source token count is unknown; '
-            'the crossed-out agent total → direct figure is the account number. '
+            'the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. '
+            'Bucket prices are router-wide estimates and are not added to that account bill. '
             'Input/output/cache on that row are agent comparisons, not direct token types. '
             'Model rows are not account totals.')
     footer = re.search(r'<footer class="foot">(.*?)</footer>', DASHBOARD_HTML, re.S)
