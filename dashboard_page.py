@@ -295,7 +295,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
   </section>
 
-  <footer class="foot"><p class="note" id="models-note">One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the account total is listed once and the incomplete bucket is not repeated. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
+  <footer class="foot"><p class="note" id="models-note">One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the account row shows the account total once, not a residual beside a combined figure, and the bucket row stays. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
 </main>
 
 <script>
@@ -1254,14 +1254,13 @@ function tableModels(data) {
         return item.reason === 'unmatched' && familyBuckets[item.bucket] ? sum + item.tokens : sum;
       }, 0);
       exclusiveStatus = directNotes.some(function (note) { return note.exclusive_status === 'partial_retention'; }) ? 'partial_retention' : 'partitioned';
-      // Incomplete retention cannot split a model into residual + bucket without
-      // also showing their sum. List the account total once and drop that bucket.
+      // Incomplete retention must not put residual and combined totals in one cell.
+      // The bucket row stays; only the account cell collapses to one billed figure.
       accountOnce = exclusiveStatus === 'partial_retention' && proven > 0;
       if (accountOnce) {
         totals.total = accountBilledTokens;
         cost = accountBilledCost;
         costKind = 'billed';
-        matchedBuckets = Object.keys(familyBuckets);
         proven = 0;
         unreconciled = 0;
         unknownTokens = 0;
@@ -1291,7 +1290,6 @@ function tableModels(data) {
       comparison_total: !accountOnce && billed && comparison.total > 0 ? comparison.total : null,
       comparison_categories: !accountOnce && billed && comparison.total > 0 ? comparison : null,
       listing: accountOnce ? 'account' : null,
-      matched_buckets: matchedBuckets,
       bucket: bucket, bucket_usage: observation && observation.bucket_usage,
       token_scope: bucket ? (agents.length ? 'agent-reported' : 'router-wide') : null,
       exclusive_status: exclusiveStatus, overlap_proven_tokens: proven, overlap_unreconciled_tokens: unreconciled,
@@ -1313,16 +1311,7 @@ function tableModels(data) {
       daily: daily,
     };
   });
-  var hiddenBuckets = {};
-  grouped.forEach(function (row) {
-    (row.matched_buckets || []).forEach(function (name) { hiddenBuckets[name] = true; });
-  });
-  return grouped.filter(function (row) {
-    if (!row.bucket) return true;
-    if (hiddenBuckets[row.model]) return false;
-    var key = String(row.model_key || '');
-    return !(key.indexOf('omniroute/') === 0 && hiddenBuckets[key.slice('omniroute/'.length)]);
-  });
+  return grouped;
 }
 function modelSortValue(row, key) {
   if (key === 'source') return row.source === 'nordrouter' ? 'NordRouter' : row.provider || null;
@@ -1386,7 +1375,7 @@ function renderModels(data) {
     }
     node('span', row.model || '—', modelName);
     if (row.listing === 'account')
-      node('div', 'retained router history incomplete; account total listed once', modelCell).className = 'cost-kind';
+      node('div', 'retained router history incomplete; account total, not a split', modelCell).className = 'cost-kind';
     else if (row.exclusive_status === 'partial_retention')
       node('div', 'partial retention; residual may include older bucket traffic', modelCell).className = 'cost-kind';
     else if (row.overlap_proven_tokens)

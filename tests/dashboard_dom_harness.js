@@ -78,7 +78,7 @@ const registry = new Map();
 });
 const sectionNotes = {
   'overview-note': 'Canonical direct NordRouter + agent usage, summed per model',
-  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the account total is listed once and the incomplete bucket is not repeated. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.',
+  'models-note': 'One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the account row shows the account total once, not a residual beside a combined figure, and the bucket row stays. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.',
 };
 Object.entries(sectionNotes).forEach(([id, value]) => { registry.get(id).textContent = value; });
 ['source', 'model', 'input', 'output', 'cache_read', 'cache_write', 'total', 'usd'].forEach((key) => {
@@ -1103,27 +1103,30 @@ const incomplete30 = {
 const incompleteRows = tableModels(incomplete30);
 const deepseek30 = incompleteRows.find((row) => row.model_key === 'deepseek-v4.1-flash');
 const glm30 = incompleteRows.find((row) => row.model_key === 'glm-5.3-flash');
-assertEqual(incompleteRows.filter((row) => row.model_key === 'deepseek-v4.1-flash' || row.model === 'nr-deepseek-41f').length, 1,
-  '30d DeepSeek is one listing, not residual plus bucket');
-assertEqual(incompleteRows.filter((row) => row.model_key === 'glm-5.3-flash' || row.model === 'nr-glm-53-flash').length, 1,
-  '30d GLM Flash is one listing, not residual plus bucket');
-assertEqual(deepseek30.totals.total, 2165277726, '30d DeepSeek lists the account total once');
-assertEqual(deepseek30.comparison_total, null, '30d DeepSeek does not keep the agent part beside the total');
-assertEqual(glm30.totals.total, 550975407, '30d GLM Flash lists the account total once');
-assertEqual(glm30.comparison_total, null, '30d GLM Flash does not keep the agent part beside the total');
+const deepseekBucket = incompleteRows.find((row) => row.model === 'nr-deepseek-41f');
+const glmBucket = incompleteRows.find((row) => row.model === 'nr-glm-53-flash');
+assert(deepseekBucket && deepseekBucket.bucket, '30d still lists nr-deepseek-41f');
+assert(glmBucket && glmBucket.bucket, '30d still lists nr-glm-53-flash');
+assertEqual(deepseekBucket.totals.total, 932500000, '30d DeepSeek bucket keeps its own token figure');
+assertEqual(glmBucket.totals.total, 230500000, '30d GLM bucket keeps its own token figure');
+assertEqual(deepseek30.totals.total, 2165277726, '30d DeepSeek account row is the billed total, not the 1.24B combined residual');
+assertEqual(deepseek30.comparison_total, null, '30d DeepSeek cell is not residual plus combined');
+assertEqual(glm30.totals.total, 550975407, '30d GLM Flash account row is the billed total');
+assertEqual(glm30.comparison_total, null, '30d GLM cell is not residual plus combined');
 renderModels(incomplete30);
-const deepseekRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek/deepseek-v4.1-flash') && !row.classList.contains('bucket-detail-row'));
-const glmRow = registry.get('models').children.find((row) => row.textContent.includes('z-ai/glm-5.3-flash') && !row.classList.contains('bucket-detail-row'));
+const deepseekRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek/deepseek-v4.1-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
+const glmRow = registry.get('models').children.find((row) => row.textContent.includes('z-ai/glm-5.3-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
+const deepseekBucketRow = registry.get('models').children.find((row) => row.textContent.includes('nr-deepseek-41f') && row.classList.contains('bucket-row'));
+const glmBucketRow = registry.get('models').children.find((row) => row.textContent.includes('nr-glm-53-flash') && row.classList.contains('bucket-row'));
+assert(deepseekBucketRow, 'rendered 30d keeps the nr-deepseek-41f name');
+assert(glmBucketRow, 'rendered 30d keeps the nr-glm-53-flash name');
 assert(deepseekRow.children[6].textContent.includes('2.17B'), '30d DeepSeek token cell is the account total');
-assert(!deepseekRow.children[6].textContent.includes('1.24B'), '30d DeepSeek token cell is not the residual-or-combined figure');
-assert(!deepseekRow.children[6].textContent.includes('436.7M'), '30d DeepSeek token cell does not repeat the agent part');
+assert(!deepseekRow.children[6].textContent.includes('1.24B'), '30d DeepSeek token cell is not the combined residual');
+assert(!deepseekRow.children[6].textContent.includes('436.7M'), '30d DeepSeek token cell does not also show the agent part');
+assert(!/436\.7M[\s\S]*1\.24B|1\.24B[\s\S]*436\.7M/.test(deepseekRow.children[6].textContent), '30d DeepSeek cell is not a residual/combined pair');
 assert(glmRow.children[6].textContent.includes('551.0M'), '30d GLM token cell is the account total');
 assert(!glmRow.children[6].textContent.includes('320.1M'), '30d GLM token cell is not the residual');
-assert(!glmRow.children[6].textContent.includes('15.0M'), '30d GLM token cell does not repeat the agent part');
-assert(!registry.get('models').textContent.includes('932.5M'), '30d DeepSeek bucket tokens are not a second listing');
-assert(!registry.get('models').textContent.includes('230.5M'), '30d GLM bucket tokens are not a second listing');
-assert(!registry.get('models').textContent.includes('nr-deepseek-41f'), '30d matched DeepSeek bucket row is omitted');
-assert(!registry.get('models').textContent.includes('nr-glm-53-flash'), '30d matched GLM bucket row is omitted');
+assert(!glmRow.children[6].textContent.includes('15.0M'), '30d GLM token cell does not also show the agent part');
 const aliasPayload = {
   meta: { omniroute_status: 'ok' },
   source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 140 }] },
