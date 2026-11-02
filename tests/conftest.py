@@ -15,8 +15,11 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolated_environment(tmp_path):
+def isolated_environment(tmp_path, monkeypatch):
     """Restore the process environment and redirect the saved-window database."""
+    import openai_api_usage
+    monkeypatch.setattr(openai_api_usage, "_inference_key", lambda: "")
+    monkeypatch.delenv("OPENAI_BILLING_SESSION_KEY", raising=False)
     before = dict(os.environ)
     os.environ['OPENCLAW_USAGE_CACHE_DIR'] = str(tmp_path / 'openclaw-cache')
     os.environ['AI_USAGE_DASHBOARD_DB'] = str(tmp_path / 'dashboard.sqlite')

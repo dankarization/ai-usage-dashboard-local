@@ -78,3 +78,21 @@ and cached dashboard payload are gitignored.
 - `/api/v1/quotas` — cached provider quotas.
 - `/docs` and `/openapi.json` — API endpoints and field descriptions.
 - [Test and service checks](docs/test.md) — focused verification and private artifacts.
+
+### OpenAI API billing (separate from Codex)
+
+The OpenAI API card checks Platform credit-grant access read-only. It can reuse
+`OPENAI_API_KEY` or the existing OpenClaw `openai-whisper-api` credential without
+changing transcription. Ordinary project keys cannot read this browser-session
+billing endpoint: the card displays the HTTP authorization blocker and unknown
+balances, never a fictional $0 or a hardcoded monthly grant.
+
+An existing Platform billing session key can optionally be supplied privately as
+`OPENAI_BILLING_SESSION_KEY`, with `OPENAI_BILLING_ORG_ID` when needed to select
+the linked organization. Do not commit session credentials or exports. A usage
+admin key is not a substitute for grant identity. Aggregate credits are shown as
+unclassified: they cannot establish a ChatGPT subsidy, purchased balance, paid
+usage, subscription cycle, or token funding split. Those fields remain unknown
+until an authoritative funding-specific source is available. Grant expiry is
+not treated as a recurring reset. Organization billing is deliberately not added
+to token history or overview totals, which already include local agent sessions.

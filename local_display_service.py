@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 from dashboard_page import DASHBOARD_HTML
 
 from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_all_codex_quotas, load_env
+import openai_api_usage
 import grok_usage
 from dashboard_models import (
     AntigravityIngestRequest,
@@ -117,9 +118,9 @@ def token_usage_json() -> dict[str, Any]:
     response_model=QuotasResponse,
     response_model_exclude_unset=True,
     summary="Return current provider quota windows",
-    description="Without source, returns the cached automation view without refreshing. source=codex, grok, or grok_bot fetches only that provider live, independently of the full dashboard refresh.",
+    description="Without source, returns the cached automation view without refreshing. source=codex, grok, grok_bot, or openai_api fetches only that provider live, independently of the full dashboard refresh.",
 )
-def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot'] = 'all') -> dict[str, Any]:
+def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = 'all') -> dict[str, Any]:
     global _cached_payload
     if source == 'all':
         payload = _cached_payload
@@ -131,7 +132,9 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot'] = 'all') -> dict[
             payload = {"meta": {}, "quotas": []}
     else:
         load_env()
-        if source == 'codex':
+        if source == 'openai_api':
+            snapshots = openai_api_usage.export_openai_api_quota()
+        elif source == 'codex':
             snapshots = load_all_codex_quotas()
         else:
             cookie = os.environ.get('GROK_COOKIE', '')
@@ -147,7 +150,7 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot'] = 'all') -> dict[
     for item in payload.get("quotas") or []:
         used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
         quota_items.append({
-            **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis", "product_usage") if k in item},
+            **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis", "product_usage", "billing") if k in item},
             **({'plan_type': item['plan_type']} if item.get('provider') == 'codex' and isinstance(item.get('plan_type'), str) and item['plan_type'] in {'prolite', 'pro', 'pro500', 'plus'} else {}),
             "provider": item.get("provider", "unknown"),
             "label": item.get("label", "unknown"),

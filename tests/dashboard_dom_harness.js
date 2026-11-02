@@ -71,7 +71,7 @@ class Element {
 }
 
 const registry = new Map();
-['hero', 'quotas', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
+['openai-api', 'hero', 'quotas', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
  'period-30', 'period-7', 'period-1', 'overview-note', 'models-note'].forEach((id) => {
   registry.set(id, new Element('div'));
@@ -244,6 +244,20 @@ process.env.TZ = 'America/New_York';
 assertEqual(time('2026-10-09T09:23:00Z'), '09.10.2026 05:23', 'reset instant follows viewer timezone');
 if (originalZone === undefined) delete process.env.TZ;
 else process.env.TZ = originalZone;
+
+/* OpenAI API credit evidence must never masquerade as Codex or gross tokens. */
+renderOpenaiApi([{provider:'openai_api', status:'unavailable', billing:{
+  subsidy_total_usd:null, paid_usage_usd:null, detail:'Platform session required', fetched_at:new Date().toISOString()
+}}]);
+const apiRoot = registry.get('openai-api');
+assert(apiRoot.textContent.includes('Subsidy total: Unknown'), 'missing grants remain unknown');
+assert(apiRoot.textContent.includes('Paid / non-subsidized usage: Unknown'), 'paid spend not inferred');
+assert(apiRoot.textContent.includes('Cycle: Unknown'), 'calendar cycle must not be guessed');
+assert(apiRoot.textContent.includes('Platform session required'), 'auth blocker is visible');
+assert(!all(apiRoot).some((e) => e.getAttribute('role') === 'progressbar'), 'unknown subsidy has no zero bar');
+renderOpenaiApi([{provider:'openai_api', status:'partial', billing:{aggregate_total_usd:100, aggregate_used_usd:0, aggregate_remaining_usd:100}}]);
+assert(apiRoot.textContent.includes('All credits (unclassified): $100.00 total · $0.00 used'), 'real aggregate zero is preserved');
+assert(apiRoot.textContent.includes('Subsidy total: Unknown'), 'aggregate is not subsidy');
 
 /* ---------------- quota rendering ---------------- */
 renderQuotas(QUOTAS, MODELS);
@@ -1577,5 +1591,8 @@ async function waitForReload() {
     assert(registry.get('history').textContent.length > 0, 'token history survives API repricing');
     console.log('OK: server/API/hero/model rows agree on category estimates');
   }
+  pendingFetches.filter((entry) => entry.url === quotaFor('openai_api')).forEach((entry) => reply(entry, quotaResponse(entry.url)));
+  await flush();
+  await flush();
   console.log('OK: independent sources render progressively and preserve period/scale state');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -254,6 +254,11 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="panel flat"><div id="codex"></div></div>
   </section>
 
+  <section aria-labelledby="h-openai-api">
+    <div class="sec-head"><h2 id="h-openai-api" class="quota-title"><span id="openai-api-brand"></span>OpenAI API</h2></div>
+    <div class="panel flat"><div id="openai-api"></div></div>
+  </section>
+
   <section aria-labelledby="h-grok">
     <div class="sec-head"><h2 id="h-grok" class="quota-title"><span id="grok-brand"></span>xAI Grok</h2></div>
     <div class="panel flat"><div id="quotas"></div></div>
@@ -623,7 +628,7 @@ function groupQuotas(rows) {
 /* Quota section order the user asked for: Codex accounts first (account 1,
    then account 2, each showing configured or unconfigured state), then Grok,
    then any remaining providers. NordRouter renders in its own section. */
-var QUOTA_ORDER = ['codex', 'grok'];
+var QUOTA_ORDER = ['codex', 'openai_api', 'grok'];
 function orderGroups(groups) {
   return groups.slice().sort(function (a, b) {
     var ia = QUOTA_ORDER.indexOf(a.provider);
@@ -633,6 +638,38 @@ function orderGroups(groups) {
     if (ia !== ib) return ia - ib;
     return String(a.account || '').localeCompare(String(b.account || ''));
   });
+}
+
+function renderOpenaiApi(rows) {
+  var root = $('openai-api');
+  if (!root) return;
+  root.replaceChildren();
+  var mark = $('openai-api-brand');
+  if (mark) { mark.replaceChildren(); brandMark('codex', mark); }
+  var snapshot = rows[0] || {};
+  var billing = snapshot.billing || {};
+  var card = node('div', undefined, root); card.className = 'limit-group';
+  card.setAttribute('data-provider', 'openai_api');
+  var head = node('div', undefined, card); head.className = 'limit-head';
+  var chip = node('span', statusText(snapshot.status || 'unavailable'), head); chip.className = 'chip ' + statusClass(snapshot.status || 'unavailable');
+  windowRow(card, {provider: 'openai_api', label: 'Subsidy', used_percentage: snapshot.used_percentage});
+  function amount(value) { return number(value) ? '$' + value.toFixed(2) : 'Unknown'; }
+  [ ['Subsidy total', 'subsidy_total_usd'], ['Subsidy used', 'subsidy_used_usd'],
+    ['Subsidy remaining', 'subsidy_remaining_usd'], ['Purchased balance', 'purchased_balance_usd'],
+    ['Paid / non-subsidized usage', 'paid_usage_usd'] ].forEach(function (pair) {
+    node('p', pair[0] + ': ' + amount(billing[pair[1]]), card).className = 'note';
+  });
+  node('p', 'Cycle: ' + (billing.cycle_start ? time(billing.cycle_start) : 'Unknown') + ' — ' +
+    (billing.cycle_end ? time(billing.cycle_end) : 'Unknown') +
+    ' · Expiry: ' + (billing.expires_at ? time(billing.expires_at) : 'Unknown'), card).className = 'note';
+  node('p', 'Token funding split: unknown (not inferred from gross usage).', card).className = 'note';
+  if (number(billing.aggregate_total_usd)) {
+    node('p', 'All credits (unclassified): ' + amount(billing.aggregate_total_usd) + ' total · ' +
+      amount(billing.aggregate_used_usd) + ' used · ' + amount(billing.aggregate_remaining_usd) + ' remaining', card).className = 'note';
+  }
+  node('p', billing.detail || 'Awaiting OpenAI Platform billing evidence.', card).className = 'unavailable';
+  if (billing.fetched_at) node('p', 'Checked ' + time(billing.fetched_at), card).className = 'note';
+  node('p', 'Separate from Codex login. Organization billing is not added to local usage history.', card).className = 'note';
 }
 
 function renderQuotas(data, models, pending) {
@@ -654,7 +691,9 @@ function renderQuotas(data, models, pending) {
     node('p', pending && pending.codex ? 'Loading Codex quota…' : 'No Codex snapshot available.', codexRoot).className = 'empty';
   }
 
-  var others = rows.filter(function (row) { return row.provider !== 'nordrouter' && row.provider !== 'codex'; });
+  renderOpenaiApi(rows.filter(function (row) { return row.provider === 'openai_api'; }));
+
+  var others = rows.filter(function (row) { return row.provider !== 'nordrouter' && row.provider !== 'codex' && row.provider !== 'openai_api'; });
   if (!others.length) {
     node('p', pending && (pending.grok || pending.grok_bot) ? 'Loading provider quotas…' :
       'No Grok or other quota snapshots available.', root).className = 'empty';
@@ -1620,20 +1659,20 @@ function renderAvailable(state) {
 function mergeQuotaParts(state) {
   var cached = state.quotaParts.all || { quotas: [] };
   var rows = (cached.quotas || []).slice();
-  ['codex', 'grok', 'grok_bot'].forEach(function (source) {
+  ['codex', 'grok', 'grok_bot', 'openai_api'].forEach(function (source) {
     var part = state.quotaParts[source];
     if (!part) return;
     rows = rows.filter(function (row) { return row.provider !== source; }).concat(part.quotas || []);
   });
-  var latest = state.quotaParts.all || state.quotaParts.codex || state.quotaParts.grok || state.quotaParts.grok_bot;
+  var latest = state.quotaParts.all || state.quotaParts.codex || state.quotaParts.grok || state.quotaParts.grok_bot || state.quotaParts.openai_api;
   state.quotas = Object.assign({}, latest || {}, { quotas: rows });
 }
 function loadSources(version, state, requested) {
-  requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'nordrouter', 'openclaw', 'hermes', 'omniroute'];
+  requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'openai_api', 'nordrouter', 'openclaw', 'hermes', 'omniroute'];
   requested.forEach(function (source) {
     var ticket = state.requests[source] = (state.requests[source] || 0) + 1;
     function current() { return version === loadVersion && ticket === state.requests[source]; }
-    if (source === 'quotas' || source === 'codex' || source === 'grok' || source === 'grok_bot') {
+    if (source === 'quotas' || source === 'codex' || source === 'grok' || source === 'grok_bot' || source === 'openai_api') {
       var quotaSource = source === 'quotas' ? 'all' : source;
       state.quotaPending[quotaSource] = true;
       json('/api/v1/quotas' + (source === 'quotas' ? '' : '?source=' + source)).then(function (quotas) {

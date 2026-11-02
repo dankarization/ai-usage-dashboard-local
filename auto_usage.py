@@ -30,6 +30,7 @@ import requests
 
 import antigravity_usage as _antigravity_usage
 import dsh_usage as _dsh_usage
+import openai_api_usage as _openai_api_usage
 import grok_usage as _grok_usage
 import hermes_usage as _hermes_usage
 import nordrouter_usage as _nordrouter_usage
@@ -2514,7 +2515,7 @@ def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, ski
             grok_bot_quota = cast(list[QuotaSnapshot], _grok_usage.export_grok_bot_quota(grok_cookie))
         except Exception as e:
             print(f"Failed to fetch Grok Bot quota: {type(e).__name__}")
-    quotas = glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + grok_bot_quota + cursor_quota
+    quotas = cast(list[QuotaSnapshot], _openai_api_usage.export_openai_api_quota()) + glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + grok_bot_quota + cursor_quota
     if nordrouter:
         quotas.append(_nordrouter_usage.quota(nordrouter))
 

@@ -86,6 +86,7 @@ class GlmQuotaSnapshot(BaseModel):
 
 
 class AccountMetrics(BaseModel):
+    billing: Optional[dict] = Field(default=None, description="OpenAI API billing evidence; null funding/cycle fields mean unknown, never zero. Aggregate credits are not a subsidy allocation.")
     account: Optional[str] = Field(default=None, description='Stable Codex profile identity: codex_1 or codex_2.')
     account_label: Optional[str] = Field(default=None, description='Display name of the local Codex profile, when available.')
     plan_type: Optional[Literal['prolite', 'pro', 'pro500', 'plus']] = Field(default=None, description='Explicit Codex plan_type from the existing ChatGPT wham/usage response; unknown or historical fallback plans are omitted. Generic pro does not imply pro500.')
