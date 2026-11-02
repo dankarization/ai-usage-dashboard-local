@@ -1034,6 +1034,7 @@ function drawHistory(root, byDate, categories, title, account) {
   var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img',
     'aria-label': balanced ? 'Daily model usage; fourth-root visual weighting per model, not a token axis' :
       'Daily token usage stacked by model; linear token axis' }, root);
+  if (account) svg.style.height = height + 'px';
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
     svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);

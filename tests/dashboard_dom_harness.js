@@ -541,6 +541,8 @@ assert(!segments.some((e) => segmentLabel(e).includes('nr-route')), 'account is 
 assert(segments.every((e) => segmentLabel(e).includes('day total 16')), 'agent history and account history are not stacked');
 assert(all(registry.get('account-history')).some((e) => e.tagName === 'RECT' &&
   segmentLabel(e).includes('all models; no daily model split) · 20 tokens')), 'account keeps its own measured total');
+assertEqual(all(registry.get('account-history')).find((e) => e.tagName === 'SVG').style.height, '160px',
+  'the account chart does not stretch its text through the main-chart CSS height');
 assertEqual(all(chart).filter((e) => e.tagName === 'TEXT' && e.textContent === '03.10.2026').at(-1).getAttribute('text-anchor'),
   'end', 'last date label stays inside the chart');
 let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
