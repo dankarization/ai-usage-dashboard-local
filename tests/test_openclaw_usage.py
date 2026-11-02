@@ -326,12 +326,17 @@ def test_unrecognized_response_shapes_fall_back_instead_of_raising(cache):
         assert result['status'] == 'cached', bad
         assert result['error']
 
-    # Rows that cannot be projected are dropped, never invented, and the read
-    # stays a successful (empty) window rather than becoming an event.
-    empty = openclaw_usage.load_with_cache(
+    # Malformed rows cannot erase the successful saved window.
+    before = saved_window()
+    malformed = openclaw_usage.load_with_cache(
         7, START, END, fetch=lambda *_: {'aggregates': {'byModel': ['nope'], 'modelDaily': 'x'}})
-    assert empty['status'] == 'ok'
-    assert empty['response'] == {'aggregates': {'byModel': [], 'modelDaily': []}}
+    assert malformed['status'] == 'cached'
+    assert malformed['response'] == before['data']
+    assert saved_window() == before
+    empty = openclaw_usage.load_with_cache(
+        7, START, END, fetch=lambda *_: {'aggregates': {'byModel': [], 'modelDaily': []}})
+    assert empty['status'] == 'ok'  # explicit, valid zero remains distinguishable
+    assert empty['response']['aggregates']['byModel'] == []
 
 
 def test_repeated_failures_never_promote_or_rewrite_the_saved_window(cache):
@@ -879,3 +884,17 @@ def test_a_failed_read_stores_nothing(cache):
     finally:
         monkeypatch.undo()
         openclaw_usage.release_cli_cache()
+
+
+@pytest.mark.parametrize('status', ['partial', 'stale', 'refreshing'])
+def test_partial_gateway_snapshot_never_completes_overview(cache, monkeypatch, status):
+    monkeypatch.setattr('auto_usage.get_date_range', lambda days: (START, END, None, None))
+    monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda: [])
+    monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {
+        **live_read(START, END), 'cacheStatus': {'status': status}})
+    result = build_model_breakdown(7, source='openclaw')
+    assert result['meta']['openclaw_status'] == status
+    assert result['sources']['openclaw']['complete'] is False
+    assert result['sources']['openclaw']['tokens'] == 10
+    assert result['totals']['total'] is None

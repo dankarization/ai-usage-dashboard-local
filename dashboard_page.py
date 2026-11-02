@@ -279,6 +279,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button></div>
     <div class="panel">
       <div id="history" class="chart-wrap"></div>
+      <div id="account-history" class="chart-wrap"></div>
       <div class="history-table">
         <p id="model-stamp" class="note"></p>
         <div class="scroll">
@@ -646,45 +647,46 @@ function renderOpenaiApi(rows) {
   root.replaceChildren();
   var mark = $('openai-api-brand');
   if (mark) { mark.replaceChildren(); brandMark('codex', mark); }
-  var snapshot = rows[0] || {};
-  var billing = snapshot.billing || {};
-  if (billing.organization_name) node('p', 'Organization: ' + billing.organization_name, root).className = 'note';
-  if (billing.link_checked_at) node('p', 'ChatGPT link verified: ' + (billing.linked_account_name || 'linked account') +
-    ' · ' + time(billing.link_checked_at) + ' (saved verification)', root).className = 'note';
+  var snapshot = rows[0] || {}, billing = snapshot.billing || {};
   var card = node('div', undefined, root); card.className = 'limit-group';
   card.setAttribute('data-provider', 'openai_api');
-  var head = node('div', undefined, card); head.className = 'limit-head';
-  var chip = node('span', statusText(snapshot.status || 'unavailable'), head); chip.className = 'chip ' + statusClass(snapshot.status || 'unavailable');
-  windowRow(card, {provider: 'openai_api', label: snapshot.label || 'Subsidy', used_percentage: snapshot.used_percentage});
-  function amount(value) { return number(value) ? '$' + value.toFixed(value > 0 && value < 0.01 ? 6 : 2) : 'Unknown'; }
+  function amount(value) { return number(value) ? '$' + value.toFixed(value > 0 && value < 0.01 ? 6 : 2) : '—'; }
+  var available = number(billing.aggregate_remaining_usd);
+  if (available) {
+    windowRow(card, {provider: 'openai_api', label: 'All API credits', used_percentage: snapshot.used_percentage});
+    node('p', amount(billing.aggregate_remaining_usd) + ' remaining · ' +
+      amount(billing.aggregate_used_usd) + ' used of ' + amount(billing.aggregate_total_usd) + ' granted', card).className = 'note';
+    var balances = [];
+    if (number(billing.purchased_balance_usd)) balances.push('Purchased: ' + amount(billing.purchased_balance_usd));
+    if (number(billing.unclassified_free_remaining_usd)) balances.push('Other credits: ' + amount(billing.unclassified_free_remaining_usd));
+    if (balances.length) node('p', balances.join(' · '), card).className = 'note';
+    node('p', 'Balances are in dollars; this source does not split tokens by funding.', card).className = 'note';
+  } else {
+    node('p', billing.detail || 'OpenAI Platform billing unavailable.', card).className = 'unavailable';
+  }
+  var detail = node('details', undefined, card);
+  node('summary', 'Billing details', detail);
+  if (billing.organization_name) node('p', 'Organization: ' + billing.organization_name, detail).className = 'note';
+  if (billing.link_checked_at) node('p', 'ChatGPT link verified: ' + (billing.linked_account_name || 'linked account') +
+    ' · ' + time(billing.link_checked_at) + ' (saved verification)', detail).className = 'note';
   if (number(billing.benefit_period_amount_usd)) {
-    node('p', 'Subscription entitlement: ' + amount(billing.benefit_period_amount_usd) + ' / ' +
-      (billing.benefit_cadence || 'Unknown cadence') + ' (not the initial grant amount)', card).className = 'note';
+    node('p', 'Subscription entitlement: ' + amount(billing.benefit_period_amount_usd) +
+      (billing.benefit_cadence ? ' / ' + billing.benefit_cadence : '') + ' (not the initial grant amount)', detail).className = 'note';
     node('p', 'Benefit expiry: ' + time(billing.benefit_expires_at) +
       ' · Verified ' + time(billing.benefit_checked_at) + ' (saved snapshot' +
-      (billing.benefit_snapshot_expired ? ', expired)' : ')'), card).className = 'note';
+      (billing.benefit_snapshot_expired ? ', expired)' : ')'), detail).className = 'note';
   }
-  [ ['Subsidy total', 'subsidy_total_usd'], ['Subsidy used', 'subsidy_used_usd'],
-    ['Subsidy remaining', 'subsidy_remaining_usd'], ['Purchased balance', 'purchased_balance_usd'],
-    ['Non-purchased credits (unclassified)', 'unclassified_free_remaining_usd'],
-    ['Paid / non-subsidized usage', 'paid_usage_usd'] ].forEach(function (pair) {
-    node('p', pair[0] + ': ' + amount(billing[pair[1]]), card).className = 'note';
-  });
-  node('p', 'Cycle: ' + (billing.cycle_start ? time(billing.cycle_start) : 'Unknown') + ' — ' +
-    (billing.cycle_end ? time(billing.cycle_end) : 'Unknown') +
-    ' · Expiry: ' + (billing.expires_at ? time(billing.expires_at) : 'Unknown'), card).className = 'note';
-  node('p', 'Token funding split: unknown (not inferred from gross usage).', card).className = 'note';
-  if (number(billing.aggregate_total_usd)) {
-    node('p', 'All credits (unclassified): ' + amount(billing.aggregate_total_usd) + ' total · ' +
-      amount(billing.aggregate_used_usd) + ' used · ' + amount(billing.aggregate_remaining_usd) + ' remaining', card).className = 'note';
-  }
+  if (billing.cycle_start && billing.cycle_end)
+    node('p', 'Cycle: ' + time(billing.cycle_start) + ' — ' + time(billing.cycle_end), detail).className = 'note';
   (billing.grants || []).filter(function (g) { return g.remaining_usd > 0 && !g.scheduled; }).forEach(function (g) {
     node('p', 'Grant (funding unclassified): ' + amount(g.remaining_usd) + ' / ' + amount(g.total_usd) +
-      ' · Used ' + amount(g.used_usd) + ' · Received ' + time(g.effective_at) + ' · Expires ' + (g.expires_at ? time(g.expires_at) : 'Unknown'), card).className = 'note';
+      ' · Used ' + amount(g.used_usd) + ' · Received ' + time(g.effective_at) +
+      (g.expires_at ? ' · Expires ' + time(g.expires_at) : ''), detail).className = 'note';
   });
-  node('p', billing.detail || 'Awaiting OpenAI Platform billing evidence.', card).className = 'unavailable';
-  if (billing.fetched_at) node('p', 'Checked ' + time(billing.fetched_at), card).className = 'note';
-  node('p', 'Separate from Codex login. Organization billing is not added to local usage history.', card).className = 'note';
+  if (available && billing.detail) node('p', billing.detail, detail).className = 'note';
+  node('p', 'All-grant totals are not current-cycle spending. A grant or dollar balance does not identify which requests used purchased versus subsidized funds.', detail).className = 'note';
+  if (billing.fetched_at) node('p', 'Checked ' + time(billing.fetched_at), detail).className = 'note';
+  node('p', 'Separate from Codex login. Not added to local token history.', detail).className = 'note';
 }
 
 function renderQuotas(data, models, pending) {
@@ -779,9 +781,10 @@ function renderHero(payload) {
   var unpriced = agents.reduce(function (sum, source) { return sum + (source.unpriced_models || 0); }, 0);
   var root = $('hero');
   root.replaceChildren();
-  var full = direct.complete && gateway.complete && hermes.complete;
+  var overlapUnknown = [gateway, hermes].some(function (source) { return (source.bucket_comparison_tokens || 0) > 0; });
+  var full = direct.complete && gateway.complete && hermes.complete && !overlapUnknown;
   stripItem(root, 'Total tokens', full ? tokens(payload.totals.total) : '—',
-    full ? null : 'incomplete source · total unavailable', !full);
+    full ? null : overlapUnknown ? 'router overlap · combined total unavailable' : 'incomplete source · total unavailable', !full);
   stripItem(root, 'NordRouter billed cost', usd(direct.billed_cost_usd),
     null, !number(direct.billed_cost_usd));
   stripItem(root, 'Estimated cost', usd(agentCost),
@@ -800,8 +803,7 @@ function renderHero(payload) {
 }
 
 /* ---------- history chart ---------- */
-// Agent rollups share the model stack; NordRouter-route rows from either agent
-// are proxy weights for the direct account buckets, never their own series.
+// Agent rollups and account invoices have independent, non-additive charts.
 var AGENT_SOURCES = { openclaw: true, hermes: true };
 var lastHistoryData = null;
 var historyScale = 'linear';
@@ -903,7 +905,6 @@ function nordrouterOverlap(models, routerStatus, nrDaily) {
   var proven = {};
   var matchedBuckets = {};
   var unknown = [];
-  var movable = [];
   routerRows.forEach(function (row) {
     (row.bucket_usage.routes || []).forEach(function (route) {
       var tokens = windowTokens(route);
@@ -916,10 +917,7 @@ function nordrouterOverlap(models, routerStatus, nrDaily) {
         }
         proven[match] = (proven[match] || 0) + tokens;
         (matchedBuckets[match] = matchedBuckets[match] || {})[row.model] = true;
-        movable.push({ route: route, key: String(row.model_key || row.model), label: row.model, kind: 'matched' });
-      } else if (route.nordrouter === false) {
-        movable.push({ route: route, key: String(row.model_key || row.model), label: row.model, kind: 'other' });
-      } else {
+      } else if (route.nordrouter !== false) {
         unknown.push({ bucket: row.model, model: route.model, tokens: tokens, reason: 'no_route_map' });
       }
     });
@@ -950,135 +948,68 @@ function nordrouterOverlap(models, routerStatus, nrDaily) {
       overlap_unreconciled_tokens: Math.max(0, matched - account), overlap_unknown_tokens: unknownTokens
     });
   });
-  var daysReady = hasRouter && movable.length > 0 && movable.every(function (item) {
-    var days = item.route.daily || [];
-    if (!days.length) return false;
-    if (nrDates) return true;
-    return days.reduce(function (sum, day) {
-      var n = day.totals && number(day.totals.total) && day.totals.total > 0 ? day.totals.total : 0;
-      return sum + n;
-    }, 0) === routeTokens(item.route);
-  });
-  var daily = null;
-  if (daysReady) {
-    var matchedByDate = new Map();
-    movable.forEach(function (item) {
-      if (item.kind !== 'matched') return;
-      (item.route.daily || []).forEach(function (day) {
-        var n = day.totals && number(day.totals.total) ? day.totals.total : 0;
-        if (n > 0) matchedByDate.set(day.date, (matchedByDate.get(day.date) || 0) + n);
-      });
-    });
-    daily = [];
-    daysReady = true;
-  }
   return { annotations: annotations, hasRouter: hasRouter, retentionLimited: retentionLimited,
-    unknown: unknown, proven: proven, matchedBuckets: matchedBuckets, movable: movable,
-    daysReady: daysReady, matchedByDate: daysReady ? matchedByDate : null };
+    unknown: unknown, proven: proven, matchedBuckets: matchedBuckets };
+
+}
+// Account-day totals have no model split; agent shares cannot allocate an
+// invoice, and router-wide attempts cannot replace a measured agent bucket.
+function historySeries(payload) {
+  var byDate = new Map(), categories = new Map();
+  var meta = payload.meta || {};
+  tableModels(payload).forEach(function (model) {
+    if (model.source === 'nordrouter' || String(model.provider).toLowerCase() === 'nordrouter' ||
+        model.token_scope === 'router-wide') return;
+    var key = rowKey(model);
+    categories.set(key, { key: key, label: model.model, total: 0 });
+    (model.daily || []).forEach(function (day) {
+      if (!number(day.total) || day.total < 0 ||
+          (meta.start_date && day.date < meta.start_date) ||
+          (meta.end_date && day.date > meta.end_date)) return;
+      if (!byDate.has(day.date)) byDate.set(day.date, new Map());
+      var buckets = byDate.get(day.date);
+      buckets.set(key, (buckets.get(key) || 0) + day.total);
+      if (day.total > 0) chartedModelRows.add(key);
+    });
+  });
+  return { byDate: byDate, categories: categories };
 }
 function renderHistory(payload) {
   lastHistoryData = payload;
   chartedModelRows = new Set();
-  var root = $('history');
   if (activeHistoryTooltip) activeHistoryTooltip.hide();
-  root.replaceChildren();
-  var byDate = new Map();
-  var categories = new Map();
-  var nordByDate = new Map();
-  var overlap = nordrouterOverlap(payload.models, (payload.meta || {}).omniroute_status, (payload.source_daily || {}).nordrouter);
-  var partitionDays = overlap.daysReady;
-  (payload.models || []).forEach(function (model) {
-    if (!AGENT_SOURCES[model.source]) return;
-    // A retained router observation replaces agent bucket comparison in the
-    // additive stack. Without day-complete routes, keep the agent series so
-    // those tokens are not dropped.
-    if (partitionDays && model.bucket_comparison) return;
-    var nord = String(model.provider).toLowerCase() === 'nordrouter';
-    var key = String(model.model_key || model.model || 'unknown');
-    if (!categories.has(key)) categories.set(key, { key: key, label: key, total: 0 });
-    (model.daily || []).forEach(function (day) {
-      if (!number(day.total) || day.total < 0) return;
-      var dates = nord ? nordByDate : byDate;
-      if (!dates.has(day.date)) dates.set(day.date, new Map());
-      var buckets = dates.get(day.date);
-      buckets.set(key, (buckets.get(key) || 0) + day.total);
+  var history = historySeries(payload);
+  drawHistory($('history'), history.byDate, history.categories,
+    'Agent-reported model tokens · UTC days', false);
+  var account = $('account-history');
+  if (account) {
+    var dates = new Map(), categories = new Map();
+    var key = 'direct-nordrouter-unattributed';
+    categories.set(key, { key: key, label: 'NordRouter (all models; no daily model split)', total: 0 });
+    ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
+      var meta = payload.meta || {};
+      if (!number(day.tokens) || day.tokens < 0 ||
+          (meta.start_date && day.date < meta.start_date) ||
+          (meta.end_date && day.date > meta.end_date)) return;
+      dates.set(day.date, new Map([[key, day.tokens]]));
     });
-  });
-  var directByDate = new Map();
-  var nordAttributedByDate = new Map();
-  ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
-    if (!number(day.tokens) || day.tokens < 0) return;
-    var tokens = day.tokens;
-    if (partitionDays) {
-      var matched = overlap.matchedByDate.get(day.date) || 0;
-      tokens = day.tokens - Math.min(day.tokens, matched);
-    }
-    directByDate.set(day.date, (directByDate.get(day.date) || 0) + tokens);
-  });
-  var unattributedKey = 'direct-nordrouter-unattributed';
-  directByDate.forEach(function (direct, date) {
-    var proxy = nordByDate.get(date);
-    if (!byDate.has(date)) byDate.set(date, new Map());
-    var buckets = byDate.get(date);
-    var proxyTotal = proxy ? Array.from(proxy.values()).reduce(function (sum, value) { return sum + value; }, 0) : 0;
-    if (!proxyTotal) {
-      if (direct > 0) {
-        buckets.set(unattributedKey, direct);
-        categories.set(unattributedKey, { key: unattributedKey, label: 'NordRouter (model attribution unavailable)', nord: true });
-      }
-      return;
-    }
-    var allocations = Array.from(proxy, function (entry) {
-      var exact = direct * (entry[1] / proxyTotal);
-      return { key: entry[0], amount: Math.floor(exact), fraction: exact - Math.floor(exact) };
-    });
-    var remainder = direct - allocations.reduce(function (sum, item) { return sum + item.amount; }, 0);
-    allocations.sort(function (a, b) { return b.fraction - a.fraction || a.key.localeCompare(b.key); });
-    for (var i = 0; i < remainder; i++) allocations[i].amount++;
-    allocations.forEach(function (item) {
-      buckets.set(item.key, (buckets.get(item.key) || 0) + item.amount);
-      if (item.amount > 0) {
-        if (!nordAttributedByDate.has(date)) nordAttributedByDate.set(date, new Set());
-        nordAttributedByDate.get(date).add(item.key);
-      }
-    });
-  });
-  if (partitionDays) {
-    var accountDates = {};
-    ((payload.source_daily || {}).nordrouter || []).forEach(function (day) { accountDates[day.date] = true; });
-    overlap.movable.forEach(function (item) {
-      (item.route.daily || []).forEach(function (day) {
-        if (Object.keys(accountDates).length && !accountDates[day.date]) return;
-        var amount = day.totals && number(day.totals.total) ? day.totals.total : 0;
-        if (amount <= 0) return;
-        if (!byDate.has(day.date)) byDate.set(day.date, new Map());
-        byDate.get(day.date).set(item.key, (byDate.get(day.date).get(item.key) || 0) + amount);
-        if (!categories.has(item.key)) categories.set(item.key, { key: item.key, label: item.label, total: 0 });
-        chartedModelRows.add(item.key);
-      });
-    });
+    drawHistory(account, dates, categories, 'NordRouter account · UTC days', true);
+    node('p', 'Account totals include router traffic. These charts are separate views, not values to add together. No account-day model allocation is available.', account).className = 'chart-note';
   }
-  (payload.models || []).forEach(function (model) {
-    if (!AGENT_SOURCES[model.source]) return;
-    var nord = String(model.provider).toLowerCase() === 'nordrouter';
-    var key = String(model.model_key || model.model || 'unknown');
-    if ((model.daily || []).some(function (day) {
-      return number(day.total) && day.total > 0 && (!nord ||
-        (nordAttributedByDate.get(day.date) || new Set()).has(key));
-    })) chartedModelRows.add(key);
-  });
+}
+function drawHistory(root, byDate, categories, title, account) {
+  root.replaceChildren();
+  node('p', title, root).className = 'note';
+  var unattributedKey = 'direct-nordrouter-unattributed';
   byDate.forEach(function (buckets) {
-    buckets.forEach(function (amount, key) {
-      categories.get(key).total = (categories.get(key).total || 0) + amount;
-    });
+    buckets.forEach(function (amount, key) { categories.get(key).total += amount; });
   });
   var series = Array.from(byDate, function (item) {
     return { date: item[0], buckets: item[1], total_tokens: Array.from(item[1].values()).reduce(function (sum, value) { return sum + value; }, 0) };
-  })
-    .sort(function (a, b) { return a.date.localeCompare(b.date); });
+  }).sort(function (a, b) { return a.date.localeCompare(b.date); });
   var peak = series.reduce(function (max, day) { return Math.max(max, day.total_tokens); }, 0);
   if (!series.length || peak <= 0) {
-    node('p', 'No historical usage data available.', root).className = 'empty';
+    node('p', series.length ? 'No reported usage in this snapshot.' : 'No historical usage data available.', root).className = 'empty';
     return;
   }
   var modelCategories = Array.from(categories.values()).filter(function (category) { return category.key !== unattributedKey && category.total > 0; })
@@ -1090,7 +1021,7 @@ function renderHistory(payload) {
   if (unattributed && unattributed.total > 0) unattributed.color = '#8491a3';
   var stackOrder = unattributed && unattributed.total > 0 ? [unattributed].concat(modelCategories) : modelCategories;
   var width = Math.max(320, root.clientWidth || 900);
-  var height = root.clientWidth && root.clientWidth <= 640 ? 260 : 300;
+  var height = account ? 160 : root.clientWidth && root.clientWidth <= 640 ? 260 : 300;
   var padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
   var balanced = historyScale === 'balanced';
@@ -1193,16 +1124,7 @@ function renderHistory(payload) {
     }
   });
   node('div', (balanced ? 'visual weight relative to tallest day · raw token peak ' : 'daily tokens · peak ') + tokens(peak), root).className = 'chart-summary';
-  if (partitionDays && overlap.retentionLimited)
-    node('div', 'partial retention; residual may include older bucket traffic', root).className = 'chart-note';
-  else if (partitionDays && overlap.unknown.some(function (item) { return item.reason === 'unmatched'; }))
-    node('div', 'unmatched NordRouter serving ' + tokens(overlap.unknown.reduce(function (sum, item) {
-      return item.reason === 'unmatched' ? sum + item.tokens : sum;
-    }, 0)) + ' not deducted', root).className = 'chart-note';
-  else if (overlap.hasRouter && !partitionDays && Object.keys(overlap.proven).length)
-    node('div', 'serving days unavailable; account daily not reduced', root).className = 'chart-note';
-  else if (!overlap.hasRouter && (payload.meta || {}).omniroute_status === 'unavailable')
-    node('div', 'bucket overlap unavailable; account daily not reduced', root).className = 'chart-note';
+
 }
 
 /* ---------- model table ---------- */
@@ -1259,8 +1181,15 @@ function tableModels(data) {
   var groups = new Map();
   var overlap = nordrouterOverlap(data.models, (data.meta || {}).omniroute_status, (data.source_daily || {}).nordrouter);
   var accountRows = (data.models || []).filter(function (row) { return row.source === 'nordrouter'; });
+  var accountFamilies = new Set((data.models || []).filter(function (row) {
+    return row.source === 'nordrouter' || (AGENT_SOURCES[row.source] && String(row.provider).toLowerCase() === 'nordrouter');
+  }).map(rowKey));
   (data.models || []).forEach(function (row) {
     var key = rowKey(row);
+    // A model name is not a billing-route identity. Independent provider rows
+    // cannot become crossed-out account comparisons just because names match.
+    if (AGENT_SOURCES[row.source] && String(row.provider).toLowerCase() !== 'nordrouter' && accountFamilies.has(key))
+      key = 'agent/' + key;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   });
@@ -1385,12 +1314,13 @@ function renderModels(data) {
   var meta = data.meta || {};
   $('model-stamp').textContent = 'snapshot ' +
     (meta.generated_at_utc ? time(meta.generated_at_utc) : serverTime(meta.generated_at) + ' (server time)') +
-    (meta.start_date && meta.end_date ? ' · ' + dateOnly(meta.start_date) + ' → ' + dateOnly(meta.end_date) : '') +
+    (meta.start_date && meta.end_date ? ' · ' + dateOnly(meta.start_date) + ' → ' + dateOnly(meta.end_date) + ' · UTC days' : '') +
     ' · OpenClaw ' + (meta.openclaw_status || 'unknown') +
     (meta.openclaw_status === 'cached' && meta.openclaw_cached_at_utc
       ? ' (saved ' + time(meta.openclaw_cached_at_utc) + ')' : '') +
     ' · Hermes ' + (meta.hermes_status || 'unknown') +
     ' · NordRouter ' + (meta.nordrouter_status || 'unknown') +
+    (meta.nordrouter_fetched_at_utc ? ' (fetched ' + time(meta.nordrouter_fetched_at_utc) + ')' : '') +
     ' · OmniRoute ' + (meta.omniroute_status || 'not_configured');
   var body = $('models');
   body.replaceChildren();
@@ -1614,11 +1544,14 @@ function renderPeriod(models, quotas) {
 }
 function partialModels(state) {
   var openclaw = state.parts.openclaw, nordrouter = state.parts.nordrouter, hermes = state.parts.hermes, router = state.parts.omniroute;
-  var openSource = openclaw && openclaw.sources && openclaw.sources.openclaw || { complete: false };
-  var hermesSource = hermes && hermes.sources && hermes.sources.hermes || { complete: false };
-  var directSource = nordrouter && nordrouter.sources && nordrouter.sources.nordrouter || { complete: false };
+  var openSource = Object.assign({}, openclaw && openclaw.sources && openclaw.sources.openclaw || { complete: false });
+  var hermesSource = Object.assign({}, hermes && hermes.sources && hermes.sources.hermes || { complete: false });
+  var directSource = Object.assign({}, nordrouter && nordrouter.sources && nordrouter.sources.nordrouter || { complete: false });
+  if ((state.errors || {}).openclaw) openSource.complete = false;
+  if ((state.errors || {}).hermes) hermesSource.complete = false;
+  if ((state.errors || {}).nordrouter) directSource.complete = false;
   var agents = [openSource, hermesSource];
-  var agentsComplete = agents.every(function (source) { return source.complete; });
+  var agentsComplete = agents.every(function (source) { return source.complete && !source.bucket_comparison_tokens; });
   var merged = (openclaw ? openclaw.models : []).concat(hermes ? hermes.models : [])
     .concat(nordrouter ? nordrouter.models : []).concat(router ? router.models : []);
   return {
@@ -1629,6 +1562,7 @@ function partialModels(state) {
       openclaw_error: openclaw ? openclaw.meta.openclaw_error : null,
       hermes_status: hermes ? hermes.meta.hermes_status : 'loading',
       nordrouter_status: nordrouter ? nordrouter.meta.nordrouter_status : 'loading',
+      nordrouter_fetched_at_utc: nordrouter ? nordrouter.meta.nordrouter_fetched_at_utc : null,
       omniroute_status: router ? router.meta.omniroute_status : 'loading',
     }),
     totals: { total: agentsComplete && directSource.complete
@@ -1658,10 +1592,11 @@ function savedOpenClawNotice(state) {
 }
 function renderAvailable(state) {
   var models = partialModels(state);
-  if (state.parts.openclaw || state.parts.nordrouter || state.parts.hermes || state.parts.omniroute) {
+  if (state.modelsDirty !== false) {
     renderHero(models);
     renderHistory(models);
     renderModels(models);
+    state.modelsDirty = false;
   }
   if (state.quotas) renderQuotas(state.quotas, models, state.quotaPending);
   var messages = Object.keys(state.errors).map(function (source) {
@@ -1682,7 +1617,7 @@ function mergeQuotaParts(state) {
   var latest = state.quotaParts.all || state.quotaParts.codex || state.quotaParts.grok || state.quotaParts.grok_bot || state.quotaParts.openai_api;
   state.quotas = Object.assign({}, latest || {}, { quotas: rows });
 }
-function loadSources(version, state, requested) {
+function loadSources(version, state, requested, fresh) {
   requested = requested || ['quotas', 'codex', 'grok', 'grok_bot', 'openai_api', 'nordrouter', 'openclaw', 'hermes', 'omniroute'];
   requested.forEach(function (source) {
     var ticket = state.requests[source] = (state.requests[source] || 0) + 1;
@@ -1705,7 +1640,7 @@ function loadSources(version, state, requested) {
       });
       return;
     }
-    json('/api/v1/model-breakdown?days=' + state.days + '&daily=true&source=' + source)
+    json('/api/v1/model-breakdown?days=' + state.days + '&daily=true&source=' + source + (fresh ? '&refresh=true' : ''))
       .then(function (models) {
         if (!current()) return;
         if (models.meta.days !== state.days) throw new Error('period mismatch');
@@ -1722,11 +1657,13 @@ function loadSources(version, state, requested) {
               previous.meta.end_date !== models.meta.end_date)) delete state.parts[other];
         });
         state.parts[source] = models;
+        state.modelsDirty = true;
         delete state.errors[source];
         renderAvailable(state);
       }).catch(function (error) {
         if (!current()) return;
         state.errors[source] = error.message;
+        state.modelsDirty = true;
         renderAvailable(state);
       });
   });
@@ -1746,14 +1683,16 @@ function reload(force, nextDays) {
   if (busy) button.classList.add('busy'); else button.classList.remove('busy');
   setPeriodButtons();
   $('error').textContent = '';
-  loadSources(version, state);
+  state.modelsDirty = true;
+  renderAvailable(state);
+  loadSources(version, state, null, force);
   if (nextDays) return;
   json('/api/v1/display/update', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason: force ? 'force_button' : 'auto_refresh', view: days + 'd', device_id: 'web_dashboard' }),
   }).then(function () {
-    if (version === loadVersion) loadSources(version, state, ['quotas', 'nordrouter']);
+    if (version === loadVersion) loadSources(version, state, ['quotas']);
   }).catch(function (error) {
     if (version !== loadVersion) return;
     state.errors.refresh = error.message;

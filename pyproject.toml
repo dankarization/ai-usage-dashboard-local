@@ -33,6 +33,7 @@ py-modules = [
     "dashboard_models",
     "dashboard_page",
     "local_display_service",
+    "source_cache",
     "grok_usage",
     "opencode_token_analyzer",
     "pricing_config",

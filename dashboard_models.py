@@ -231,7 +231,7 @@ class ModelBreakdownTotals(BaseModel):
     output: int = Field(default=0, description='Total output tokens across all models that provide per-category breakdown.')
     cache_read: int = Field(default=0, description='Total cache-read tokens across all models that provide per-category breakdown.')
     cache_write: int = Field(default=0, description='Total cache-write tokens across all models that provide per-category breakdown.')
-    total: Optional[int] = Field(default=None, description='Canonical OpenClaw non-NordRouter plus direct NordRouter daily tokens; null if a source is unavailable.')
+    total: Optional[int] = Field(default=None, description='Non-overlapping agent plus direct account tokens; null for unavailable/partial sources or unresolved agent-router/account overlap.')
     input_output_ratio: Optional[float] = Field(default=None, description='Input divided by output (non-cached input / output). None when output is zero.')
     cache_hit_rate: Optional[float] = Field(default=None, description='Cache-read tokens divided by (input + cache_read). None when the denominator is zero.')
 
@@ -244,10 +244,12 @@ class ModelBreakdownMeta(BaseModel):
     start_date: Optional[str] = Field(default=None, description='Inclusive start date, YYYY-MM-DD.')
     end_date: Optional[str] = Field(default=None, description='Inclusive end date, YYYY-MM-DD.')
     days: Optional[int] = Field(default=None, description='Number of days covered, inclusive of both endpoints.')
+    day_timezone: str = Field(default='UTC', description='Calendar-day timezone shared by usage sources, distinct from the viewer-local snapshot clock.')
     openclaw_status: Optional[str] = Field(default=None, description='Gateway usage rollup status: fresh/refreshing/stale/unavailable from the Gateway itself, cached when the last successful saved window was served after a failed live read, or pending when this source was not requested.')
     openclaw_cached_at_utc: Optional[str] = Field(default=None, description='Offset-aware UTC ISO timestamp of the original successful Gateway fetch that produced the saved snapshot currently displayed. Set only when openclaw_status is cached; the value never advances on a failed read.')
     openclaw_error: Optional[str] = Field(default=None, description='Bounded, non-secret failure summary for the most recent failed live Gateway read; null after a successful read. Displayed in the dashboard warning banner.')
     hermes_status: Optional[str] = Field(default=None, description='Hermes native session usage status: ok, not_configured when no Hermes state database exists, or unavailable when none could be read; pending when this source was not requested.')
+    nordrouter_fetched_at_utc: Optional[str] = Field(default=None, description='Original provider fetch timestamp, not the time its cached response was read.')
     nordrouter_status: Optional[str] = Field(default=None, description='Direct NordRouter analytics status; pending when this source was not requested.')
     omniroute_status: Optional[str] = Field(default=None, description='Read-only retained router snapshot status: ok/stale/unavailable/not_configured/pending. Does not affect overview availability.')
 

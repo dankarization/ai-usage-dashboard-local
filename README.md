@@ -7,10 +7,19 @@ A self-hosted dashboard for AI token usage, provider quotas, and costs, based on
 
 ## What it shows
 
-- Token usage by model and day, with 1-, 7-, and 30-day views.
+- Agent-reported model history and a separate NordRouter account-day chart, with 1-, 7-, and 30-day UTC windows.
 - OpenClaw and Hermes usage, plus configured provider quota windows.
 - NordRouter balance, billed spend, and top models.
 - API-equivalent cost estimates, separate from billed spend.
+
+Account-day totals have no daily model split: the dashboard never allocates them
+using agent model shares. Model history uses the same measured agent rows as the
+table; account history is a separate, non-additive view. Router-wide observations
+remain drill-down comparisons, not replacements for agent bucket counts. When
+router agent usage may overlap account billing, the combined total is unavailable
+rather than double-counted. Account top-list omissions have an explicit
+unattributed-model residual. Input, output, cache reads and cache writes are
+separate categories; cached input is included once in total tokens.
 
 Missing data stays unknown, not zero. If OpenClaw is unavailable, a saved window
 for the same period is labelled with its original fetch time.
@@ -86,6 +95,13 @@ The OpenAI API card checks Platform credit-grant access read-only. It can reuse
 changing transcription. Ordinary project keys cannot read this browser-session
 billing endpoint: the card displays the HTTP authorization blocker and unknown
 balances, never a fictional $0 or a hardcoded monthly grant.
+
+The default credit card shows the total credit bar, remaining/used dollars and
+reported purchased/other balances. Grant, entitlement and verification details
+are collapsed under **Billing details**. All-grant spending is not current-cycle
+spending. Neither credit grants nor the documented usage/cost grouping dimensions
+identify which tokens were funded by purchased versus subscription credits; no
+token split is inferred from dollar proportions.
 
 An operator-authorized Platform session can be stored outside Git in
 `~/.config/ai-usage-dashboard/openai-billing.json` (directory mode `0700`,

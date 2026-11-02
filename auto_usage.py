@@ -283,7 +283,8 @@ def _opencode_extra_dbs():
     return dbs
 
 def get_date_range(days=30):
-    today = datetime.now()
+    # Account/Gateway days are UTC, independent of the host-local clock.
+    today = datetime.now(ZoneInfo('UTC'))
     start = today - timedelta(days=days - 1)
     
     start_date = start.strftime('%Y-%m-%d')
@@ -2895,7 +2896,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             except (OSError, ValueError, sqlite3.Error):
                 hermes_status = 'unavailable'
 
-    router = (_omniroute_usage.collect(start_str, end_str, include_daily=include_daily)
+    router = (_omniroute_usage.collect(start_str, end_str, include_daily=True)
               if source in ('all', 'omniroute') else
               {'models': [], 'daily': [], 'status': 'pending', 'source': {'tokens': 0, 'complete': False}})
     # Direct NordRouter analytics is the sole NordRouter history authority.
@@ -2903,17 +2904,23 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     nr_daily = []
     nr_window_cost = None
     nr_window_days = None
+    nr_fetched_at = None
     expected_dates = {d.isoformat() for d in list_dates_in_range(start_str, end_str)}
     nr_complete = False
     nr_key = os.environ.get('NORDROUTER_API_KEY', '')
     if nr_key and source in ('all', 'nordrouter'):
-        nr, stale = _nordrouter_usage.Client(nr_key).get('analytics', days=max(1, min(days, 90)))
-        nr_status = 'stale' if stale else 'ok'
+        nr_client = _nordrouter_usage.Client(nr_key)
+        nr, stale = nr_client.get('analytics', days=max(1, min(days, 90)))
+        fetched_at = getattr(nr_client, 'fetched_at', None)
+        nr_fetched_at = datetime.fromtimestamp(fetched_at, ZoneInfo('UTC')).isoformat() if fetched_at else None
+        nr_status = 'unavailable' if nr is None else 'stale' if stale else 'ok'
         if nr:
-            nr_daily = [dict(row) for row in nr.get('daily', [])]
+            nr_daily = [dict(row) for row in nr.get('daily', [])
+                        if start_str <= row['date'] <= end_str]
             nr_window_cost = (nr.get('totals') or {}).get('amount_usd')
             nr_window_days = nr.get('window_days')
-            nr_complete = nr_window_days == days and {row['date'] for row in nr_daily} == expected_dates
+            nr_complete = (nr_window_days == days and len(nr_daily) == len(expected_dates)
+                           and {row['date'] for row in nr_daily} == expected_dates)
             # A model aggregate has no own dates. Show it only when its server
             # window and account-day coverage match the requested period.
             for model in nr.get('top_models', []) if nr_complete else []:
@@ -2924,6 +2931,15 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
                     'totals': {'total': tokens}, 'daily': [],
                     'cost_usd': float(model['amount_usd']),
                 })
+
+    account_tokens = sum(day['tokens'] for day in nr_daily) if nr_daily else None
+    model_tokens = sum(m['totals']['total'] for m in models if m['source'] == 'nordrouter')
+    model_residual = max(0, account_tokens - model_tokens) if nr_complete else None
+    if model_residual:
+        models.append({'source': 'nordrouter', 'provider': 'nordrouter',
+                       'model': 'Unattributed account models',
+                       'model_key': 'direct-nordrouter-unattributed-models',
+                       'totals': {'total': model_residual}, 'daily': [], 'cost_usd': None})
 
     # One API-equivalent policy for all agent categories, independent of native
     # cost availability and subscription route. Account invoices remain separate.
@@ -2954,6 +2970,8 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             return row.get('overview_cost_usd') if row.get('bucket_comparison') else row.get('cost_usd')
         priced = [m for m in rows if overview_cost(m) is not None]
         return {'tokens': sum(m['totals']['total'] for m in rows),
+                'bucket_comparison_tokens': sum(m['totals']['total'] for m in rows if m.get('bucket_comparison')),
+                'independent_tokens': sum(m['totals']['total'] for m in rows if not m.get('bucket_comparison')),
                 'estimated_cost_usd': sum(overview_cost(m) for m in priced) if priced else None,
                 'priced_models': len(priced),
                 'unpriced_models': sum(m.get('overview_cost_kind', m.get('cost_kind')) in ('partial', 'unknown') or
@@ -2972,8 +2990,13 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     hermes_source = agent_source('hermes')
     # A saved snapshot is not current: the Gateway kept accruing while it was
     # unreachable, so it stays incomplete and never becomes the canonical total.
-    openclaw_source['complete'] = gateway_status not in ('unavailable', 'pending', 'cached')
-    hermes_source['complete'] = hermes_status not in ('unavailable', 'pending')
+    openclaw_source['complete'] = gateway_status in ('ok', 'fresh')
+    hermes_source['complete'] = hermes_status in ('ok', 'not_configured')
+    if gateway_status in ('unavailable', 'pending'):
+        openclaw_source['tokens'] = None
+    if hermes_status in ('unavailable', 'pending'):
+        hermes_source['tokens'] = None
+    accounting_complete = not any(m.get('bucket_comparison') for m in agent_models)
     router_source = router['source']
     router_keys = {m['model_key'] for m in router['models']}
     # An unobserved bucket can be outside retention, renamed, or unavailable.
@@ -2985,17 +3008,24 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     detailed = [m['totals'] for m in agent_models]
     def amount(field):
         return sum(t.get(field) or 0 for t in detailed)
+    # Presentation flags cannot change accounting: retain route days through
+    # reconciliation, then omit them at the response boundary only.
+    if not include_daily:
+        for row in models:
+            row['daily'] = []
+            for route in (row.get('bucket_usage') or {}).get('routes', []):
+                route['daily'] = []
     total_input, total_output = amount('input'), amount('output')
     cache_read = amount('cache_read')
     return {
         'meta': {
             'generated_at': datetime.now(ZoneInfo('America/Los_Angeles')).replace(tzinfo=None).isoformat(timespec='seconds'),
             'generated_at_utc': _now_utc_iso(), 'start_date': start_str,
-            'end_date': end_str, 'days': days,
+            'end_date': end_str, 'days': days, 'day_timezone': 'UTC',
             'openclaw_status': gateway_status, 'hermes_status': hermes_status,
             'openclaw_cached_at_utc': gateway_cached_at_utc,
             'openclaw_error': gateway_error,
-            'nordrouter_status': nr_status,
+            'nordrouter_status': nr_status, 'nordrouter_fetched_at_utc': nr_fetched_at,
             'omniroute_status': router['status'],
         },
         'totals': {
@@ -3005,18 +3035,24 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             'total': (sum(m['totals']['total'] for m in agent_models) +
                       sum(day['tokens'] for day in nr_daily))
                      if source == 'all' and openclaw_source['complete']
-                     and hermes_source['complete'] and nr_complete else None,
+                     and hermes_source['complete'] and nr_complete and nr_status == 'ok'
+                     and accounting_complete else None,
             'input_output_ratio': round(total_input / total_output, 2) if total_output else None,
             'cache_hit_rate': round(cache_read / (total_input + cache_read), 4) if total_input + cache_read else None,
         },
-        'source_daily': {'nordrouter': nr_daily if include_daily else [], 'omniroute': router['daily']},
+        'source_daily': {'nordrouter': nr_daily if include_daily else [], 'omniroute': router['daily'] if include_daily else []},
         'sources': {
+            'accounting_complete': accounting_complete,
+            'accounting_note': None if accounting_complete else 'Router agent tokens overlap account billing; no per-agent allocation is available.',
             'openclaw': openclaw_source,
             'hermes': hermes_source,
             'omniroute': router_source,
             'nordrouter': {'tokens': sum(day['tokens'] for day in nr_daily) if nr_daily else None,
-                           'billed_cost_usd': nr_window_cost if nr_window_days == days else None,
-                           'window_days': nr_window_days, 'complete': nr_complete,
+                           'billed_cost_usd': nr_window_cost if nr_complete else None,
+                           'window_days': nr_window_days, 'complete': nr_complete and nr_status == 'ok',
+                           'fetched_at': nr_fetched_at,
+                           'unattributed_model_tokens': model_residual,
+                           'model_coverage_complete': nr_complete and model_residual == 0 and model_tokens == account_tokens,
                            'overlap': {key: overlap[key] for key in (
                                'status', 'proven_tokens', 'unreconciled_tokens', 'unknown_tokens',
                                'exclusive_tokens', 'days_ready', 'daily', 'retention_limited')}},

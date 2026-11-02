@@ -187,9 +187,11 @@ def test_breakdown_preserves_hero_bill_and_annotates_residual(monkeypatch):
         'source': {'tokens': BUCKET_TOTAL, 'complete': False, 'additive': False, 'status': 'ok'}}
     monkeypatch.setattr(auto_usage._omniroute_usage, 'collect', lambda *a, **kw: observation)
     result = auto_usage.build_model_breakdown(1)
-    # Hero keeps agent non-NordRouter rows, including bucket comparison, plus the
-    # full account daily total. It does not add router observations or a residual.
-    assert result['totals']['total'] == 651_600_000 + 5 + 789_847_836
+    # No per-agent serving/account join exists, so a combined token total
+    # cannot claim these routed calls are distinct from the account invoice.
+    assert result['totals']['total'] is None
+    assert result['sources']['accounting_complete'] is False
+    assert result['sources']['openclaw']['bucket_comparison_tokens'] == 651_600_000
     assert result['sources']['nordrouter']['billed_cost_usd'] == 6.988398
     assert result['sources']['nordrouter']['tokens'] == 789_847_836
     direct = [row for row in result['models'] if row['source'] == 'nordrouter']
@@ -202,3 +204,32 @@ def test_breakdown_preserves_hero_bill_and_annotates_residual(monkeypatch):
     overlap = result['sources']['nordrouter']['overlap']
     assert overlap['proven_tokens'] + overlap['exclusive_tokens'] == 789_847_836
     assert overlap['unknown_tokens'] == BUCKET_DATED
+
+
+def test_daily_presentation_flag_does_not_change_accounting(monkeypatch):
+    """Daily route evidence must survive until overlap is calculated."""
+    import copy
+    import openclaw_usage
+    monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture')
+    monkeypatch.setattr(auto_usage, 'get_date_range', lambda days: ('2026-11-01', '2026-11-01', None, None))
+    monkeypatch.setattr(auto_usage._hermes_usage, 'state_dbs', lambda: [])
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
+    monkeypatch.setattr(auto_usage._nordrouter_usage.Client, 'get', lambda *a, **kw: ({
+        'window_days': 1, 'totals': {'amount_usd': 1},
+        'daily': [{'date': '2026-11-01', 'tokens': 100, 'amount_usd': 1}],
+        'top_models': [{'id': 'vendor/a', 'tokens': 100, 'amount_usd': 1}]}, False))
+    def collect(*a, include_daily=True):
+        observation = bucket('bucket', [route('a', 40)])
+        if not include_daily:
+            observation['bucket_usage']['routes'][0]['daily'] = []
+        return {'models': [copy.deepcopy(observation)], 'daily': [], 'status': 'ok', 'source': {}}
+    monkeypatch.setattr(auto_usage._omniroute_usage, 'collect', collect)
+    true = auto_usage.build_model_breakdown(1, include_daily=True)
+    false = auto_usage.build_model_breakdown(1, include_daily=False)
+    fields = ('exclusive_tokens', 'overlap_proven_tokens', 'overlap_unreconciled_tokens')
+    direct = lambda data: next(m for m in data['models'] if m['source'] == 'nordrouter')
+    assert [direct(true)[k] for k in fields] == [60, 40, 0]
+    assert [direct(false)[k] for k in fields] == [60, 40, 0]
+    assert false['totals'] == true['totals']
+    assert all(not m['daily'] for m in false['models'])
+    assert not next(m for m in false['models'] if m['source'] == 'omniroute')['bucket_usage']['routes'][0]['daily']

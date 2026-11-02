@@ -332,7 +332,7 @@ def test_post_update_serializes_concurrent_refreshes(monkeypatch):
         first.result(timeout=2)
         second.result(timeout=2)
 
-    assert call_count == 2
+    assert call_count == 1  # overlapping manual requests share one refresh
     assert max_active == 1
 
 
@@ -728,3 +728,29 @@ def test_model_breakdown_source_hermes_isolates_the_agent(monkeypatch):
     assert body["meta"]["hermes_status"] == "ok"
     assert body["sources"]["hermes"]["tokens"] == 120
     assert body["models"][0]["cost_kind"] == "estimated"
+
+
+def test_cold_get_and_post_never_run_exporters_concurrently(monkeypatch):
+    started, release = threading.Event(), threading.Event()
+    active, peak = 0, 0
+    def generate():
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        started.set()
+        assert release.wait(2)
+        active -= 1
+        return {'meta': {}, 'summary': {}, 'daily': []}
+    monkeypatch.setattr(local_display_service, '_cached_payload', None)
+    monkeypatch.setattr(local_display_service, 'generate_latest_payload', generate)
+    request = local_display_service.UpdateRequest(reason='force_button', view='7d', device_id='fixture')
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        first = pool.submit(local_display_service.read_cached_payload)
+        assert started.wait(2)
+        second = pool.submit(local_display_service.read_cached_payload)
+        third = pool.submit(local_display_service.display_update, request, Response())
+        time.sleep(.03)
+        release.set()
+        for f in (first, second, third):
+            f.result(2)
+    assert peak == 1

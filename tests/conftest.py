@@ -18,6 +18,10 @@ import pytest
 def isolated_environment(tmp_path, monkeypatch):
     """Restore the process environment and redirect the saved-window database."""
     import openai_api_usage
+    import local_display_service
+    from source_cache import SourceCache
+    monkeypatch.setattr(local_display_service, "_source_cache", SourceCache())
+    monkeypatch.setattr(local_display_service, "_payload_path", tmp_path / "payload.json")
     monkeypatch.setattr(openai_api_usage, "_inference_key", lambda: "")
     monkeypatch.setenv("OPENAI_BILLING_SESSION_FILE", str(tmp_path / "missing-session.json"))
     monkeypatch.delenv("OPENAI_BILLING_SESSION_KEY", raising=False)

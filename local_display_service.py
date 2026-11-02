@@ -15,6 +15,8 @@ from dashboard_page import DASHBOARD_HTML
 from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_all_codex_quotas, load_env
 import openai_api_usage
 import grok_usage
+import auto_usage
+from source_cache import SourceCache
 from dashboard_models import (
     AntigravityIngestRequest,
     AntigravityIngestResponse,
@@ -36,6 +38,7 @@ _payload_path = Path(__file__).resolve().parent / "token_usage_eink.json"
 _refresh_lock = threading.Lock()
 _last_successful_refresh = 0.0
 AUTO_REFRESH_MIN_SECONDS = 4 * 60
+_source_cache = SourceCache()
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -56,15 +59,19 @@ def _read_payload_from_disk() -> dict[str, Any] | None:
 
 def read_cached_payload() -> dict[str, Any]:
     global _cached_payload
-    if _cached_payload is None:
-        try:
-            _cached_payload = generate_latest_payload()
-        except Exception:
-            disk_payload = _read_payload_from_disk()
-            if disk_payload is None:
-                raise
-            _cached_payload = disk_payload
-    return _cached_payload
+    if _cached_payload is not None:
+        return _cached_payload
+    # GET and POST share ownership of exports and generated files.
+    with _refresh_lock:
+        if _cached_payload is None:
+            try:
+                _cached_payload = generate_latest_payload()
+            except Exception:
+                disk_payload = _read_payload_from_disk()
+                if disk_payload is None:
+                    raise
+                _cached_payload = disk_payload
+        return _cached_payload
 
 
 def generate_latest_payload() -> dict[str, Any]:
@@ -118,9 +125,9 @@ def token_usage_json() -> dict[str, Any]:
     response_model=QuotasResponse,
     response_model_exclude_unset=True,
     summary="Return current provider quota windows",
-    description="Without source, returns the cached automation view without refreshing. source=codex, grok, grok_bot, or openai_api fetches only that provider live, independently of the full dashboard refresh.",
+    description="Without source, returns the cached automation view without refreshing. source=codex, grok, grok_bot, or openai_api reads only that provider independently, with bounded 30-second single-flight caching and original snapshot times.",
 )
-def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = 'all') -> dict[str, Any]:
+def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = 'all', response: Response = None) -> dict[str, Any]:
     global _cached_payload
     if source == 'all':
         payload = _cached_payload
@@ -132,20 +139,24 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = '
             payload = {"meta": {}, "quotas": []}
     else:
         load_env()
-        if source == 'openai_api':
-            snapshots = openai_api_usage.export_openai_api_quota()
-        elif source == 'codex':
-            snapshots = load_all_codex_quotas()
-        else:
-            cookie = os.environ.get('GROK_COOKIE', '')
-            if source == 'grok':
-                snapshots = grok_usage.export_grok_quota(cookie) if cookie else []
+        def collect():
+            if source == 'openai_api':
+                snapshots = openai_api_usage.export_openai_api_quota()
+            elif source == 'codex':
+                snapshots = load_all_codex_quotas()
             else:
-                snapshots = grok_usage.export_grok_bot_quota(cookie) if cookie else [{
-                    'provider': 'grok_bot', 'label': 'Weekly Grok Bot Limit', 'status': 'unavailable',
-                }]
-        payload = {"meta": {"generated_at_utc": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds")},
-                   "quotas": snapshots}
+                cookie = os.environ.get('GROK_COOKIE', '')
+                if source == 'grok':
+                    snapshots = grok_usage.export_grok_quota(cookie) if cookie else []
+                else:
+                    snapshots = grok_usage.export_grok_bot_quota(cookie) if cookie else [{
+                        'provider': 'grok_bot', 'label': 'Weekly Grok Bot Limit', 'status': 'unavailable',
+                    }]
+            return {"meta": {"generated_at_utc": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds")},
+                    "quotas": snapshots}
+        payload, status = _source_cache.get(('quotas', source), collect)
+        if response is not None:
+            response.headers['X-Dashboard-Source-Cache'] = status
     quota_items = []
     for item in payload.get("quotas") or []:
         used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
@@ -173,16 +184,23 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = '
     "/api/v1/model-breakdown",
     response_model=ModelBreakdownResponse,
     summary="Return per-model token usage breakdown",
-    description="Returns OpenClaw Gateway usage, Hermes native usage, canonical NordRouter analytics and optional non-additive router-wide bucket observations. Agent costs use exact-model API rates and a standard short-context baseline, independent of subscription/native cost. Coverage fields distinguish partial/unknown categories. source=openclaw|hermes|nordrouter|omniroute reads one independently. Bucket prices sum retained serving attempts at exact current tariffs; bucket_usage includes route/day drilldown and coverage. Agent bucket tokens are preserved; router-wide USD is not an agent allocation and never enters overview or account billed totals. Direct NordRouter totals remain account billed counts. exclusive_tokens is the residual outside proven NordRouter-origin bucket routes; unmatched, unmapped, or unretained overlap is explicit and not silently dropped. Pass ?daily=false to omit daily entries.",
+    description="Returns OpenClaw Gateway usage, Hermes native usage, canonical NordRouter analytics and optional non-additive router-wide bucket observations. Agent costs use exact-model API rates and a standard short-context baseline, independent of subscription/native cost. Coverage fields distinguish partial/unknown categories. source=openclaw|hermes|nordrouter|omniroute reads one independently. Bucket prices sum retained serving attempts at exact current tariffs; bucket_usage includes route/day drilldown and coverage. Agent bucket tokens are preserved; router-wide USD is not an agent allocation and never enters overview or account billed totals. Direct NordRouter totals remain account billed counts. exclusive_tokens is the residual outside proven NordRouter-origin bucket routes; unmatched, unmapped, or unretained overlap is explicit and not silently dropped. All usage days are UTC. Account daily totals are not model-day attribution. A combined total is null when agent buckets can overlap account billing. Reads coalesce for 30 seconds; refresh=true bypasses this layer, not upstream rate-limit caches. Pass daily=false to omit daily entries without changing reconciliation.",
 )
-def model_breakdown(days: int = 30, daily: bool = True, source: Literal['all', 'openclaw', 'hermes', 'nordrouter', 'omniroute'] = 'all') -> dict[str, Any]:
+def model_breakdown(response: Response, days: int = 30, daily: bool = True, refresh: bool = False, source: Literal['all', 'openclaw', 'hermes', 'nordrouter', 'omniroute'] = 'all') -> dict[str, Any]:
     days = max(1, min(days, 90))
     # Reads Gateway aggregates and NordRouter's independently locked cache;
     # do not queue a period switch behind an unrelated full provider refresh.
     load_env()
-    if source == 'all':
-        return build_model_breakdown(days=days, include_daily=daily)
-    return build_model_breakdown(days=days, include_daily=daily, source=source)
+    # Include the UTC day in the identity: no prior-day snapshot crosses midnight.
+    start, end, _, _ = auto_usage.get_date_range(days)
+    key = ('models', start, end, days, daily, source)
+    def collect():
+        if source == 'all':
+            return build_model_breakdown(days=days, include_daily=daily)
+        return build_model_breakdown(days=days, include_daily=daily, source=source)
+    value, status = _source_cache.get(key, collect, force=refresh)
+    response.headers['X-Dashboard-Source-Cache'] = status
+    return value
 
 
 @app.post(
@@ -193,8 +211,24 @@ def model_breakdown(days: int = 30, daily: bool = True, source: Literal['all', '
 )
 def display_update(request: UpdateRequest, response: Response) -> dict[str, Any]:
     global _cached_payload, _last_successful_refresh
-    # Collection writes shared cache files, so refreshes must not overlap.
+    # A client joining an in-flight refresh receives that result, not a second
+    # full export. Sequential manual refreshes remain explicit new reads.
+    requested_at = time.monotonic()
     with _refresh_lock:
+        if request.reason == 'auto_refresh' and _cached_payload is None:
+            _cached_payload = _read_payload_from_disk()
+            meta = (_cached_payload or {}).get('meta', {})
+            stamp = meta.get('generated_at_utc') or _pacific_naive_to_utc_iso(meta.get('generated_at'))
+            if stamp:
+                try:
+                    age = datetime.now(ZoneInfo('UTC')).timestamp() - datetime.fromisoformat(stamp).timestamp()
+                    if 0 <= age < AUTO_REFRESH_MIN_SECONDS:
+                        _last_successful_refresh = requested_at - age
+                except (TypeError, ValueError):
+                    pass
+        if _cached_payload is not None and _last_successful_refresh >= requested_at:
+            response.headers["X-Dashboard-Refresh"] = "coalesced"
+            return _cached_payload
         if (request.reason == "auto_refresh" and _cached_payload is not None
                 and time.monotonic() - _last_successful_refresh < AUTO_REFRESH_MIN_SECONDS):
             response.headers["X-Dashboard-Refresh"] = "cached"
@@ -202,6 +236,7 @@ def display_update(request: UpdateRequest, response: Response) -> dict[str, Any]
         try:
             _cached_payload = generate_latest_payload()
             _last_successful_refresh = time.monotonic()
+            _source_cache.invalidate()
             response.headers["X-Dashboard-Refresh"] = "fresh"
         except Exception:
             response.headers["X-Dashboard-Refresh"] = "stale"

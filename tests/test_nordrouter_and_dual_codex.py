@@ -303,7 +303,7 @@ def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(monkeypatc
 
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
     start, end, _, _ = usage.get_date_range(1)
-    assert start == end == datetime.now().date().isoformat()
+    assert start == end == datetime.now(usage.ZoneInfo('UTC')).date().isoformat()
     requested = []
 
     def gateway(first, last):
@@ -403,13 +403,13 @@ def test_direct_source_http_finishes_while_gateway_source_is_stalled(monkeypatch
         assert gateway.result(timeout=2).json()['meta']['openclaw_status'] == 'unavailable'
 
 
-def test_one_day_window_rolls_over_at_local_midnight(monkeypatch):
+def test_one_day_window_rolls_over_at_utc_midnight(monkeypatch):
     class Clock(datetime):
         current = datetime(2026, 10, 8, 23, 59, 59)
 
         @classmethod
         def now(cls, tz=None):
-            return cls.current if tz is None else datetime.now(tz)
+            return cls.current.replace(tzinfo=tz) if tz is not None else cls.current
 
     monkeypatch.setattr(usage, 'datetime', Clock)
     assert usage.get_date_range(1)[:2] == ('2026-10-08', '2026-10-08')
@@ -452,3 +452,45 @@ def test_quota_api_additive_plan_isolation_and_unknown_omission(monkeypatch):
         item.pop('plan_type')
     baseline = client.get('/api/v1/quotas').json()['quotas']
     assert [{k: v for k, v in row.items() if k != 'plan_type'} for row in rows] == baseline
+
+
+def test_account_top_list_residual_and_duplicate_days(monkeypatch):
+    import copy
+    import openclaw_usage
+    monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
+    monkeypatch.setattr(usage, 'get_date_range', lambda days: ('2026-10-02', '2026-10-02', None, None))
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
+    monkeypatch.setattr(usage._hermes_usage, 'state_dbs', lambda: [])
+    body = {'window_days': 1, 'totals': {'amount_usd': 1},
+            'daily': [{'date': '2026-10-02', 'tokens': 100, 'amount_usd': 1}],
+            'top_models': [{'id': 'vendor/model', 'tokens': 70, 'amount_usd': .7}]}
+    monkeypatch.setattr(nr.Client, 'get', lambda *a, **k: (copy.deepcopy(body), False))
+    result = usage.build_model_breakdown(1)
+    unknown = next(row for row in result['models'] if row['model'] == 'Unattributed account models')
+    assert unknown['totals']['total'] == 30
+    assert unknown['daily'] == [] and unknown['cost_usd'] is None
+    assert result['sources']['nordrouter']['unattributed_model_tokens'] == 30
+    assert result['sources']['nordrouter']['model_coverage_complete'] is False
+    body['daily'] *= 2
+    duplicate = usage.build_model_breakdown(1)
+    assert duplicate['totals']['total'] is None
+    assert duplicate['sources']['nordrouter']['complete'] is False
+    assert not duplicate['models']
+    with pytest.raises(ValueError, match='duplicate'):
+        nr._sanitize('analytics', body)
+
+
+def test_account_cache_refreshes_at_utc_midnight_even_within_ttl(monkeypatch, tmp_path):
+    from datetime import timezone
+    clock = [datetime(2026, 10, 2, 23, 59, 59, tzinfo=timezone.utc).timestamp()]
+    calls = []
+    monkeypatch.setattr(nr.time, 'time', lambda: clock[0])
+    def get(*a, **k):
+        calls.append(1)
+        return Response(analytics(7))
+    monkeypatch.setattr(requests, 'get', get)
+    client = nr.Client('fixture', tmp_path)
+    client.get('analytics', days=7)
+    clock[0] += 2
+    client.get('analytics', days=7)
+    assert len(calls) == 2

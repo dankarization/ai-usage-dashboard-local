@@ -16,13 +16,13 @@ from pathlib import Path
 import re
 import subprocess
 import time
-from zoneinfo import ZoneInfo
 
 import nordrouter_usage
 
 ROOT = Path(__file__).resolve().parent
-TZ = ZoneInfo('Asia/Tbilisi')
+TZ = timezone.utc
 TTL = 300
+AGGREGATE_VERSION = 2  # UTC days: never reuse old local-day snapshots.
 
 
 def is_bucket(row):
@@ -34,7 +34,7 @@ def bucket_key(model):
 
 
 def bounds(start, end, tz=TZ):
-    """Inclusive local calendar dates -> half-open UTC instants (DST safe)."""
+    """Inclusive calendar dates -> half-open UTC instants (UTC by default)."""
     return tuple(datetime.combine(d, day_time(), tz).astimezone(timezone.utc).isoformat()
                  for d in (date.fromisoformat(start), date.fromisoformat(end) + timedelta(days=1)))
 
@@ -76,11 +76,14 @@ class Client:
             except (OSError, ValueError):
                 cache = {}
             now = time.time()
-            if now >= cache.get('retry_at', 0):
+            if cache.get('version') != AGGREGATE_VERSION:
+                cache = {}
+            if now >= cache.get('retry_at', 0) or (cache.get('end') != end and not cache.get('failed')):
                 cache['retry_at'] = now + TTL
+                cache['version'] = AGGREGATE_VERSION
                 try:
                     first = (date.fromisoformat(end) - timedelta(days=89)).isoformat()
-                    cache.update(data=self._read(first, end), end=end,
+                    cache.update(data=self._read(first, end), end=end, version=AGGREGATE_VERSION,
                                  fetched_at=datetime.now(timezone.utc).isoformat(), failed=False)
                 except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
                     cache['failed'] = True
@@ -231,14 +234,14 @@ def collect(start, end, *, include_daily=True, client=None, price_client=None):
         body, status, fetched_at = (client or Client()).get(end)
         if body is None:
             return {'models': [], 'daily': [], 'status': status,
-                    'source': {'tokens': 0, 'complete': status == 'not_configured', 'status': status}}
+                    'source': {'tokens': 0 if status == 'not_configured' else None, 'complete': status == 'not_configured', 'status': status}}
         key = os.environ.get('NORDROUTER_API_KEY', '')
         pricing, stale = (price_client or nordrouter_usage.Client(key)).get('pricing') if key or price_client else (None, True)
         return aggregate(body, pricing, start, end, status=status, fetched_at=fetched_at,
                          pricing_stale=stale, include_daily=include_daily)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         return {'models': [], 'daily': [], 'status': 'unavailable',
-                'source': {'tokens': 0, 'complete': False, 'status': 'unavailable'}}
+                'source': {'tokens': None, 'complete': False, 'status': 'unavailable'}}
 
 
 def match_account_model(serving, account_ids):

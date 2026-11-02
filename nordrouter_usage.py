@@ -49,6 +49,11 @@ def _sanitize(endpoint, body):
                  for row in body["daily"]]
         models = [{"id": str(row["id"]), "tokens": int(row["tokens"]),
                    "amount_usd": float(row["amount_usd"])} for row in body["top_models"]]
+        if (len({row['date'] for row in daily}) != len(daily)
+                or len({row['id'] for row in models}) != len(models)
+                or any(row['tokens'] < 0 or not math.isfinite(row['amount_usd']) or row['amount_usd'] < 0
+                       for row in daily + models)):
+            raise ValueError('Invalid or duplicate account aggregates')
         return {"window_days": int(body["window_days"]),
                 "totals": {"amount_usd": float(body["totals"]["amount_usd"])},
                 "daily": daily, "top_models": models}
@@ -65,6 +70,7 @@ def _sanitize(endpoint, body):
 class Client:
     def __init__(self, key, cache_dir=None):
         self.key = key
+        self.fetched_at = None
         self.root = Path(cache_dir or CACHE_DIR) / hashlib.sha256(key.encode()).hexdigest()[:16]
 
     def get(self, endpoint, **params):
@@ -79,6 +85,18 @@ class Client:
             raise ValueError("Cache directory must not be a symlink")
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         path = self.root / (endpoint + "-" + "-".join(f"{k}_{v}" for k, v in sorted(params.items())) + ".json")
+        now = time.time()
+        scope_day = datetime.fromtimestamp(now, ZoneInfo('UTC')).date().isoformat()
+        try:
+            ready = json.loads(path.read_text())
+        except (OSError, ValueError):
+            ready = {}
+        # Atomic files allow fresh readers to avoid an unrelated slow provider
+        # request holding the credential lock. Expired/missing reads serialize.
+        if (now < ready.get('retry_at', 0) and ready.get('data') is not None and
+                (endpoint != 'analytics' or ready.get('scope_day') == scope_day)):
+            self.fetched_at = ready.get('fetched_at')
+            return ready['data'], bool(ready.get('failed'))
         with (self.root / "lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             self._prune_cache(time.time(), path.name)
@@ -87,6 +105,10 @@ class Client:
             except (OSError, ValueError):
                 cache = {}
             now = time.time()
+            self.fetched_at = cache.get('fetched_at')
+            scope_day = datetime.fromtimestamp(now, ZoneInfo('UTC')).date().isoformat()
+            if endpoint == 'analytics' and cache.get('scope_day') != scope_day:
+                cache['retry_at'] = 0
             if now >= cache.get("retry_at", 0):
                 # Global family budget also bounds different window/page queries.
                 budget_path = self.root / (endpoint + "-budget.json" if endpoint in ("usage", "pricing") else "analytics-budget.json")
@@ -101,12 +123,14 @@ class Client:
                 budget.append(now)
                 budget_path.write_text(json.dumps(budget))
                 cache["retry_at"] = now + ttl
+                cache["scope_day"] = scope_day
                 try:
                     response = requests.get(f"{BASE_URL}/{endpoint}", params=params,
                                             headers={"Authorization": f"Bearer {self.key}"}, timeout=20)
                     response.raise_for_status()
                     data = _sanitize(endpoint, response.json())
                     cache.update(data=data, fetched_at=now, failed=False)
+                    self.fetched_at = now
                 except (requests.RequestException, ValueError, KeyError, TypeError):
                     cache["failed"] = True
                 temp = path.with_suffix(".tmp")

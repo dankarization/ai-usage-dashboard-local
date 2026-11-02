@@ -31,3 +31,32 @@ git check-ignore .env token_usage_eink.json token_usage_dashboard.png usage.json
 ```
 
 Keep local credentials, exports, generated payloads/charts, logs, and unredacted screenshots outside the tracked tree. The committed dashboard screenshot has two opaque account-label masks and no metadata.
+
+## Accounting and read-cache contracts
+
+Usage-day windows are UTC for Gateway, Hermes, router observations and account
+analytics; snapshot timestamps still use the viewer's clock. The model chart
+uses agent rows, while the separate account chart has only all-model daily totals.
+Do not infer account-model days from small agent samples. Partial router retention
+must not suppress older agent bucket days. Independent provider rows sharing an
+account model name are not account-route comparisons.
+
+`daily=false` omits presentation arrays after overlap reconciliation; it must not
+change account/residual tokens. Malformed Gateway aggregates cannot replace a
+valid saved window. Partial, refreshing, stale and unavailable sources cannot
+complete the canonical overview. Duplicate account dates are not summed as a
+complete period; omitted top models remain explicitly unattributed.
+
+The in-process read cache is bounded to 32 projections, keyed by exact UTC window,
+source and daily flag. Healthy reads live for 30 seconds; degraded results back
+off for 5 seconds. Same-key concurrent reads share collection.
+`refresh=true` bypasses this layer (not upstream rate-limit caches). A completed
+full refresh invalidates it and fences earlier in-flight publications. Original
+fetch timestamps remain unchanged on hits. Quota arrivals do not rebuild the
+model chart/table. Concurrent full refreshes coalesce; cold GET and POST exports
+share one writer lock.
+
+Focused regressions: `tests/test_source_cache.py`, `tests/test_openclaw_usage.py`,
+`tests/test_nordrouter_bucket_exclusion.py`, `tests/test_omniroute_usage.py`,
+`tests/dashboard_dom_harness.js`. Browser acceptance must additionally verify both
+charts, mobile containment, quota disclosure, period switches and refresh errors.

@@ -26,10 +26,10 @@ const snapshot = db.transaction(() => {
   const providers = Object.fromEntries(Array.from(origins, ([id, values]) => [id, values.size === 1 ? [...values][0] : null]));
   // Rows have unique primary IDs. Do NOT dedup by correlation: real fallback
   // attempts share that ID and can each consume (and bill) tokens.
-  // Group by Asia/Tbilisi calendar day (UTC+04, no DST), not request time.
+  // UTC calendar days match Gateway/account analytics; never mix day zones.
   const rows = db.prepare(`SELECT combo_name AS bucket, provider, model,
       combo_execution_key AS route_path, usage_provenance, status,
-      date(timestamp, '+4 hours') AS date,
+      date(timestamp) AS date,
       count(*) AS requests, sum(tokens_in) AS prompt, sum(tokens_out) AS output,
       sum(coalesce(tokens_cache_read,0)) AS cache_read,
       sum(coalesce(tokens_cache_creation,0)) AS cache_write,
@@ -41,7 +41,7 @@ const snapshot = db.transaction(() => {
       AND connection_id IS NOT NULL
       AND julianday(timestamp) >= julianday(?) AND julianday(timestamp) < julianday(?)
     GROUP BY combo_name, provider, model, combo_execution_key, usage_provenance, status,
-      date(timestamp, '+4 hours')`).all(start, end);
+      date(timestamp)`).all(start, end);
   const history = db.prepare('SELECT min(timestamp) AS first, max(timestamp) AS last FROM call_logs').get();
   return { rows, providers, history };
 });

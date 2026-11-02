@@ -6,7 +6,7 @@ contain total tokens/cost only; byModel supplies token-type window totals.
 A successful live read is also retained as one row per requested window in the
 dashboard-owned SQLite database ``data/dashboard.sqlite`` (see
 ``dashboard_store``). When the Gateway is unavailable, slow, or erroring, the
-saved window for exactly that period (1d/7d/30d, local calendar dates) is served
+saved window for exactly that period (1d/7d/30d, UTC calendar dates) is served
 with an explicit ``cached`` status, its original successful fetch time, and the
 failure text. A failure never rewrites a snapshot and never advances its fetch
 time.
@@ -125,7 +125,7 @@ def release_cli_cache() -> None:
 
 def _run_cli(cli: str, start_date: str, end_date: str, timeout: float) -> dict:
     """One bounded attempt; returns the validated Gateway response."""
-    params = {'agentScope': 'all', 'limit': 1,
+    params = {'agentScope': 'all', 'limit': 1, 'mode': 'utc',
               'startDate': start_date, 'endDate': end_date}
     result = subprocess.run(
         [cli, 'gateway', 'call', 'sessions.usage', '--json',
@@ -206,29 +206,36 @@ def _sanitize_aggregate(response: dict) -> dict:
     identical tokens, costs, and daily history.
     """
     aggregates = response.get('aggregates') if isinstance(response, dict) else None
-    if not isinstance(aggregates, dict):
+    if (not isinstance(aggregates, dict) or
+            not all(isinstance(aggregates.get(key), list) for key in ('byModel', 'modelDaily'))):
         raise ValueError('OpenClaw usage aggregate unavailable')
     by_model, model_daily = [], []
     for row in aggregates.get('byModel') or []:
         if not isinstance(row, dict):
-            continue
+            raise ValueError('Malformed Gateway aggregate row')
         provider, model = row.get('provider'), row.get('model')
         if not isinstance(provider, str) or not isinstance(model, str):
-            continue
+            raise ValueError('Malformed Gateway model identity')
         totals = row.get('totals')
-        totals = totals if isinstance(totals, dict) else {}
+        if not isinstance(totals, dict) or type(totals.get('totalTokens')) is not int or totals['totalTokens'] < 0:
+            raise ValueError('Malformed Gateway model totals')
+        for field in ('input', 'output', 'cacheRead', 'cacheWrite'):
+            if field in totals and (type(totals[field]) is not int or totals[field] < 0):
+                raise ValueError('Malformed Gateway token category')
         by_model.append({'provider': provider, 'model': model, 'totals': {
             key: value for key, value in totals.items()
             if key in _TOTAL_FIELDS and isinstance(value, (int, float))
             and not isinstance(value, bool)}})
     for row in aggregates.get('modelDaily') or []:
         if not isinstance(row, dict):
-            continue
+            raise ValueError('Malformed Gateway aggregate row')
         provider, model = row.get('provider'), row.get('model')
         if not isinstance(provider, str) or not isinstance(model, str):
-            continue
-        if not isinstance(row.get('date'), str) or not isinstance(row.get('tokens'), int):
-            continue
+            raise ValueError('Malformed Gateway model identity')
+        if (not isinstance(row.get('date'), str) or type(row.get('tokens')) is not int
+                or row['tokens'] < 0):
+            raise ValueError('Malformed Gateway daily usage')
+        datetime.strptime(row['date'], '%Y-%m-%d')
         entry = {'date': row['date'], 'provider': provider, 'model': model,
                  'tokens': row['tokens']}
         if isinstance(row.get('cost'), (int, float)) and not isinstance(row['cost'], bool):

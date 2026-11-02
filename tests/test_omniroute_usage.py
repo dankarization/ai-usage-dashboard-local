@@ -13,7 +13,7 @@ import nordrouter_usage as nr
 def route(model='vendor/a:fjord', **values):
     return dict(bucket='parent', provider='nr-route', model=model,
                 route_path='parent/child/0', usage_provenance='reported', status=200,
-                timestamp='2026-10-22T21:00:00Z', requests=1,
+                timestamp='2026-10-23T01:00:00Z', requests=1,
                 prompt=1_000_000, output=100_000, cache_read=600_000,
                 cache_write=100_000, invalid=0, **values)
 
@@ -49,7 +49,7 @@ def test_actual_fallback_attempts_exact_suffixes_cache_and_calendar_day():
     assert routes[0]['requests'] == 2
     assert routes[0]['daily'][0]['requests'] == 2
     assert len(routes[0]['daily']) == 1
-    assert bucket['daily'][0]['date'] == '2026-10-23'  # UTC 22nd -> local 23rd
+    assert bucket['daily'][0]['date'] == '2026-10-23'  # UTC day, independent of the host timezone
     assert bucket['daily'][0]['cost_usd'] == pytest.approx(bucket['cost_usd'])
     assert result['source']['additive'] is False
     assert result['daily'][0]['amount_usd'] == pytest.approx(bucket['cost_usd'])
@@ -59,7 +59,7 @@ def test_actual_fallback_attempts_exact_suffixes_cache_and_calendar_day():
 def test_unknown_is_not_zero_no_suffix_fallback_and_retention_is_exposed():
     rows = [route(), route('vendor/a:saga-unknown')]
     body = snapshot(rows)
-    body['history']['first'] = '2026-10-23T00:00:00Z'
+    body['history']['first'] = '2026-10-23T00:30:00Z'
     result = om.aggregate(body, prices(), '2026-10-23', '2026-10-23')
     bucket, = result['models']
     assert bucket['cost_usd'] is None
@@ -104,14 +104,14 @@ def test_renames_nested_paths_and_provider_ambiguity_do_not_invent_history():
 
 
 def test_half_open_selected_window_and_dst():
-    assert om.bounds('2026-10-23', '2026-10-23') == ('2026-10-22T20:00:00+00:00', '2026-10-23T20:00:00+00:00')
+    assert om.bounds('2026-10-23', '2026-10-23') == ('2026-10-23T00:00:00+00:00', '2026-10-24T00:00:00+00:00')
     from zoneinfo import ZoneInfo
     a, b = om.bounds('2026-11-01', '2026-11-01', ZoneInfo('America/New_York'))
     assert (datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds() == 25 * 3600
     before, inside, after = route(), route(), route()
-    before['timestamp'] = '2026-10-22T19:59:59Z'
-    inside['timestamp'] = '2026-10-22T20:00:00Z'
-    after['timestamp'] = '2026-10-23T20:00:00Z'
+    before['timestamp'] = '2026-10-22T23:59:59Z'
+    inside['timestamp'] = '2026-10-23T00:00:00Z'
+    after['timestamp'] = '2026-10-24T00:00:00Z'
     result = om.aggregate(snapshot([before, inside, after]), prices(), '2026-10-23', '2026-10-23')
     assert result['models'][0]['bucket_usage']['priced_requests'] == 1
 
@@ -161,7 +161,7 @@ def test_real_sql_counts_serving_attempts_once_not_parent_or_direct_logs():
     db.row_factory = sqlite3.Row
     db.execute('CREATE TABLE call_logs(id PRIMARY KEY, correlation_id, combo_name, provider, model, combo_execution_key, usage_provenance, status, timestamp, connection_id, tokens_in, tokens_out, tokens_cache_read, tokens_cache_creation)')
     values = ['same-correlation', 'parent', 'nr-route', 'vendor/a:fjord', 'parent/child/0',
-              'reported', 200, '2026-10-22T21:00:00Z', 'connection', 1_000_000, 100_000, 600_000, 100_000]
+              'reported', 200, '2026-10-23T01:00:00Z', 'connection', 1_000_000, 100_000, 600_000, 100_000]
     insert = 'INSERT INTO call_logs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     for i in range(2):  # both physical attempts count despite shared correlation
         db.execute(insert, [i, *values])
@@ -204,7 +204,8 @@ def test_integration_preserves_overview_and_direct_nr_separately(monkeypatch):
     observation = om.aggregate(snapshot(), prices(), '2026-10-23', '2026-10-23')
     monkeypatch.setattr(om, 'collect', lambda *a, **kw: deepcopy(observation))
     result = usage.build_model_breakdown(1)
-    assert result['totals']['total'] == 1104  # unchanged legacy overview; no router tokens added
+    assert result['totals']['total'] is None  # agent bucket/account overlap is not additive
+    assert result['sources']['accounting_complete'] is False
     assert result['sources']['openclaw']['estimated_cost_usd'] == pytest.approx(0.00001)
     assert result['sources']['openclaw']['unpriced_models'] == 1
     bucket = next(m for m in result['models'] if m['source'] == 'openclaw' and m['provider'] == 'omniroute')

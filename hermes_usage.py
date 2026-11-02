@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -92,7 +92,7 @@ def _route(provider: str, base_url: str) -> str:
         host, port = (parsed.hostname or '').lower(), parsed.port
     except ValueError:
         pass
-    if provider == 'nordrouter' or host.endswith(NORDROUTER_HOST_SUFFIX):
+    if provider == 'nordrouter' or host == NORDROUTER_HOST_SUFFIX or host.endswith('.' + NORDROUTER_HOST_SUFFIX):
         return 'nordrouter'
     if port in OMNIROUTE_PORTS:
         return 'omniroute'
@@ -100,12 +100,12 @@ def _route(provider: str, base_url: str) -> str:
 
 
 def _row_date(first_seen: float | None, last_seen: float | None) -> date | None:
-    """Local day of the row's last activity; the dashboard windows are local."""
+    """UTC last-activity day, matching Gateway and account day buckets."""
     stamp = last_seen if last_seen is not None else first_seen
     if stamp is None:
         return None
     try:
-        return datetime.fromtimestamp(float(stamp)).date()
+        return datetime.fromtimestamp(float(stamp), timezone.utc).date()
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -124,16 +124,11 @@ def model_entries(start_date: str, end_date: str, *, include_daily: bool = True,
     daily: dict[tuple[str, str], dict[str, dict[str, int]]] = {}
 
     for path in state_dbs(root):
-        try:
-            connection = _connect(path)
-        except sqlite3.Error:
-            continue
+        connection = _connect(path)
         try:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 f"SELECT {', '.join(_COLUMNS)} FROM session_model_usage").fetchall()
-        except sqlite3.Error:
-            rows = []
         finally:
             connection.close()
         for row in rows:
@@ -149,7 +144,9 @@ def model_entries(start_date: str, end_date: str, *, include_daily: bool = True,
             if tokens['total'] <= 0:
                 continue
             day = _row_date(row['first_seen'], row['last_seen'])
-            if day is not None and not (start <= day <= end):
+            if day is None:
+                raise ValueError('Hermes usage has no activity date')
+            if not (start <= day <= end):
                 continue
             route = _route(row['billing_provider'], row['billing_base_url'])
             key = (model, route)

@@ -256,3 +256,27 @@ def test_breakdown_reports_hermes_as_not_configured_without_state_db(monkeypatch
     assert result['meta']['hermes_status'] == 'not_configured'
     assert result['models'] == []
     assert result['sources']['hermes']['tokens'] == 0
+
+
+def test_last_activity_day_is_utc_not_the_dashboard_hosts_local_date():
+    from datetime import timezone
+    instant = datetime(2026, 11, 2, 22, 30, tzinfo=timezone.utc).timestamp()
+    assert hermes_usage._row_date(None, instant).isoformat() == '2026-11-02'
+
+
+def test_unreadable_or_undated_usage_is_not_a_successful_zero(tmp_path, monkeypatch):
+    import auto_usage
+    today = date.today().isoformat()
+    path = tmp_path / 'state.db'
+    path.write_text('not a database')
+    with pytest.raises(sqlite3.Error):
+        hermes_usage.model_entries(today, today, root=tmp_path)
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    result = auto_usage.build_model_breakdown(1, source='hermes')
+    assert result['meta']['hermes_status'] == 'unavailable'
+    assert result['sources']['hermes']['tokens'] is None
+    assert result['sources']['hermes']['complete'] is False
+    path.unlink()
+    make_db(path, [{'model': 'unknown-day', 'provider': 'openai', 'input': 10}])
+    with pytest.raises(ValueError, match='activity date'):
+        hermes_usage.model_entries(today, today, root=tmp_path)
