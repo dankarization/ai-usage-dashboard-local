@@ -656,7 +656,7 @@ function renderOpenaiApi(rows) {
   var head = node('div', undefined, card); head.className = 'limit-head';
   var chip = node('span', statusText(snapshot.status || 'unavailable'), head); chip.className = 'chip ' + statusClass(snapshot.status || 'unavailable');
   windowRow(card, {provider: 'openai_api', label: snapshot.label || 'Subsidy', used_percentage: snapshot.used_percentage});
-  function amount(value) { return number(value) ? '$' + value.toFixed(2) : 'Unknown'; }
+  function amount(value) { return number(value) ? '$' + value.toFixed(value > 0 && value < 0.01 ? 6 : 2) : 'Unknown'; }
   if (number(billing.benefit_period_amount_usd)) {
     node('p', 'Subscription entitlement: ' + amount(billing.benefit_period_amount_usd) + ' / ' +
       (billing.benefit_cadence || 'Unknown cadence') + ' (not the initial grant amount)', card).className = 'note';
@@ -680,7 +680,7 @@ function renderOpenaiApi(rows) {
   }
   (billing.grants || []).filter(function (g) { return g.remaining_usd > 0 && !g.scheduled; }).forEach(function (g) {
     node('p', 'Grant (funding unclassified): ' + amount(g.remaining_usd) + ' / ' + amount(g.total_usd) +
-      ' · Received ' + time(g.effective_at) + ' · Expires ' + (g.expires_at ? time(g.expires_at) : 'Unknown'), card).className = 'note';
+      ' · Used ' + amount(g.used_usd) + ' · Received ' + time(g.effective_at) + ' · Expires ' + (g.expires_at ? time(g.expires_at) : 'Unknown'), card).className = 'note';
   });
   node('p', billing.detail || 'Awaiting OpenAI Platform billing evidence.', card).className = 'unavailable';
   if (billing.fetched_at) node('p', 'Checked ' + time(billing.fetched_at), card).className = 'note';

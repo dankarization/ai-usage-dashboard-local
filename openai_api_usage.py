@@ -151,7 +151,7 @@ def export_openai_api_quota(timeout: float = 10) -> list[dict[str, Any]]:
         snapshot["label"] = "All credits (funding unclassified)"
         total = billing["aggregate_total_usd"]
         if total > 0:
-            snapshot["used_percentage"] = round(100 * billing["aggregate_used_usd"] / total, 2)
+            snapshot["percentage"] = round(100 * billing["aggregate_used_usd"] / total)
         billing["detail"] = ("Credit-grant balances verified. Grant rows do not identify ChatGPT subsidy versus other funding. "
                              "Purchased balance is reported separately when supplied. Cycle, paid spend and token funding allocation remain unknown.")
     except HTTPError as exc:

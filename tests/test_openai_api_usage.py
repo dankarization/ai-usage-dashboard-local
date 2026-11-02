@@ -136,7 +136,7 @@ def test_grant_dates_are_not_subscription_reset_or_funding_identity(monkeypatch,
                     'effective_at': 1793491200, 'expires_at': 1796083200, 'is_scheduled': False}]}}
     monkeypatch.setattr(provider, 'urlopen', lambda *a, **k: io.StringIO(json.dumps(payload)))
     row = provider.export_openai_api_quota()[0]
-    assert row['used_percentage'] == 25
+    assert row['percentage'] == 25
     assert row['label'] == 'All credits (funding unclassified)'
     grant = row['billing']['grants'][0]
     assert grant['remaining_usd'] == 75
@@ -172,3 +172,14 @@ def test_subscription_entitlement_is_not_prorated_grant_or_reset(monkeypatch, cr
     assert row['billing']['cycle_start'] is None
     assert row['billing']['cycle_end'] is None
     assert row['billing']['aggregate_total_usd'] == 65
+
+
+def test_authenticated_percentage_survives_live_service_normalization(monkeypatch, credential):
+    payload = {'total_granted': 100, 'total_used': 25, 'total_available': 75,
+               'total_paid_available': 5}
+    monkeypatch.setattr(provider, 'urlopen', lambda *a, **k: io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(service, 'load_env', lambda: None)
+    row = service.quotas('openai_api')['quotas'][0]
+    assert row['used_percentage'] == 25
+    assert row['label'] == 'All credits (funding unclassified)'
+    assert row['billing']['purchased_balance_usd'] == 5
