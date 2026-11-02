@@ -648,14 +648,25 @@ function renderOpenaiApi(rows) {
   if (mark) { mark.replaceChildren(); brandMark('codex', mark); }
   var snapshot = rows[0] || {};
   var billing = snapshot.billing || {};
+  if (billing.organization_name) node('p', 'Organization: ' + billing.organization_name, root).className = 'note';
+  if (billing.link_checked_at) node('p', 'ChatGPT link verified: ' + (billing.linked_account_name || 'linked account') +
+    ' · ' + time(billing.link_checked_at) + ' (saved verification)', root).className = 'note';
   var card = node('div', undefined, root); card.className = 'limit-group';
   card.setAttribute('data-provider', 'openai_api');
   var head = node('div', undefined, card); head.className = 'limit-head';
   var chip = node('span', statusText(snapshot.status || 'unavailable'), head); chip.className = 'chip ' + statusClass(snapshot.status || 'unavailable');
-  windowRow(card, {provider: 'openai_api', label: 'Subsidy', used_percentage: snapshot.used_percentage});
+  windowRow(card, {provider: 'openai_api', label: snapshot.label || 'Subsidy', used_percentage: snapshot.used_percentage});
   function amount(value) { return number(value) ? '$' + value.toFixed(2) : 'Unknown'; }
+  if (number(billing.benefit_period_amount_usd)) {
+    node('p', 'Subscription entitlement: ' + amount(billing.benefit_period_amount_usd) + ' / ' +
+      (billing.benefit_cadence || 'Unknown cadence') + ' (not the initial grant amount)', card).className = 'note';
+    node('p', 'Benefit expiry: ' + time(billing.benefit_expires_at) +
+      ' · Verified ' + time(billing.benefit_checked_at) + ' (saved snapshot' +
+      (billing.benefit_snapshot_expired ? ', expired)' : ')'), card).className = 'note';
+  }
   [ ['Subsidy total', 'subsidy_total_usd'], ['Subsidy used', 'subsidy_used_usd'],
     ['Subsidy remaining', 'subsidy_remaining_usd'], ['Purchased balance', 'purchased_balance_usd'],
+    ['Non-purchased credits (unclassified)', 'unclassified_free_remaining_usd'],
     ['Paid / non-subsidized usage', 'paid_usage_usd'] ].forEach(function (pair) {
     node('p', pair[0] + ': ' + amount(billing[pair[1]]), card).className = 'note';
   });
@@ -667,6 +678,10 @@ function renderOpenaiApi(rows) {
     node('p', 'All credits (unclassified): ' + amount(billing.aggregate_total_usd) + ' total · ' +
       amount(billing.aggregate_used_usd) + ' used · ' + amount(billing.aggregate_remaining_usd) + ' remaining', card).className = 'note';
   }
+  (billing.grants || []).filter(function (g) { return g.remaining_usd > 0 && !g.scheduled; }).forEach(function (g) {
+    node('p', 'Grant (funding unclassified): ' + amount(g.remaining_usd) + ' / ' + amount(g.total_usd) +
+      ' · Received ' + time(g.effective_at) + ' · Expires ' + (g.expires_at ? time(g.expires_at) : 'Unknown'), card).className = 'note';
+  });
   node('p', billing.detail || 'Awaiting OpenAI Platform billing evidence.', card).className = 'unavailable';
   if (billing.fetched_at) node('p', 'Checked ' + time(billing.fetched_at), card).className = 'note';
   node('p', 'Separate from Codex login. Organization billing is not added to local usage history.', card).className = 'note';

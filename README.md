@@ -87,12 +87,22 @@ changing transcription. Ordinary project keys cannot read this browser-session
 billing endpoint: the card displays the HTTP authorization blocker and unknown
 balances, never a fictional $0 or a hardcoded monthly grant.
 
-An existing Platform billing session key can optionally be supplied privately as
+An operator-authorized Platform session can be stored outside Git in
+`~/.config/ai-usage-dashboard/openai-billing.json` (directory mode `0700`,
+file mode `0600`, fields `session_key`, `organization_id`, optional
+`organization_name`). `OPENAI_BILLING_SESSION_FILE` overrides that path.
+Symlinks and files accessible to other users are rejected. Expired sessions
+produce an explicit authorization state and require reconnection.
+
+An existing Platform billing session key can alternatively be supplied privately as
 `OPENAI_BILLING_SESSION_KEY`, with `OPENAI_BILLING_ORG_ID` when needed to select
 the linked organization. Do not commit session credentials or exports. A usage
-admin key is not a substitute for grant identity. Aggregate credits are shown as
-unclassified: they cannot establish a ChatGPT subsidy, purchased balance, paid
+admin key is not a substitute for grant identity. The authoritative `total_paid_available` field supplies purchased balance.
+Aggregate credits otherwise remain unclassified: they cannot establish a ChatGPT subsidy, paid
 usage, subscription cycle, or token funding split. Those fields remain unknown
-until an authoritative funding-specific source is available. Grant expiry is
+until an authoritative funding-specific source is available. Verified subscription
+entitlement and link metadata may be stored with their verification timestamps;
+the card labels them as saved snapshots, not fresh grant allocation. Entitlement
+is not treated as the prorated initial grant. Grant expiry is
 not treated as a recurring reset. Organization billing is deliberately not added
 to token history or overview totals, which already include local agent sessions.

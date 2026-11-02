@@ -259,6 +259,22 @@ renderOpenaiApi([{provider:'openai_api', status:'partial', billing:{aggregate_to
 assert(apiRoot.textContent.includes('All credits (unclassified): $100.00 total · $0.00 used'), 'real aggregate zero is preserved');
 assert(apiRoot.textContent.includes('Subsidy total: Unknown'), 'aggregate is not subsidy');
 
+renderOpenaiApi([{provider:'openai_api', status:'partial', label:'All credits (funding unclassified)', used_percentage:32.28, billing:{
+  organization_name:'Example', purchased_balance_usd:6.11, unclassified_free_remaining_usd:65,
+  benefit_period_amount_usd:100, benefit_cadence:'monthly', benefit_expires_at:'2026-11-21T19:23:47Z',
+  benefit_checked_at:'2026-11-03T00:00:00Z', benefit_snapshot_expired:false,
+  grants:[{total_usd:65, remaining_usd:65, effective_at:'2026-11-01T00:00:00Z',expires_at:'2026-11-21T19:23:47Z'}]
+}}]);
+assert(apiRoot.textContent.includes('Purchased balance: $6.11'), 'purchased balance comes from paid field');
+assert(apiRoot.textContent.includes('Paid / non-subsidized usage: Unknown'), 'purchased balance is not paid usage');
+assert(apiRoot.textContent.includes('Subscription entitlement: $100.00 / monthly (not the initial grant amount)'), 'entitlement is distinct from grant');
+assert(apiRoot.textContent.includes('saved snapshot'), 'benefit verification is not advertised as live');
+assert(apiRoot.textContent.includes('Grant (funding unclassified): $65.00 / $65.00'), 'unclassified grant is not relabelled subsidy');
+assert(apiRoot.textContent.includes('Subsidy total: Unknown'), 'entitlement does not fabricate current subsidy grant');
+const apiBar = all(apiRoot).find((e) => e.getAttribute('role') === 'progressbar');
+assertEqual(apiBar.getAttribute('aria-label'), 'All credits (funding unclassified) used', 'aggregate bar names its actual pool');
+assertEqual(apiBar.getAttribute('aria-valuenow'), '32', 'aggregate progress is authoritative');
+
 /* ---------------- quota rendering ---------------- */
 renderQuotas(QUOTAS, MODELS);
 

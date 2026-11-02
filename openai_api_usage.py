@@ -39,6 +39,7 @@ def parse_credit_grants(data: Any) -> dict[str, Any]:
     grants = data.get("grants")
     rows = grants.get("data") if isinstance(grants, dict) else None
     expiries = []
+    public_grants = []
     if isinstance(rows, list):
         for row in rows:
             if not isinstance(row, dict):
@@ -48,7 +49,20 @@ def parse_credit_grants(data: Any) -> dict[str, Any]:
                 if isinstance(expiry, bool) or not isinstance(expiry, (int, float)) or not math.isfinite(expiry) or expiry <= 0:
                     raise ValueError("invalid expiry")
                 expiries.append(datetime.fromtimestamp(expiry, timezone.utc).isoformat())
-    return {**amounts, "aggregate_grant_expiries": sorted(set(expiries))}
+            if "grant_amount" in row and "used_amount" in row:
+                amount, spent = _money(row["grant_amount"]), _money(row["used_amount"])
+                if amount is None or spent is None or spent > amount + .02:
+                    raise ValueError("invalid grant amounts")
+                effective = row.get("effective_at")
+                if isinstance(effective, bool) or not isinstance(effective, (int, float)) or not math.isfinite(effective):
+                    raise ValueError("invalid grant effective time")
+                public_grants.append({"total_usd": amount, "used_usd": spent,
+                    "remaining_usd": max(0., amount - spent),
+                    "effective_at": datetime.fromtimestamp(effective, timezone.utc).isoformat(),
+                    "expires_at": datetime.fromtimestamp(expiry, timezone.utc).isoformat() if expiry else None,
+                    "scheduled": row.get("is_scheduled") is True,
+                    "funding": "unclassified"})
+    return {**amounts, "aggregate_grant_expiries": sorted(set(expiries)), "grants": public_grants}
 
 
 def _inference_key() -> str:
@@ -66,6 +80,28 @@ def _inference_key() -> str:
         return ""
 
 
+def _billing_session() -> dict[str, str]:
+    """Read an operator-authorized session from a private, non-Git file."""
+    if os.environ.get("OPENAI_BILLING_SESSION_KEY"):
+        return {"session_key": os.environ["OPENAI_BILLING_SESSION_KEY"],
+                "organization_id": os.environ.get("OPENAI_BILLING_ORG_ID", "")}
+    path = Path(os.environ.get("OPENAI_BILLING_SESSION_FILE") or str(
+        Path.home() / ".config/ai-usage-dashboard/openai-billing.json"))
+    try:
+        info = path.lstat()
+        if not path.is_file() or path.is_symlink() or info.st_mode & 0o077 or info.st_uid != os.getuid():
+            return {}
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict) or not isinstance(data.get("session_key"), str):
+            return {}
+        return {k: v for k, v in data.items() if k in
+                ("session_key", "organization_id", "organization_name", "linked_account_name",
+                 "link_state", "link_checked_at", "benefit_period_amount_usd", "benefit_cadence",
+                 "benefit_expires_at", "benefit_checked_at") and isinstance(v, str)}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def export_openai_api_quota(timeout: float = 10) -> list[dict[str, Any]]:
     billing: dict[str, Any] = {
         "subsidy_total_usd": None, "subsidy_used_usd": None,
@@ -77,25 +113,53 @@ def export_openai_api_quota(timeout: float = 10) -> list[dict[str, Any]]:
         "source": "OpenAI Platform credit grants",
     }
     snapshot = {"provider": "openai_api", "label": "API subsidy", "status": "unavailable", "billing": billing}
-    session_key = os.environ.get("OPENAI_BILLING_SESSION_KEY", "")
-    key = session_key or _inference_key()
+    session = _billing_session()
+    key = session.get("session_key") or _inference_key()
     if not key:
         billing["detail"] = "No OpenAI credential available. Platform billing sign-in is required; Codex login is a separate pool."
         return [snapshot]
     headers = {"Authorization": "Bearer " + key, "Accept": "application/json"}
-    if os.environ.get("OPENAI_BILLING_ORG_ID"):
-        headers["OpenAI-Organization"] = os.environ["OPENAI_BILLING_ORG_ID"]
+    org = os.environ.get("OPENAI_BILLING_ORG_ID") or session.get("organization_id")
+    if org:
+        headers["OpenAI-Organization"] = org
+    for field in ("organization_name", "linked_account_name", "link_state", "link_checked_at"):
+        if session.get(field):
+            billing[field] = session[field]
+    if session.get("benefit_checked_at"):
+        try:
+            period_amount = float(session["benefit_period_amount_usd"])
+            expiry = datetime.fromisoformat(session["benefit_expires_at"].replace("Z", "+00:00"))
+            checked = datetime.fromisoformat(session["benefit_checked_at"].replace("Z", "+00:00"))
+            if _money(period_amount) is not None and expiry.tzinfo and checked.tzinfo:
+                billing["benefit_period_amount_usd"] = period_amount
+                for field in ("benefit_cadence", "benefit_expires_at", "benefit_checked_at"):
+                    billing[field] = session.get(field)
+                billing["benefit_snapshot_expired"] = expiry <= datetime.now(timezone.utc)
+        except (ValueError, KeyError, TypeError, OverflowError):
+            pass
     try:
         with urlopen(Request(CREDITS_URL, headers=headers), timeout=timeout) as response:
             data = json.load(response)
         billing.update(parse_credit_grants(data))
+        if "total_paid_available" in data:
+            paid = _money(data["total_paid_available"])
+            if paid is None or paid > billing["aggregate_remaining_usd"] + .02:
+                raise ValueError("invalid purchased balance")
+            billing["purchased_balance_usd"] = paid
+            billing["unclassified_free_remaining_usd"] = max(0., billing["aggregate_remaining_usd"] - paid)
         snapshot["status"] = "partial"
-        billing["detail"] = ("Aggregate credits verified, but this source does not identify ChatGPT subsidy versus purchased credits. "
-                             "Cycle, paid spend and token funding allocation remain unknown.")
+        snapshot["label"] = "All credits (funding unclassified)"
+        total = billing["aggregate_total_usd"]
+        if total > 0:
+            snapshot["used_percentage"] = round(100 * billing["aggregate_used_usd"] / total, 2)
+        billing["detail"] = ("Credit-grant balances verified. Grant rows do not identify ChatGPT subsidy versus other funding. "
+                             "Purchased balance is reported separately when supplied. Cycle, paid spend and token funding allocation remain unknown.")
     except HTTPError as exc:
         # Never echo the body: provider errors can include credential fragments.
         billing["http_status"] = exc.code
         billing["detail"] = (
+            "The saved OpenAI Platform billing session expired or was denied (HTTP " + str(exc.code) + "). Reconnect the authorized Platform session."
+            if session and exc.code in (401, 403) else
             "Billing requires an authenticated OpenAI Platform session for the linked organization; "
             "the existing transcription/project API key cannot read credit grants (HTTP " + str(exc.code) + "). "
             "An organization usage/admin key alone does not establish the subsidy or purchased balance."

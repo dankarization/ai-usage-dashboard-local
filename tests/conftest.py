@@ -19,6 +19,7 @@ def isolated_environment(tmp_path, monkeypatch):
     """Restore the process environment and redirect the saved-window database."""
     import openai_api_usage
     monkeypatch.setattr(openai_api_usage, "_inference_key", lambda: "")
+    monkeypatch.setenv("OPENAI_BILLING_SESSION_FILE", str(tmp_path / "missing-session.json"))
     monkeypatch.delenv("OPENAI_BILLING_SESSION_KEY", raising=False)
     before = dict(os.environ)
     os.environ['OPENCLAW_USAGE_CACHE_DIR'] = str(tmp_path / 'openclaw-cache')
