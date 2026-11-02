@@ -282,18 +282,20 @@ def _opencode_extra_dbs():
         pass
     return dbs
 
-def get_date_range(days=30):
-    # Account/Gateway days are UTC, independent of the host-local clock.
-    today = datetime.now(ZoneInfo('UTC'))
+def _date_range_from_clock(days, today):
     start = today - timedelta(days=days - 1)
-    
-    start_date = start.strftime('%Y-%m-%d')
-    end_date = today.strftime('%Y-%m-%d')
-    
-    start_ts = int(start.timestamp() * 1000)
-    end_ts = int(today.timestamp() * 1000)
-    
-    return start_date, end_date, start_ts, end_ts
+    return (start.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d'),
+            int(start.timestamp() * 1000), int(today.timestamp() * 1000))
+
+
+def get_date_range(days=30):
+    """Legacy exports retain their existing host-local calendar convention."""
+    return _date_range_from_clock(days, datetime.now())
+
+
+def get_model_date_range(days=30):
+    """Model/account analytics share UTC days, not the host-local date."""
+    return _date_range_from_clock(days, datetime.now(ZoneInfo('UTC')))
 
 
 def list_dates_in_range(start_date: str, end_date: str) -> list[date]:
@@ -2865,7 +2867,7 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     """
     import openclaw_usage
 
-    start_str, end_str, _, _ = get_date_range(days)
+    start_str, end_str, _, _ = get_model_date_range(days)
     models = []
     gateway_status = 'pending'
     gateway_cached_at_utc = None

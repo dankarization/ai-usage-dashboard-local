@@ -192,7 +192,7 @@ def model_breakdown(response: Response, days: int = 30, daily: bool = True, refr
     # do not queue a period switch behind an unrelated full provider refresh.
     load_env()
     # Include the UTC day in the identity: no prior-day snapshot crosses midnight.
-    start, end, _, _ = auto_usage.get_date_range(days)
+    start, end, _, _ = auto_usage.get_model_date_range(days)
     key = ('models', start, end, days, daily, source)
     def collect():
         if source == 'all':

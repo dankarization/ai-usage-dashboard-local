@@ -140,13 +140,14 @@ def export_openai_api_quota(timeout: float = 10) -> list[dict[str, Any]]:
     try:
         with urlopen(Request(CREDITS_URL, headers=headers), timeout=timeout) as response:
             data = json.load(response)
-        billing.update(parse_credit_grants(data))
+        parsed = parse_credit_grants(data)
         if "total_paid_available" in data:
             paid = _money(data["total_paid_available"])
-            if paid is None or paid > billing["aggregate_remaining_usd"] + .02:
+            if paid is None or paid > parsed["aggregate_remaining_usd"] + .02:
                 raise ValueError("invalid purchased balance")
-            billing["purchased_balance_usd"] = paid
-            billing["unclassified_free_remaining_usd"] = max(0., billing["aggregate_remaining_usd"] - paid)
+            parsed["purchased_balance_usd"] = paid
+            parsed["unclassified_free_remaining_usd"] = max(0., parsed["aggregate_remaining_usd"] - paid)
+        billing.update(parsed)
         snapshot["status"] = "partial"
         snapshot["label"] = "All credits (funding unclassified)"
         total = billing["aggregate_total_usd"]

@@ -163,7 +163,7 @@ def test_breakdown_preserves_hero_bill_and_annotates_residual(monkeypatch):
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture')
     monkeypatch.setattr(auto_usage._hermes_usage, 'state_dbs', lambda: [])
-    monkeypatch.setattr(auto_usage, 'get_date_range', lambda days: ('2026-11-01', '2026-11-01', None, None))
+    monkeypatch.setattr(auto_usage, 'get_model_date_range', lambda days: ('2026-11-01', '2026-11-01', None, None))
     monkeypatch.setattr(openclaw_usage, 'load_with_cache', lambda *a, **kw: {
         'status': 'ok', 'cached_at_utc': None, 'gateway_cache_status': None, 'error': None,
         'response': {'aggregates': {'byModel': [
@@ -211,7 +211,7 @@ def test_daily_presentation_flag_does_not_change_accounting(monkeypatch):
     import copy
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture')
-    monkeypatch.setattr(auto_usage, 'get_date_range', lambda days: ('2026-11-01', '2026-11-01', None, None))
+    monkeypatch.setattr(auto_usage, 'get_model_date_range', lambda days: ('2026-11-01', '2026-11-01', None, None))
     monkeypatch.setattr(auto_usage._hermes_usage, 'state_dbs', lambda: [])
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
     monkeypatch.setattr(auto_usage._nordrouter_usage.Client, 'get', lambda *a, **kw: ({
@@ -233,3 +233,13 @@ def test_daily_presentation_flag_does_not_change_accounting(monkeypatch):
     assert false['totals'] == true['totals']
     assert all(not m['daily'] for m in false['models'])
     assert not next(m for m in false['models'] if m['source'] == 'omniroute')['bucket_usage']['routes'][0]['daily']
+
+
+def test_daily_residual_is_unavailable_when_day_and_model_caps_disagree():
+    models = [account('vendor/a', 5, .1), account('vendor/b', 95, .9),
+              bucket('one', [route('a', 40)])]
+    result = om.account_overlap(models, router_status='ok',
+                                nr_daily=[{'date': '2026-11-01', 'tokens': 100}])
+    assert result['exclusive_tokens'] == 95
+    assert result['proven_tokens'] == 5
+    assert result['days_ready'] is False and result['daily'] is None

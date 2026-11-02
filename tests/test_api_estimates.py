@@ -104,7 +104,7 @@ def category_payload(monkeypatch):
     frozen = deepcopy(aggregate)
     monkeypatch.setattr(openclaw_usage, 'load_with_cache', lambda *_: dict(
         response=frozen, status='ok', cached_at_utc=None, error=None, gateway_cache_status='fresh'))
-    monkeypatch.setattr(auto_usage, 'get_date_range', lambda _: ('2026-10-21', '2026-10-27', None, None))
+    monkeypatch.setattr(auto_usage, 'get_model_date_range', lambda _: ('2026-10-21', '2026-10-27', None, None))
     monkeypatch.setattr(auto_usage._hermes_usage, 'state_dbs', lambda: ['fixture'])
     hermes = dict(source='hermes', provider='openai', model='gpt-6-sol-900k',
                   totals=tokens(1000000, 1000000, 1000000), daily=[dict(date='2026-10-21', **tokens(1000000, 1000000, 1000000))],

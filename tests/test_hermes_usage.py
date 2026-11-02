@@ -199,7 +199,7 @@ def test_breakdown_adds_hermes_and_keeps_nordrouter_comparison_only(monkeypatch,
     monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
     monkeypatch.setattr(openclaw_usage, 'fetch_usage',
                         lambda *a: (_ for _ in ()).throw(RuntimeError('gateway down')))
-    monkeypatch.setattr(auto_usage, 'get_date_range',
+    monkeypatch.setattr(auto_usage, 'get_model_date_range',
                         lambda days: (today.isoformat(), today.isoformat(), None, None))
 
     result = auto_usage.build_model_breakdown(days=1, source='hermes')
@@ -234,7 +234,7 @@ def test_hermes_uses_api_categories_not_another_sources_effective_cost(monkeypat
          'totals': {'input': 9_000, 'output': 0, 'cache_read': 0, 'cache_write': 0, 'total': 9_000},
          'daily': [], 'cost_usd': 9.0, 'cost_kind': 'estimated'},
     ])
-    monkeypatch.setattr(auto_usage, 'get_date_range',
+    monkeypatch.setattr(auto_usage, 'get_model_date_range',
                         lambda days: (today.isoformat(), today.isoformat(), None, None))
 
     result = auto_usage.build_model_breakdown(days=1, source='all')

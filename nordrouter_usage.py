@@ -51,6 +51,8 @@ def _sanitize(endpoint, body):
                    "amount_usd": float(row["amount_usd"])} for row in body["top_models"]]
         if (len({row['date'] for row in daily}) != len(daily)
                 or len({row['id'] for row in models}) != len(models)
+                or not math.isfinite(float(body['totals']['amount_usd']))
+                or float(body['totals']['amount_usd']) < 0
                 or any(row['tokens'] < 0 or not math.isfinite(row['amount_usd']) or row['amount_usd'] < 0
                        for row in daily + models)):
             raise ValueError('Invalid or duplicate account aggregates')

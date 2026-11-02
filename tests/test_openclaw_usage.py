@@ -218,7 +218,7 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
                     'top_models': [{'id': 'nr-model', 'tokens': 20,
                                     'amount_usd': 0.4}]}, False
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture-key')
-    monkeypatch.setattr('auto_usage.get_date_range', lambda days: ('2026-10-01', '2026-10-07', None, None))
+    monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: ('2026-10-01', '2026-10-07', None, None))
     monkeypatch.setattr('auto_usage._nordrouter_usage.Client', DirectClient)
     # The real Hermes databases on this host are not part of this contract.
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
@@ -398,7 +398,7 @@ def test_api_gateway_failure_requires_exact_saved_window(cache, monkeypatch, has
                                       fetched_at=original)
     monkeypatch.setattr(local_display_service, 'load_env', lambda: None)
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', failing_read)
-    monkeypatch.setattr('auto_usage.get_date_range',
+    monkeypatch.setattr('auto_usage.get_model_date_range',
                         lambda days: ('2026-10-02', '2026-10-08', None, None))
     client = TestClient(local_display_service.app, raise_server_exceptions=False)
     response = client.get('/api/v1/model-breakdown?days=7&source=openclaw')
@@ -411,7 +411,7 @@ def test_api_gateway_failure_requires_exact_saved_window(cache, monkeypatch, has
     assert body['sources']['openclaw']['complete'] is False
 
     if has_older_window:
-        monkeypatch.setattr('auto_usage.get_date_range', lambda days: (START, END, None, None))
+        monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: (START, END, None, None))
         response = client.get('/api/v1/model-breakdown?days=7&source=openclaw')
         assert response.status_code == 200, response.text
         assert response.json()['meta']['openclaw_status'] == 'cached'
@@ -532,7 +532,7 @@ def test_failure_text_is_bounded_and_free_of_paths_and_secrets(cache):
 
 def test_breakdown_serves_the_saved_window_with_time_and_failure_text(cache, monkeypatch):
     """The API reports a saved window as stale, with its original fetch time."""
-    monkeypatch.setattr('auto_usage.get_date_range', lambda days: (START, END, None, None))
+    monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: (START, END, None, None))
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
     monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', live_read)
@@ -551,13 +551,13 @@ def test_breakdown_serves_the_saved_window_with_time_and_failure_text(cache, mon
     assert cached['sources']['openclaw']['tokens'] == 10
     assert cached['totals']['total'] is None
     # A missing window still reports an honest unavailable.
-    monkeypatch.setattr('auto_usage.get_date_range', lambda days: ('2026-01-01', '2026-01-07', None, None))
+    monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: ('2026-01-01', '2026-01-07', None, None))
     assert build_model_breakdown(days=7, source='openclaw')['meta']['openclaw_status'] == 'unavailable'
 
 
 def test_cached_and_live_breakdowns_agree_except_for_staleness(cache, monkeypatch):
     """Identical input must produce identical accounting, stale status aside."""
-    monkeypatch.setattr('auto_usage.get_date_range', lambda days: (START, END, None, None))
+    monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: (START, END, None, None))
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
     monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', live_read)
@@ -888,7 +888,7 @@ def test_a_failed_read_stores_nothing(cache):
 
 @pytest.mark.parametrize('status', ['partial', 'stale', 'refreshing'])
 def test_partial_gateway_snapshot_never_completes_overview(cache, monkeypatch, status):
-    monkeypatch.setattr('auto_usage.get_date_range', lambda days: (START, END, None, None))
+    monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: (START, END, None, None))
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda: [])
     monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {

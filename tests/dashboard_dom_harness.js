@@ -282,6 +282,11 @@ assert(defaultApiText.includes('$71.07 remaining') && defaultApiText.includes('P
   'default card contains authoritative balances');
 assert(!defaultApiText.includes('Unknown') && !defaultApiText.includes('Subscription entitlement') &&
   !defaultApiText.includes('Grant (funding'), 'default card omits technical and Unknown-field noise');
+renderOpenaiApi([{provider:'openai_api', status:'unavailable', billing:{aggregate_total_usd:100,
+  aggregate_used_usd:20, aggregate_remaining_usd:80, detail:'Billing response rejected'}}]);
+assert(apiRoot.textContent.includes('Billing response rejected'), 'rejected billing is visible');
+assert(!apiRoot.textContent.includes('$80.00 remaining'), 'rejected aggregate cannot masquerade as a balance');
+assert(!all(apiRoot).some((e) => e.getAttribute('role') === 'progressbar'), 'rejected balance has no valid-looking bar');
 /* ---------------- quota rendering ---------------- */
 renderQuotas(QUOTAS, MODELS);
 

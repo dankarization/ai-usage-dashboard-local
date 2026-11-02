@@ -651,7 +651,7 @@ function renderOpenaiApi(rows) {
   var card = node('div', undefined, root); card.className = 'limit-group';
   card.setAttribute('data-provider', 'openai_api');
   function amount(value) { return number(value) ? '$' + value.toFixed(value > 0 && value < 0.01 ? 6 : 2) : '—'; }
-  var available = number(billing.aggregate_remaining_usd);
+  var available = (snapshot.status === 'ok' || snapshot.status === 'partial') && number(billing.aggregate_remaining_usd);
   if (available) {
     windowRow(card, {provider: 'openai_api', label: 'All API credits', used_percentage: snapshot.used_percentage});
     node('p', amount(billing.aggregate_remaining_usd) + ' remaining · ' +

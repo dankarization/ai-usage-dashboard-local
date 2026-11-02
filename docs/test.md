@@ -35,7 +35,8 @@ Keep local credentials, exports, generated payloads/charts, logs, and unredacted
 ## Accounting and read-cache contracts
 
 Usage-day windows are UTC for Gateway, Hermes, router observations and account
-analytics; snapshot timestamps still use the viewer's clock. The model chart
+analytics; snapshot timestamps still use the viewer's clock. The legacy export payload
+keeps its existing host-local date window independently of model analytics. The model chart
 uses agent rows, while the separate account chart has only all-model daily totals.
 Do not infer account-model days from small agent samples. Partial router retention
 must not suppress older agent bucket days. Independent provider rows sharing an
@@ -44,7 +45,9 @@ account model name are not account-route comparisons.
 `daily=false` omits presentation arrays after overlap reconciliation; it must not
 change account/residual tokens. Malformed Gateway aggregates cannot replace a
 valid saved window. Partial, refreshing, stale and unavailable sources cannot
-complete the canonical overview. Duplicate account dates are not summed as a
+complete the canonical overview. Daily overlap residuals are withheld when per-day caps contradict the model-window
+reconciliation. Rejected credit data is admitted atomically, never partially shown
+as a valid balance. Duplicate account dates are not summed as a
 complete period; omitted top models remain explicitly unattributed.
 
 The in-process read cache is bounded to 32 projections, keyed by exact UTC window,

@@ -195,7 +195,7 @@ def test_integration_preserves_overview_and_direct_nr_separately(monkeypatch):
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture')
     monkeypatch.setattr(usage._hermes_usage, 'state_dbs', lambda: [])
-    _, today, *_ = usage.get_date_range(1)
+    _, today, *_ = usage.get_model_date_range(1)
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [
         {'provider': 'omniroute', 'model': 'parent', 'totals': {'totalTokens': 99, 'totalCost': 0}},
         {'provider': 'xai', 'model': 'grok-4.7', 'totals': {'input': 5, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 5, 'totalCost': 0.2}}], 'modelDaily': []}})

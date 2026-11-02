@@ -378,6 +378,12 @@ def account_overlap(models, *, router_status=None, nr_daily=None):
                 daily.append({'date': day['date'], 'tokens': account - subtracted,
                               'subtracted': subtracted, 'unreconciled': max(0, matched - account)})
     proven_tokens = sum(note.get('overlap_proven_tokens') or 0 for note in annotations)
+    # A day-wide cap and per-model window caps are not interchangeable. Without
+    # account model-day data, refuse a daily partition that contradicts the
+    # model-window reconciliation instead of publishing two different residuals.
+    if daily is not None and sum(day['subtracted'] for day in daily) != proven_tokens:
+        daily = None
+        days_ready = False
     unreconciled_tokens = sum(note.get('overlap_unreconciled_tokens') or 0 for note in annotations)
     statuses = {note.get('exclusive_status') for note in annotations}
     if not account_rows:

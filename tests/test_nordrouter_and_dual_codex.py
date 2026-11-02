@@ -274,7 +274,7 @@ def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypa
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
-    start, end, _, _ = usage.get_date_range(7)
+    start, end, _, _ = usage.get_model_date_range(7)
     matched = analytics(7)
     matched['daily'] = [{'date': day.isoformat(), 'tokens': 123 if day.isoformat() == end else 0,
                          'amount_usd': 2 if day.isoformat() == end else 0}
@@ -302,7 +302,7 @@ def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(monkeypatc
     import openclaw_usage
 
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
-    start, end, _, _ = usage.get_date_range(1)
+    start, end, _, _ = usage.get_model_date_range(1)
     assert start == end == datetime.now(usage.ZoneInfo('UTC')).date().isoformat()
     requested = []
 
@@ -335,7 +335,7 @@ def test_source_breakdowns_do_not_collect_the_other_source(monkeypatch):
     import openclaw_usage
 
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
-    start, end, _, _ = usage.get_date_range(1)
+    start, end, _, _ = usage.get_model_date_range(1)
     calls = []
 
     def gateway(first, last):
@@ -373,7 +373,7 @@ def test_direct_source_http_finishes_while_gateway_source_is_stalled(monkeypatch
     monkeypatch.setattr(service, 'load_env', lambda: None)
     started = threading.Event()
     release = threading.Event()
-    end = usage.get_date_range(1)[1]
+    end = usage.get_model_date_range(1)[1]
 
     def slow_gateway(*args):
         started.set()
@@ -412,9 +412,9 @@ def test_one_day_window_rolls_over_at_utc_midnight(monkeypatch):
             return cls.current.replace(tzinfo=tz) if tz is not None else cls.current
 
     monkeypatch.setattr(usage, 'datetime', Clock)
-    assert usage.get_date_range(1)[:2] == ('2026-10-08', '2026-10-08')
+    assert usage.get_model_date_range(1)[:2] == ('2026-10-08', '2026-10-08')
     Clock.current = datetime(2026, 10, 9, 0, 0, 0)
-    assert usage.get_date_range(1)[:2] == ('2026-10-09', '2026-10-09')
+    assert usage.get_model_date_range(1)[:2] == ('2026-10-09', '2026-10-09')
 
 
 @pytest.mark.parametrize('plan', ['prolite', 'pro', 'pro500', 'plus', 'unknown', None, {'unexpected': 'secret'}])
@@ -458,7 +458,7 @@ def test_account_top_list_residual_and_duplicate_days(monkeypatch):
     import copy
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
-    monkeypatch.setattr(usage, 'get_date_range', lambda days: ('2026-10-02', '2026-10-02', None, None))
+    monkeypatch.setattr(usage, 'get_model_date_range', lambda days: ('2026-10-02', '2026-10-02', None, None))
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
     monkeypatch.setattr(usage._hermes_usage, 'state_dbs', lambda: [])
     body = {'window_days': 1, 'totals': {'amount_usd': 1},
@@ -494,3 +494,15 @@ def test_account_cache_refreshes_at_utc_midnight_even_within_ttl(monkeypatch, tm
     clock[0] += 2
     client.get('analytics', days=7)
     assert len(calls) == 2
+
+
+def test_utc_model_window_does_not_change_legacy_local_exports(monkeypatch):
+    from zoneinfo import ZoneInfo
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            instant = datetime(2026, 11, 3, 2, 30, tzinfo=ZoneInfo('Asia/Tbilisi'))
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+    monkeypatch.setattr(usage, 'datetime', Clock)
+    assert usage.get_date_range(1)[:2] == ('2026-11-03', '2026-11-03')
+    assert usage.get_model_date_range(1)[:2] == ('2026-11-02', '2026-11-02')

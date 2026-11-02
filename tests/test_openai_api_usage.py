@@ -183,3 +183,13 @@ def test_authenticated_percentage_survives_live_service_normalization(monkeypatc
     assert row['used_percentage'] == 25
     assert row['label'] == 'All credits (funding unclassified)'
     assert row['billing']['purchased_balance_usd'] == 5
+
+
+def test_rejected_purchased_balance_never_leaves_displayable_aggregate(monkeypatch, credential):
+    payload = {'total_granted': 100, 'total_used': 20, 'total_available': 80,
+               'total_paid_available': 90}
+    monkeypatch.setattr(provider, 'urlopen', lambda *a, **k: io.StringIO(json.dumps(payload)))
+    row = provider.export_openai_api_quota()[0]
+    assert row['status'] == 'unavailable'
+    assert row['billing'].get('aggregate_remaining_usd') is None
+    assert row['billing']['purchased_balance_usd'] is None
