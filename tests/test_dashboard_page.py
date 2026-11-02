@@ -64,9 +64,9 @@ def test_page_orders_quotas_codex_then_grok_then_rest():
     # The requested hierarchy is overall statistics, then Codex accounts, then
     # Grok, then NordRouter. The page markup must place the sections in order.
     order = [DASHBOARD_HTML.index(marker) for marker in
-             ('id="hero"', 'id="codex"', 'id="quotas"', 'id="h-nord"', 'id="history"')]
-    assert order == sorted(order), 'sections must be stats, Codex, Grok, NordRouter, history'
-    assert "var QUOTA_ORDER = ['codex', 'openai_api', 'grok']" in DASHBOARD_HTML
+             ('id="hero"', 'id="codex"', 'id="quotas"', 'id="openai-api"', 'id="h-nord"', 'id="history"')]
+    assert order == sorted(order), 'sections must be stats, Codex, Grok, OpenAI API, NordRouter, history'
+    assert "var QUOTA_ORDER = ['codex', 'grok', 'openai_api']" in DASHBOARD_HTML
 
 
 def test_page_marks_brand_and_colors_by_remaining_capacity():

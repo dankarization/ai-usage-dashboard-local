@@ -254,14 +254,14 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="panel flat"><div id="codex"></div></div>
   </section>
 
-  <section aria-labelledby="h-openai-api">
-    <div class="sec-head"><h2 id="h-openai-api" class="quota-title"><span id="openai-api-brand"></span>OpenAI API</h2></div>
-    <div class="panel flat"><div id="openai-api"></div></div>
-  </section>
-
   <section aria-labelledby="h-grok">
     <div class="sec-head"><h2 id="h-grok" class="quota-title"><span id="grok-brand"></span>xAI Grok</h2></div>
     <div class="panel flat"><div id="quotas"></div></div>
+  </section>
+
+  <section aria-labelledby="h-openai-api">
+    <div class="sec-head"><h2 id="h-openai-api" class="quota-title"><span id="openai-api-brand"></span>OpenAI API</h2></div>
+    <div class="panel flat"><div id="openai-api"></div></div>
   </section>
 
   <section aria-labelledby="h-nord">
@@ -628,7 +628,7 @@ function groupQuotas(rows) {
 /* Quota section order the user asked for: Codex accounts first (account 1,
    then account 2, each showing configured or unconfigured state), then Grok,
    then any remaining providers. NordRouter renders in its own section. */
-var QUOTA_ORDER = ['codex', 'openai_api', 'grok'];
+var QUOTA_ORDER = ['codex', 'grok', 'openai_api'];
 function orderGroups(groups) {
   return groups.slice().sort(function (a, b) {
     var ia = QUOTA_ORDER.indexOf(a.provider);
