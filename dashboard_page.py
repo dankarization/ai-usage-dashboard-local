@@ -1222,6 +1222,11 @@ function tableModels(data) {
     });
     if (!billed && incompletePrice && number(cost)) costKind = 'partial';
     agents.forEach(function (row) { addTotals(comparison, row.totals); });
+    // A missing category is not a reported zero, including account-only rows.
+    ['input', 'output', 'cache_read', 'cache_write'].forEach(function (field) {
+      if (!shown.length || shown.some(function (row) { return !number((row.totals || {})[field]); })) totals[field] = null;
+      if (!agents.length || agents.some(function (row) { return !number((row.totals || {})[field]); })) comparison[field] = null;
+    });
     var accountBilledTokens = null, accountBilledCost = null, proven = 0, unreconciled = 0, unknownTokens = 0, exclusiveStatus = null, accountOnce = false, matchedBuckets = [];
     if (exclusive) {
       var residual = directNotes.reduce(function (sum, note) { return sum + note.exclusive_tokens; }, 0);
@@ -1290,7 +1295,8 @@ function tableModels(data) {
 function modelSortValue(row, key) {
   if (key === 'source') return row.source === 'nordrouter' ? 'NordRouter' : row.provider || null;
   if (key === 'model') return row.model || null;
-  var value = key === 'usd' ? row.cost_usd : row.totals && row.totals[key];
+  var categories = row.comparison_categories || row.totals || {};
+  var value = key === 'usd' ? row.cost_usd : (key === 'total' ? row.totals && row.totals.total : categories[key]);
   return number(value) ? value : null;
 }
 function sortedModels(rows) {

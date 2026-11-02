@@ -20,6 +20,8 @@ Rules that keep a cache from becoming a liability:
 from __future__ import annotations
 
 import os
+import fcntl
+import time
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -108,6 +110,31 @@ def _refuse(state: str) -> None:
 
 
 @contextmanager
+def _initialization_guard(target):
+    """Serialize only first-time WAL/schema setup across dashboard processes.
+
+    SQLite's journal-mode transition can fail immediately on a concurrent empty
+    database despite busy_timeout. Ordinary transactions keep SQLite ownership.
+    """
+    path = target.with_name(target.name + '.init.lock')
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'a') as guard:
+        deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+        while True:
+            try:
+                fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise StoreUnavailable('dashboard database initialization busy')
+                time.sleep(.01)
+        try:
+            yield
+        finally:
+            fcntl.flock(guard, fcntl.LOCK_UN)
+
+
+@contextmanager
 def connection(path=None, *, create: bool):
     """Open the dashboard database, refusing a file that is not ours.
 
@@ -145,9 +172,21 @@ def connection(path=None, *, create: bool):
             yield None
             return
         if state == 'empty':
-            # The journal mode cannot change inside a transaction, so it is set
-            # beforehand; it only applies to a database this dashboard creates.
-            conn.execute('PRAGMA journal_mode = WAL')
+            with _initialization_guard(target):
+                # Another initializer may have completed while we waited. Never
+                # change journal mode while its normal writer is already active.
+                state = _classify(conn)
+                _refuse(state)
+                if state == 'empty':
+                    conn.execute('PRAGMA journal_mode = WAL')
+                    conn.execute('BEGIN IMMEDIATE')
+                    try:
+                        _create_schema(conn)
+                        conn.execute('COMMIT')
+                    except BaseException:
+                        conn.execute('ROLLBACK')
+                        raise
+                    os.chmod(target, 0o600)
         conn.execute('BEGIN IMMEDIATE')
         try:
             if create:

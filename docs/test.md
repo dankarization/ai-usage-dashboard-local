@@ -57,7 +57,9 @@ off for 5 seconds. Same-key concurrent reads share collection.
 full refresh invalidates it and fences earlier in-flight publications. Original
 fetch timestamps remain unchanged on hits. Quota arrivals do not rebuild the
 model chart/table. Concurrent full refreshes coalesce; cold GET and POST exports
-share one writer lock.
+share one writer lock. First-time SQLite WAL/schema initialization has a separate
+bounded cross-process guard, so simultaneous cold windows cannot race the journal
+mode transition; ordinary snapshot transactions remain SQLite-owned.
 
 Focused regressions: `tests/test_source_cache.py`, `tests/test_openclaw_usage.py`,
 `tests/test_nordrouter_bucket_exclusion.py`, `tests/test_omniroute_usage.py`,

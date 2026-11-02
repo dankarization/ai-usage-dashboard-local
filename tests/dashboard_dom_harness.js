@@ -755,6 +755,12 @@ assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')
   'incomplete overview must not show numeric source chips');
 selectedDays = 30;
 
+const knownZeroCategories = tableModels({models:[{source:'openclaw',provider:'local',model:'zero-cache',
+  totals:{input:1,output:1,cache_read:0,cache_write:0,total:2},daily:[]}]})[0];
+assertEqual(knownZeroCategories.totals.cache_read,0,'reported zero cache count remains a real zero');
+const partialCategories=tableModels({models:[{source:'openclaw',provider:'local',model:'partial',totals:{input:1,total:1},daily:[]},
+  {source:'hermes',provider:'local',model:'partial',totals:{total:2},daily:[]}]})[0];
+assertEqual(partialCategories.totals.input,null,'one missing contributor cannot become a complete category subtotal');
 /* ---------------- unified model rows and sorting ---------------- */
 const mergedFixture = { ...MODELS, models: [
   { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3',
@@ -801,6 +807,8 @@ assertEqual(all(directOnly.children[6]).filter((e) => e.tagName === 'S').length,
   'direct-only model has no invented agent comparison');
 assertEqual(directOnly.children[7].textContent, '$0.00billed',
   'small billed cost still displays exactly two decimals');
+assertEqual(directOnly.children[2].textContent, '—', 'account-only input category is unknown, not zero');
+assertEqual(directOnly.children[4].textContent, '—', 'account-only cache category is unknown, not zero');
 assertEqual(rowFor('other').children[7].textContent, '$0.56estimated',
   'estimated USD also rounds to exactly two decimals');
 assert(rowFor('unmatched-route').children[7].textContent === '$3.00estimated',
