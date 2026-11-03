@@ -71,7 +71,7 @@ class Element {
 }
 
 const registry = new Map();
-['openai-api', 'hero', 'quotas', 'account-history', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
+['openai-api', 'hero', 'quotas', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
  'period-30', 'period-7', 'period-1', 'overview-note', 'models-note'].forEach((id) => {
   registry.set(id, new Element('div'));
@@ -540,8 +540,8 @@ assert(registry.get('models-note').textContent.includes('NordRouter bills every 
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
-assertEqual(segments.length, 2, 'agent chart contains only dated, shown agent models');
-assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, 'agent models have distinct colours');
+assertEqual(segments.length, 3, 'one chart includes the account pool plus two independent agent models');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 3, 'independent models and neutral account pool have distinct colours');
 assertEqual(all(chart).filter((e) => e.classList.contains('legend-item')).length, 0,
   'history no longer repeats the model list');
 assertEqual(modelSwatch('grok-test', 'xai').style.background, chartColor('grok-test'),
@@ -551,16 +551,16 @@ assertEqual(modelSwatch('hermes-model', 'openai').style.background, chartColor('
 assert(!modelSwatch('nr-route', 'nordrouter'), 'comparison route cannot invent invoice model days');
 assert(!modelSwatch('z-ai/glm-5.3', 'NordRouter'), 'direct models have no fabricated daily split');
 assert(!segments.some((e) => segmentLabel(e).includes('nr-route')), 'account is not allocated by agent shares');
-assert(segments.every((e) => segmentLabel(e).includes('day total 16')), 'agent history and account history are not stacked');
-assert(all(registry.get('account-history')).some((e) => e.tagName === 'RECT' &&
-  segmentLabel(e).includes('all models; no daily model split) · 20 tokens')), 'account keeps its own measured total');
-assertEqual(all(registry.get('account-history')).find((e) => e.tagName === 'SVG').style.height, '160px',
-  'the account chart does not stretch its text through the main-chart CSS height');
+assert(segments.every((e) => segmentLabel(e).includes('day total 36')), 'account plus independent agent days count once');
+assert(segments.some((e) => segmentLabel(e).startsWith('NordRouter (model split unavailable) · 20 tokens')),
+  'the same chart keeps measured account tokens without assigning them to models');
+assertEqual(all(chart).filter((e) => e.tagName === 'SVG').length, 1, 'history has only one SVG');
+assert(!registry.has('account-history'), 'a second chart is not part of the DOM contract');
 assertEqual(all(chart).filter((e) => e.tagName === 'TEXT' && e.textContent === '03.10.2026').at(-1).getAttribute('text-anchor'),
   'end', 'last date label stays inside the chart');
 let summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, 'history has one summary line');
-assertEqual(summary[0].textContent, 'daily tokens · peak 16', 'linear summary excludes total and estimate note');
+assertEqual(summary[0].textContent, 'daily tokens · peak 36', 'linear summary includes only disjoint counts');
 const initialGrokColor = chartColor('grok-test');
 const initialRouteColor = chartColor('nr-route');
 const changedOrder = { ...MODELS, models: [...MODELS.models].reverse().concat({
@@ -585,8 +585,8 @@ assertEqual(modelSwatch('grok-test', 'xai').style.background, initialGrokColor,
   'other OpenClaw history remains identified when direct daily data is absent');
 renderPeriod(MODELS, QUOTAS);
 windowListeners.resize();
-assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize keeps measured agent segments');
-assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day total 16')),
+assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 3, 'resize keeps the same single-chart segments');
+assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day total 36')),
   'resize keeps deduplicated history');
 selectedDays = 7;
 renderPeriod({ ...MODELS, meta: { ...MODELS.meta, days: 7 }, totals: { total: 11 },
@@ -609,14 +609,14 @@ assertEqual(heroPills.map((e) => e.textContent).join(','),
 assert(registry.get('models').textContent.includes('direct-7d'), '7d direct model row');
 assert(registry.get('models').textContent.includes('grok-7d'), '7d OpenClaw table');
 assert(registry.get('models').textContent.includes('hermes-7d'), '7d Hermes table');
-assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 7')), '7d agent history');
+assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 11')), '7d single history matches overview when all scopes are disjoint');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
-assertEqual(segments.length, 2, '7d keeps the two measured agent segments');
-assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2, '7d agent models have distinct colours');
+assertEqual(segments.length, 3, '7d keeps the account pool and two measured independent models');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 3, '7d models and account pool have distinct colours');
 assert(!segments.some((e) => segmentLabel(e).includes('nr-7d')), '7d account model attribution is unavailable');
 summary = all(chart).filter((e) => e.classList.contains('chart-summary'));
 assertEqual(summary.length, 1, '7d has one summary line');
-assertEqual(summary[0].textContent, 'daily tokens · peak 7', '7d linear summary excludes total and estimate note');
+assertEqual(summary[0].textContent, 'daily tokens · peak 11', '7d summary preserves the disjoint day total');
 assert(registry.get('metrics').textContent.includes('Billed spend'), 'NordRouter metric follows selection');
 assert(!registry.get('selected-top-label').textContent.includes('7d'), 'top-model label has no period suffix');
 Object.entries(sectionNotes).forEach(([id, value]) => {
@@ -631,8 +631,8 @@ assert(!all(chart).some((e) => e.tagName === 'RECT' && /^(A|B) ·/.test(segmentL
   'a small route observation cannot receive an account-wide allocation');
 assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('C · 5 tokens')),
   'the measured independent model remains unchanged');
-assert(all(registry.get('account-history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes(' · 7 tokens')),
-  'account all-model tokens have an independent chart');
+assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes(' · 7 tokens · day total 12')),
+  'account all-model tokens are retained in the single chart without adding route comparisons');
 const sharedHistory = { models: [
   { source: 'openclaw', provider: 'nordrouter', model: 'Shared', daily: [{ date: '2026-10-03', total: 3 }] },
   { source: 'openclaw', provider: 'xai', model: 'Shared', daily: [{ date: '2026-10-03', total: 5 }] },
@@ -644,11 +644,11 @@ renderModels(sharedHistory);
 assertEqual(all(chart).filter((e) => e.classList.contains('legend-item')).length, 0,
   'shared model does not recreate the duplicate legend');
 segments = all(chart).filter((e) => e.tagName === 'RECT');
-assertEqual(segments.length, 2, 'same model draws one combined segment per day');
-assert(segments.some((e) => segmentLabel(e).includes('Shared · 7 tokens · day total 8')),
-  'combined model contains only its measured independent providers');
-assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 2,
-  'one colour is assigned per distinct model');
+assertEqual(segments.length, 3, 'same independent model combines once, alongside the account pool');
+assert(segments.some((e) => segmentLabel(e).includes('Shared · 7 tokens · day total 12')),
+  'combined model contains only measured independent providers, not the account comparison');
+assertEqual(new Set(segments.map((e) => e.getAttribute('fill'))).size, 3,
+  'models have stable colours and account totals use neutral gray');
 assertEqual(modelSwatch('Shared', 'xai').style.background, chartColor('Shared'),
   'the independent-provider row maps to its measured chart colour');
 assert(!modelSwatch('Shared', 'nordrouter'), 'account comparison has no invented model-day colour');
@@ -660,7 +660,7 @@ assert(all(chart).filter((e) => e.tagName === 'SVG')[0].getAttribute('aria-label
 assertEqual(all(chart).filter((e) => e.tagName === 'TITLE').length, 0,
   'linear chart has no native SVG tooltip');
 assertEqual(all(chart).filter((e) => e.tagName === 'TEXT').slice(0, 3).map((e) => e.textContent).join(','),
-  '8,4,0', 'initial axis is labelled in tokens');
+  '12,6,0', 'initial axis is labelled in tokens');
 const linearOther = segments.find((e) => segmentLabel(e).includes('Other · 1 tokens'));
 const linearOtherHeight = Number(linearOther.getAttribute('height'));
 const linearColors = new Map(segments.map((e) => [segmentLabel(e).split(' · ')[0], e.getAttribute('fill')]));
@@ -676,11 +676,11 @@ segments = all(chart).filter((e) => e.tagName === 'RECT');
 const balancedOther = segments.find((e) => segmentLabel(e).includes('Other · 1 tokens'));
 assert(Number(balancedOther.getAttribute('height')) > linearOtherHeight,
   'balanced scale makes the small model segment more legible');
-assertEqual(segments.length, 2, 'balanced mode keeps one segment per model/day');
+assertEqual(segments.length, 3, 'balanced mode preserves independent models and account pool');
 assertEqual(new Map(segments.map((e) => [segmentLabel(e).split(' · ')[0], e.getAttribute('fill')])).get('Shared'),
   linearColors.get('Shared'), 'scale toggle preserves model colour');
-assert(segments.some((e) => segmentLabel(e).includes('Shared · 7 tokens · day total 8')),
-  'both views preserve actual model and day totals');
+assert(segments.some((e) => segmentLabel(e).includes('Shared · 7 tokens · day total 12')),
+  'both views preserve actual model and disjoint day totals');
 registry.get('history-scale').listeners.click[0]();
 assertEqual(historyScale, 'linear', 'scale button restores linear view');
 assertEqual(registry.get('history-scale').textContent, 'Scale: linear', 'button visibly names token scale');
@@ -1113,12 +1113,10 @@ const bucketRow = registry.get('models').children.find((row) => row.classList.co
 assert(bucketRow.textContent.includes('$7.71'), 'bucket estimate remains beside the residual');
 renderHistory(reportedPayload);
 const reportedSegments = all(registry.get('history')).filter((entry) => entry.tagName === 'RECT');
-assert(reportedSegments.some((entry) => segmentLabel(entry).includes('651.6M')),
-  'agent bucket chart uses the same agent count as its table row');
-assert(all(registry.get('account-history')).some((entry) => entry.tagName === 'RECT' && segmentLabel(entry).includes('789.8M')),
-  'the account chart keeps the invoice count without allocating models');
-assert(registry.get('account-history').textContent.includes('not values to add together'),
-  'overlapping scopes are explicit');
+assertEqual(reportedSegments.length, 1, 'overlapping agent and router bucket samples are not extra chart segments');
+assert(segmentLabel(reportedSegments[0]).startsWith('NordRouter (model split unavailable) · 789.8M'),
+  'the single chart preserves the full account count without allocating model days');
+assertEqual(reportedSegments[0].getAttribute('fill'), '#8491a3', 'account pool has a neutral colour');
 // Covered window above stays residual + bucket. An incomplete 30-day window must
 // not list the residual, the agent part, and the bucket as separate token figures.
 const incomplete30 = {
@@ -1326,12 +1324,15 @@ const chartPayload = {
   ],
 };
 renderHistory(chartPayload);
-assert(all(registry.get('history')).some((entry) => entry.tagName === 'RECT' && segmentLabel(entry).includes('day total 55')),
-  'agent chart preserves its 50-token bucket plus independent model');
-assert(all(registry.get('account-history')).some((entry) => entry.tagName === 'RECT' && segmentLabel(entry).includes(' · 100 tokens')),
-  'account remains exactly 100 and is never stacked with router/agent observations');
+assert(all(chart).filter((entry) => entry.tagName === 'RECT').every((entry) => segmentLabel(entry).includes('day total 115')),
+  '100 account + 5 independent + 10 proven non-account router tokens, never the 50-token comparison');
+assertEqual(all(chart).filter((entry) => entry.tagName === 'RECT').length, 3, 'only disjoint scopes are charted');
+renderModels(chartPayload);
+const routerOther = all(registry.get('models')).find((entry) => entry.classList.contains('src') && entry.textContent === 'other');
+assert(routerOther && all(routerOther).some((entry) => entry.classList.contains('model-swatch')),
+  'retained non-account model can be traced to the table drilldown by its swatch');
 // Adversarial reproduction: a tiny direct route must never inherit a huge
-// account day; partial router retention must not erase older agent bucket days.
+// account day; partial retention keeps the table comparison, not an extra chart count.
 const misleadingShare = {
   meta: { start_date: '2026-11-01', end_date: '2026-11-02', days: 2, omniroute_status: 'ok' },
   source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 599300000 },
@@ -1350,19 +1351,96 @@ const misleadingShare = {
 };
 renderHistory(misleadingShare);
 const measuredGlm = historySeries(misleadingShare);
-assertEqual(Array.from(measuredGlm.byDate.values()).reduce((sum, day) =>
-  sum + (day.get('omniroute/nr-glm') || 0), 0),
-  tableModels(misleadingShare).find((row) => row.bucket).totals.total,
-  'both agent days sum to the same bucket total as the table despite partial retention');
-assertEqual(all(registry.get('history')).filter((e) => e.tagName === 'RECT').length, 2,
-  'partial serving retention cannot remove the first agent day');
+assertEqual(tableModels(misleadingShare).find((row) => row.bucket).totals.total, 37000000,
+  'both agent days remain in the table comparison despite partial retention');
+assert(!measuredGlm.categories.has('omniroute/nr-glm'), 'overlapping bucket comparison is not added to account days');
+assert(measuredGlm.partialDates.has('2026-11-02'), 'a missing account day is unknown, not zero');
+assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 1,
+  'the known account day remains once; missing history is not replaced by overlapping samples');
 assert(!all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).startsWith('glm-5.3')),
   'tiny direct GLM comparison never receives a chart allocation');
-assertEqual(all(registry.get('account-history')).filter((e) => e.tagName === 'RECT').length, 1,
-  'account dates outside the requested window are excluded');
-assert(all(registry.get('account-history')).some((e) => e.tagName === 'RECT' &&
-  segmentLabel(e).startsWith('NordRouter (all models; no daily model split) · 599.3M')),
-  '599.3M is labelled only as account all-model usage, never GLM consumption');
+assertEqual(measuredGlm.byDate.get('2026-11-01').get('direct-nordrouter-unattributed'), 599300000,
+  '599.3M survives exactly once as an account measurement, never GLM consumption');
+assert(!measuredGlm.byDate.has('2026-10-31'), 'account dates outside the selected window are excluded');
+assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).startsWith('NordRouter (model split unavailable) · 599.3M')),
+  '599.3M is labelled only as account all-model usage in the single chart');
+// Window, route-origin and missing-data cases exercise the real merged table
+// rows and the one SVG, rather than asserting implementation substrings.
+function chartTotal(history, date) {
+  return Array.from((history.byDate.get(date) || new Map()).values()).reduce((sum, n) => sum + n, 0);
+}
+function windowFixture(days) {
+  const dates = Array.from({length: days}, (_, i) => new Date(Date.UTC(2026, 9, 4 - days + i)).toISOString().slice(0, 10));
+  const daily = (total) => dates.map((date) => ({date, total}));
+  const route = (model, nordrouter, total) => ({provider: 'test-' + String(nordrouter), model, nordrouter,
+    totals: {total: total * days}, daily: dates.map((date) => ({date, totals: {total}}))});
+  return {
+    meta: {days, start_date: dates[0], end_date: dates.at(-1), omniroute_status: 'ok', nordrouter_status: 'ok'},
+    source_daily: {nordrouter: dates.map((date) => ({date, tokens: 1000}))},
+    models: [
+      {source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', totals: {total: 1000 * days}},
+      {source: 'openclaw', provider: 'nordrouter', model: 'vendor/a', totals: {total: 3 * days}, daily: daily(3)},
+      {source: 'openclaw', provider: 'xai', model: 'independent', totals: {total: 5 * days}, daily: daily(5)},
+      {source: 'hermes', provider: 'xai', model: 'independent', totals: {total: 2 * days}, daily: daily(2)},
+      {source: 'openclaw', provider: 'omniroute', model: 'bucket', model_key: 'omniroute/bucket',
+        bucket_comparison: true, totals: {total: 50 * days}, daily: daily(50)},
+      {source: 'omniroute', provider: 'omniroute', model: 'bucket', model_key: 'omniroute/bucket',
+        totals: {total: 70 * days}, bucket_usage: {retention_limited: false,
+          routes: [route('a', true, 60), route('other', false, 10)]}},
+    ],
+  };
+}
+for (const days of [1, 7, 30]) {
+  const fixture = windowFixture(days), before = JSON.stringify(fixture);
+  renderHistory(fixture);
+  renderModels(fixture);
+  const series = historySeries(fixture), lastDate = fixture.meta.end_date;
+  assertEqual(Array.from(series.byDate.values()).reduce((sum, values) => sum + Array.from(values.values()).reduce((n, v) => n + v, 0), 0),
+    1017 * days, days + 'd keeps full account, both independent agents and non-account serving exactly once');
+  assertEqual(chartTotal(series, lastDate), 1017, days + 'd daily sum is not account plus agent bucket plus router bucket');
+  assertEqual(series.byDate.get(lastDate).get('independent'), 7,
+    days + 'd model segment equals the merged independent table row daily sum');
+  assertEqual(tableModels(fixture).find((row) => row.model === 'independent').totals.total, 7 * days,
+    days + 'd table and chart have identical independent model-window totals');
+  assertEqual(tableModels(fixture).find((row) => row.bucket).totals.total, 50 * days,
+    days + 'd bucket remains a measured table comparison, not a chart addition');
+  assertEqual(all(chart).filter((e) => e.tagName === 'SVG').length, 1, days + 'd renders exactly one chart');
+  assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 3 * days, days + 'd has exactly three disjoint segments per day');
+  assertEqual(JSON.stringify(fixture), before, days + 'd rendering never mutates the snapshot');
+}
+const uncertain = windowFixture(1), uncertainDate = uncertain.meta.end_date;
+uncertain.models.at(-1).bucket_usage.routes.push({provider: 'unknown', model: 'unknown-alias', nordrouter: null,
+  totals: {total: 500}, daily: [{date: uncertainDate, totals: {total: 500}}]});
+renderHistory(uncertain);
+assertEqual(chartTotal(historySeries(uncertain), uncertainDate), 1017, 'unknown origin is not added to a possibly overlapping account');
+assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day known subtotal 1.0K')),
+  'unknown origin makes the chart a known subtotal, not a complete daily total');
+assert(!chartedModelRows.has(routerHistoryKey(uncertain.models.at(-1).bucket_usage.routes.at(-1))),
+  'an unverified alias never acquires a chart attribution');
+const duplicateAccount = windowFixture(1);
+duplicateAccount.source_daily.nordrouter.push({date: uncertainDate, tokens: 5000});
+renderHistory(duplicateAccount);
+assertEqual(chartTotal(historySeries(duplicateAccount), uncertainDate), 17, 'duplicate account dates are withheld rather than summed or replaced');
+assert(historySeries(duplicateAccount).partialDates.has(uncertainDate), 'duplicate account date is explicitly incomplete');
+assert(all(chart).filter((e) => e.tagName === 'RECT').every((e) => segmentLabel(e).includes('day known subtotal 17')),
+  'the live tooltip cannot call a duplicate account day a complete total');
+const zeroAccount = windowFixture(1);
+zeroAccount.source_daily.nordrouter[0].tokens = 0;
+const zeroHistory = historySeries(zeroAccount);
+assert(zeroHistory.accountMode && !zeroHistory.partialDates.has(uncertainDate), 'a reported account zero remains known');
+assertEqual(chartTotal(zeroHistory, uncertainDate), 17, 'zero account plus independent measurements is not unavailable');
+const badAccount = windowFixture(1);
+badAccount.source_daily.nordrouter[0].tokens = null;
+const badHistory = historySeries(badAccount);
+assert(badHistory.accountMode && badHistory.partialDates.has(uncertainDate), 'unknown account tokens never become a known zero');
+assertEqual(chartTotal(badHistory, uncertainDate), 17, 'unknown account day cannot re-add an overlapping bucket as fallback');
+const noAccount = JSON.parse(JSON.stringify(misleadingShare));
+noAccount.source_daily.nordrouter = [];
+noAccount.meta.nordrouter_status = 'unavailable';
+renderHistory(noAccount);
+assertEqual(chartTotal(historySeries(noAccount), '2026-11-01'), 36000000, 'without account days show measured agent bucket history only');
+assertEqual(chartTotal(historySeries(noAccount), '2026-11-02'), 1000000, 'account outage does not discard older measured agent days');
+assert(chart.textContent.includes('account unavailable'), 'fallback explicitly identifies missing account history');
 historyScale = 'balanced';
 
 console.log('OK: dashboard DOM contract holds');
@@ -1460,8 +1538,8 @@ async function waitForReload() {
   reply(request(urlFor(7, 'hermes')), modelFor(7, 'hermes'));
   await settle();
   assert(registry.get('models').textContent.includes('direct-7d'), 'direct model renders before OpenClaw');
-  assert(all(registry.get('account-history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 7')),
-    'account history renders before OpenClaw');
+  assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day known subtotal 7')),
+    'account renders in the same chart before OpenClaw, with no false complete total');
   assert(registry.get('hero').textContent.includes('incomplete source'), 'incomplete canonical total is not invented');
   request(urlFor(7, 'openclaw')).reject(new Error('slow Gateway timeout'));
   initialUpdate.reject(new Error('provider refresh failed'));
@@ -1498,8 +1576,8 @@ async function waitForReload() {
   reply(request(urlFor(1, 'nordrouter'), beforeOne), modelFor(1, 'nordrouter'));
   await settle();
   assert(registry.get('models').textContent.includes('direct-1d'), 'direct one-day row joins ready OpenClaw');
-  assert(all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 2')),
-    'agent history stays independent from the account chart');
+  assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 3')),
+    'single history joins account plus independent agent tokens, not a second chart');
   assert(registry.get('hero').textContent.includes('Total tokens') &&
     registry.get('hero').textContent.includes('3'), 'canonical one-day total completes');
   assert(registry.get('metrics').textContent.includes('$0.1250'), 'one-day billed spend uses direct source');
@@ -1592,8 +1670,8 @@ async function waitForReload() {
   clickPeriod(30);
   await settle();
   assertEqual(selectedDays, 30, 'thirty-day period remains available');
-  assert(all(registry.get('history')).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 2')),
-    'thirty-day agent history renders');
+  assert(all(chart).some((e) => e.tagName === 'RECT' && segmentLabel(e).includes('day total 32')),
+    'thirty-day single history joins only disjoint counts');
   assertEqual(historyScale, 'linear', 'progressive loads preserve linear scale default');
   // A failed live Gateway read is served from the last successful saved window
   // with an explicit stale label, the original fetch time, and the failure

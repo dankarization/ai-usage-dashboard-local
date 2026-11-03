@@ -279,7 +279,6 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button></div>
     <div class="panel">
       <div id="history" class="chart-wrap"></div>
-      <div id="account-history" class="chart-wrap"></div>
       <div class="history-table">
         <p id="model-stamp" class="note"></p>
         <div class="scroll">
@@ -798,7 +797,7 @@ function renderHero(payload) {
 }
 
 /* ---------- history chart ---------- */
-// Agent rollups and account invoices have independent, non-additive charts.
+// A single history stacks only disjoint scopes; account days have no model split.
 var AGENT_SOURCES = { openclaw: true, hermes: true };
 var lastHistoryData = null;
 var historyScale = 'linear';
@@ -947,52 +946,93 @@ function nordrouterOverlap(models, routerStatus, nrDaily) {
     unknown: unknown, proven: proven, matchedBuckets: matchedBuckets };
 
 }
-// Account-day totals have no model split; agent shares cannot allocate an
-// invoice, and router-wide attempts cannot replace a measured agent bucket.
+// Account billing is counted once, without assigning its days to model samples.
+// Outside that pool, use independent agents and proven non-NordRouter serving
+// observations. Router agent buckets are comparisons, not extra consumption.
+function routerHistoryKey(route) {
+  return 'router/' + JSON.stringify([route.provider, route.model, route.price_id, route.nordrouter]);
+}
 function historySeries(payload) {
-  var byDate = new Map(), categories = new Map();
+  var byDate = new Map(), categories = new Map(), accountDays = new Map(), invalidDates = new Set();
   var meta = payload.meta || {};
-  tableModels(payload).forEach(function (model) {
-    if (model.source === 'nordrouter' || String(model.provider).toLowerCase() === 'nordrouter' ||
-        model.token_scope === 'router-wide') return;
-    var key = rowKey(model);
-    categories.set(key, { key: key, label: model.model, total: 0 });
-    (model.daily || []).forEach(function (day) {
-      if (!number(day.total) || day.total < 0 ||
-          (meta.start_date && day.date < meta.start_date) ||
-          (meta.end_date && day.date > meta.end_date)) return;
-      if (!byDate.has(day.date)) byDate.set(day.date, new Map());
-      var buckets = byDate.get(day.date);
-      buckets.set(key, (buckets.get(key) || 0) + day.total);
-      if (day.total > 0) chartedModelRows.add(key);
-    });
+  function inWindow(date) {
+    return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+      (!meta.start_date || date >= meta.start_date) && (!meta.end_date || date <= meta.end_date);
+  }
+  ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
+    if (!day || !inWindow(day.date)) return;
+    if (!Number.isSafeInteger(day.tokens) || day.tokens < 0 || accountDays.has(day.date) || invalidDates.has(day.date)) {
+      accountDays.delete(day.date); invalidDates.add(day.date); return;
+    }
+    accountDays.set(day.date, day.tokens);
   });
-  return { byDate: byDate, categories: categories };
+  var accountMode = accountDays.size > 0 || invalidDates.size > 0;
+  var partialDates = new Set(invalidDates);
+  var incomplete = ['openclaw', 'hermes'].some(function (source) {
+    return ((payload.sources || {})[source] || {}).complete === false;
+  });
+  function add(date, category, amount) {
+    if (!inWindow(date) || !number(amount) || amount < 0) return;
+    if (!categories.has(category.key)) categories.set(category.key, Object.assign({total: 0}, category));
+    if (!byDate.has(date)) byDate.set(date, new Map());
+    var buckets = byDate.get(date);
+    buckets.set(category.key, (buckets.get(category.key) || 0) + amount);
+    if (amount > 0 && category.kind !== 'account') chartedModelRows.add(category.key);
+  }
+  var rows = tableModels(payload);
+  rows.forEach(function (model) {
+    if (model.source === 'nordrouter' || String(model.provider).toLowerCase() === 'nordrouter' ||
+        model.token_scope === 'router-wide' || (accountMode && (model.bucket || String(model.provider).toLowerCase() === 'omniroute'))) return;
+    var category = {key: rowKey(model), label: model.model, kind: 'agent'};
+    (model.daily || []).forEach(function (day) { add(day.date, category, day.total); });
+  });
+  if (accountMode) {
+    incomplete = incomplete || rows.some(function (model) {
+      return model.bucket && (!model.bucket_usage || model.bucket_usage.retention_limited);
+    });
+    accountDays.forEach(function (amount, date) {
+      add(date, {key: 'direct-nordrouter-unattributed', label: 'NordRouter (model split unavailable)', kind: 'account'}, amount);
+    });
+    (payload.models || []).filter(function (row) { return row.source === 'omniroute' && row.bucket_usage; })
+      .forEach(function (row) {
+        (row.bucket_usage.routes || []).forEach(function (route) {
+          // Unknown origin can overlap the account; it cannot be added as zero
+          // or as a second model estimate. Unmatched model aliases on a
+          // proven NordRouter route are already inside the account pool.
+          if (route.nordrouter === true) return;
+          if (route.nordrouter !== false) { incomplete = true; return; }
+          var category = {key: routerHistoryKey(route), label: route.model + ' (retained router)', kind: 'router'};
+          (route.daily || []).forEach(function (day) { add(day.date, category, (day.totals || {}).total); });
+        });
+      });
+    if (meta.start_date && meta.end_date) {
+      var date = new Date(meta.start_date + 'T00:00:00Z');
+      for (var count = 0; count < 366 && Number.isFinite(date.getTime()); count++) {
+        var key = date.toISOString().slice(0, 10);
+        if (key > meta.end_date) break;
+        if (!accountDays.has(key)) {
+          partialDates.add(key);
+          if (!byDate.has(key)) byDate.set(key, new Map());
+        }
+        date.setUTCDate(date.getUTCDate() + 1);
+      }
+    }
+    byDate.forEach(function (_, date) { if (!accountDays.has(date)) partialDates.add(date); });
+  }
+  if (incomplete) byDate.forEach(function (_, date) { partialDates.add(date); });
+  return {byDate: byDate, categories: categories, accountMode: accountMode, partialDates: partialDates};
 }
 function renderHistory(payload) {
   lastHistoryData = payload;
   chartedModelRows = new Set();
   if (activeHistoryTooltip) activeHistoryTooltip.hide();
   var history = historySeries(payload);
-  drawHistory($('history'), history.byDate, history.categories,
-    'Agent-reported model tokens · UTC days', false);
-  var account = $('account-history');
-  if (account) {
-    var dates = new Map(), categories = new Map();
-    var key = 'direct-nordrouter-unattributed';
-    categories.set(key, { key: key, label: 'NordRouter (all models; no daily model split)', total: 0 });
-    ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
-      var meta = payload.meta || {};
-      if (!number(day.tokens) || day.tokens < 0 ||
-          (meta.start_date && day.date < meta.start_date) ||
-          (meta.end_date && day.date > meta.end_date)) return;
-      dates.set(day.date, new Map([[key, day.tokens]]));
-    });
-    drawHistory(account, dates, categories, 'NordRouter account · UTC days', true);
-    node('p', 'Account totals include router traffic. These charts are separate views, not values to add together. No account-day model allocation is available.', account).className = 'chart-note';
-  }
+  var title = history.accountMode ? 'Reported tokens · UTC days · NordRouter unallocated' : 'Agent-reported tokens · UTC days';
+  if (history.partialDates.size) title += ' · partial history';
+  else if (!history.accountMode && (payload.meta || {}).nordrouter_status && payload.meta.nordrouter_status !== 'not_configured') title += ' · account unavailable';
+  drawHistory($('history'), history.byDate, history.categories, title, history.partialDates);
 }
-function drawHistory(root, byDate, categories, title, account) {
+function drawHistory(root, byDate, categories, title, partialDates) {
   root.replaceChildren();
   node('p', title, root).className = 'note';
   var unattributedKey = 'direct-nordrouter-unattributed';
@@ -1004,7 +1044,7 @@ function drawHistory(root, byDate, categories, title, account) {
   }).sort(function (a, b) { return a.date.localeCompare(b.date); });
   var peak = series.reduce(function (max, day) { return Math.max(max, day.total_tokens); }, 0);
   if (!series.length || peak <= 0) {
-    node('p', series.length ? 'No reported usage in this snapshot.' : 'No historical usage data available.', root).className = 'empty';
+    node('p', partialDates.size ? 'Daily usage incomplete.' : series.length ? 'No reported usage in this snapshot.' : 'No historical usage data available.', root).className = 'empty';
     return;
   }
   var modelCategories = Array.from(categories.values()).filter(function (category) { return category.key !== unattributedKey && category.total > 0; })
@@ -1016,7 +1056,7 @@ function drawHistory(root, byDate, categories, title, account) {
   if (unattributed && unattributed.total > 0) unattributed.color = '#8491a3';
   var stackOrder = unattributed && unattributed.total > 0 ? [unattributed].concat(modelCategories) : modelCategories;
   var width = Math.max(320, root.clientWidth || 900);
-  var height = account ? 160 : root.clientWidth && root.clientWidth <= 640 ? 260 : 300;
+  var height = root.clientWidth && root.clientWidth <= 640 ? 260 : 300;
   var padL = 44, padR = 8, padT = 10, padB = 22;
   var plotW = width - padL - padR, plotH = height - padT - padB;
   var balanced = historyScale === 'balanced';
@@ -1027,9 +1067,8 @@ function drawHistory(root, byDate, categories, title, account) {
     return Math.max(max, Array.from(day.buckets.values()).reduce(function (sum, value) { return sum + visualWeight(value); }, 0));
   }, 0) : peak;
   var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img',
-    'aria-label': balanced ? 'Daily model usage; fourth-root visual weighting per model, not a token axis' :
-      'Daily token usage stacked by model; linear token axis' }, root);
-  if (account) svg.style.height = height + 'px';
+    'aria-label': balanced ? 'Daily usage by model and unattributed account; fourth-root visual weighting per segment, not a token axis' :
+      'Daily token usage by model and unattributed account; linear token axis' }, root);
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
     svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);
@@ -1072,7 +1111,8 @@ function drawHistory(root, byDate, categories, title, account) {
         x: x, y: padT + plotH * (1 - stacked / scaleMax), width: barW, height: barH,
         fill: category.color, tabindex: 0,
       }, svg);
-      var label = category.label + ' · ' + tokens(amount) + ' tokens · day total ' + tokens(day.total_tokens);
+      var label = category.label + ' · ' + tokens(amount) + ' tokens · day ' +
+        (partialDates.has(day.date) ? 'known subtotal ' : 'total ') + tokens(day.total_tokens);
       rect.setAttribute('aria-label', label);
       rect.addEventListener('pointerenter', function (event) {
         if (event.pointerType === 'mouse') showTooltip(rect, label, event.clientX, event.clientY, false);
@@ -1450,7 +1490,13 @@ function routeLine(route, body) {
   var line = bucketDetailRow(body, route.totals, route.cost_usd,
     number(route.cost_usd) ? 'router-wide estimated' : 'unknown: ' + route.unknown_reason);
   node('span', route.nordrouter === true ? 'NordRouter' : route.provider, line.source).className = 'src';
-  node('span', route.model, line.model).className = 'src';
+  var name = node('span', undefined, line.model); name.className = 'src';
+  if (chartedModelRows.has(routerHistoryKey(route))) {
+    var swatch = node('span', undefined, name); swatch.className = 'model-swatch';
+    swatch.style.background = modelColor(routerHistoryKey(route));
+    swatch.setAttribute('aria-hidden', 'true');
+  }
+  node('span', route.model, name);
   return line.row;
 }
 function servingModels(routes, date) {

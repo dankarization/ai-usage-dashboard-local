@@ -115,6 +115,8 @@ def test_history_owns_model_table_and_note_is_in_footer():
     history = re.search(r'<section aria-labelledby="h-history">(.*?)</section>', DASHBOARD_HTML, re.S)
     assert history is not None
     assert 'id="history"' in history.group(1)
+    assert history.group(1).count('class="chart-wrap"') == 1
+    assert 'id="account-history"' not in DASHBOARD_HTML
     assert 'id="model-table"' in history.group(1)
     note = ('One row per model: spellings that bill as one model are summed. '
             'NordRouter bills every agent, so its per-source token count is unknown; '

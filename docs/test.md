@@ -36,10 +36,14 @@ Keep local credentials, exports, generated payloads/charts, logs, and unredacted
 
 Usage-day windows are UTC for Gateway, Hermes, router observations and account
 analytics; snapshot timestamps still use the viewer's clock. The legacy export payload
-keeps its existing host-local date window independently of model analytics. The model chart
-uses agent rows, while the separate account chart has only all-model daily totals.
-Do not infer account-model days from small agent samples. Partial router retention
-must not suppress older agent bucket days. Independent provider rows sharing an
+keeps its existing host-local date window independently of model analytics. One history
+chart counts account daily totals once as a neutral, model-unattributed segment,
+plus independent agent model-days and retained, proven non-NordRouter router
+model-days. Agent bucket and NordRouter-route comparisons are not added to that
+pool. Without account daily data, show measured agent history only. Do not infer
+account-model days from small agent samples. Missing/duplicate account days,
+partial router retention and unknown route origins leave explicit known subtotals;
+the table preserves the full agent bucket comparison independently. Independent provider rows sharing an
 account model name are not account-route comparisons.
 
 `daily=false` omits presentation arrays after overlap reconciliation; it must not
@@ -63,5 +67,5 @@ mode transition; ordinary snapshot transactions remain SQLite-owned.
 
 Focused regressions: `tests/test_source_cache.py`, `tests/test_openclaw_usage.py`,
 `tests/test_nordrouter_bucket_exclusion.py`, `tests/test_omniroute_usage.py`,
-`tests/dashboard_dom_harness.js`. Browser acceptance must additionally verify both
-charts, mobile containment, quota disclosure, period switches and refresh errors.
+`tests/dashboard_dom_harness.js`. Browser acceptance must additionally verify
+the single chart, mobile containment, quota disclosure, period switches and refresh errors.
