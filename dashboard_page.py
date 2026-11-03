@@ -660,7 +660,6 @@ function renderOpenaiApi(rows) {
     if (number(billing.purchased_balance_usd)) balances.push('Purchased: ' + amount(billing.purchased_balance_usd));
     if (number(billing.unclassified_free_remaining_usd)) balances.push('Other credits: ' + amount(billing.unclassified_free_remaining_usd));
     if (balances.length) node('p', balances.join(' · '), card).className = 'note';
-    node('p', 'Balances are in dollars; this source does not split tokens by funding.', card).className = 'note';
   } else {
     node('p', billing.detail || 'OpenAI Platform billing unavailable.', card).className = 'unavailable';
   }
@@ -683,10 +682,6 @@ function renderOpenaiApi(rows) {
       ' · Used ' + amount(g.used_usd) + ' · Received ' + time(g.effective_at) +
       (g.expires_at ? ' · Expires ' + time(g.expires_at) : ''), detail).className = 'note';
   });
-  if (available && billing.detail) node('p', billing.detail, detail).className = 'note';
-  node('p', 'All-grant totals are not current-cycle spending. A grant or dollar balance does not identify which requests used purchased versus subsidized funds.', detail).className = 'note';
-  if (billing.fetched_at) node('p', 'Checked ' + time(billing.fetched_at), detail).className = 'note';
-  node('p', 'Separate from Codex login. Not added to local token history.', detail).className = 'note';
 }
 
 function renderQuotas(data, models, pending) {

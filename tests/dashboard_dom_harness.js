@@ -263,6 +263,8 @@ renderOpenaiApi([{provider:'openai_api', status:'partial', label:'All credits (f
   aggregate_total_usd:105, aggregate_remaining_usd:71.07, aggregate_used_usd:33.93, organization_name:'Example', purchased_balance_usd:6.11, unclassified_free_remaining_usd:65,
   benefit_period_amount_usd:100, benefit_cadence:'monthly', benefit_expires_at:'2026-11-21T19:23:47Z',
   benefit_checked_at:'2026-11-03T00:00:00Z', benefit_snapshot_expired:false,
+  fetched_at:new Date().toISOString(),
+  detail:'Credit-grant balances verified. Grant rows do not identify ChatGPT subsidy versus other funding. Purchased balance is reported separately when supplied. Cycle, paid spend and token funding allocation remain unknown.',
   grants:[{total_usd:65, remaining_usd:65, effective_at:'2026-11-01T00:00:00Z',expires_at:'2026-11-21T19:23:47Z'}]
 }}]);
 assert(apiRoot.textContent.includes('Purchased: $6.11'), 'purchased balance comes from paid field');
@@ -282,6 +284,17 @@ assert(defaultApiText.includes('$71.07 remaining') && defaultApiText.includes('P
   'default card contains authoritative balances');
 assert(!defaultApiText.includes('Unknown') && !defaultApiText.includes('Subscription entitlement') &&
   !defaultApiText.includes('Grant (funding'), 'default card omits technical and Unknown-field noise');
+for (const removed of ['Credit-grant balances verified.', 'All-grant totals are not current-cycle spending.',
+  'Checked ', 'Separate from Codex login.', 'Not added to local token history.', 'Balances are in dollars;',
+  'this source does not split tokens by funding.']) {
+  assert(!apiRoot.textContent.includes(removed), 'removed OpenAI explanation must not survive in disclosure: ' + removed);
+}
+renderOpenaiApi([{provider:'openai_api', status:'ok', used_percentage:20, billing:{
+  aggregate_total_usd:100, aggregate_used_usd:20, aggregate_remaining_usd:80,
+  fetched_at:new Date().toISOString(), detail:'A dynamically revised success explanation'
+}}]);
+assert(!apiRoot.textContent.includes('A dynamically revised success explanation'), 'dynamic success explanations stay removed');
+assert(apiRoot.textContent.includes('$80.00 remaining · $20.00 used of $100.00 granted'), 'removing explanations preserves balances');
 renderOpenaiApi([{provider:'openai_api', status:'unavailable', billing:{aggregate_total_usd:100,
   aggregate_used_usd:20, aggregate_remaining_usd:80, detail:'Billing response rejected'}}]);
 assert(apiRoot.textContent.includes('Billing response rejected'), 'rejected billing is visible');
