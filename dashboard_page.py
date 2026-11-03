@@ -777,8 +777,12 @@ function renderHero(payload) {
   root.replaceChildren();
   var overlapUnknown = [gateway, hermes].some(function (source) { return (source.bucket_comparison_tokens || 0) > 0; });
   var full = direct.complete && gateway.complete && hermes.complete && !overlapUnknown;
-  stripItem(root, 'Total tokens', full ? tokens(payload.totals.total) : '—',
-    full ? null : overlapUnknown ? 'router overlap · combined total unavailable' : 'incomplete source · total unavailable', !full);
+  var history = historySeries(payload), subtotal = null;
+  if (history.categories.size) {
+    subtotal = 0; history.byDate.forEach(function (segments) { segments.forEach(function (n) { subtotal += n; }); });
+  }
+  stripItem(root, 'Total tokens', tokens(full ? payload.totals.total : subtotal),
+    full ? null : number(subtotal) ? 'known subtotal · incomplete coverage' : 'loading sources', !full);
   stripItem(root, 'NordRouter billed cost', usd(direct.billed_cost_usd),
     null, !number(direct.billed_cost_usd));
   stripItem(root, 'Estimated cost', usd(agentCost),
@@ -1652,7 +1656,7 @@ function renderBucketDetails(row, cell, body) {
 /* ---------- loading ---------- */
 function json(url, options) {
   var controller = new AbortController();
-  var timer = setTimeout(function () { controller.abort(); }, 180000);
+  var timer = setTimeout(function () { controller.abort(); }, url.indexOf('source=openclaw') !== -1 ? 10000 : 180000);
   return fetch(url, Object.assign({ cache: 'no-store', signal: controller.signal }, options || {}))
     .then(function (response) {
       if (!response.ok) throw new Error('HTTP ' + response.status);
@@ -1667,6 +1671,8 @@ var busy = false;
 var selectedDays = 7;
 var loadVersion = 0;
 var lastLoaded = null;
+var periodStates = {};
+var openclawRetryTimers = {};
 function setPeriodButtons() {
   [30, 7, 1].forEach(function (days) {
     var button = $('period-' + days);
@@ -1697,6 +1703,10 @@ function partialModels(state) {
       openclaw_status: openclaw ? openclaw.meta.openclaw_status : 'loading',
       openclaw_cached_at_utc: openclaw ? openclaw.meta.openclaw_cached_at_utc : null,
       openclaw_error: openclaw ? openclaw.meta.openclaw_error : null,
+      openclaw_source_at_utc: openclaw ? openclaw.meta.openclaw_source_at_utc : null,
+      openclaw_snapshot_complete: openclaw ? openclaw.meta.openclaw_snapshot_complete : false,
+      openclaw_upstream_status: openclaw ? openclaw.meta.openclaw_upstream_status : null,
+      openclaw_refreshing: openclaw ? openclaw.meta.openclaw_refreshing : false,
       hermes_status: hermes ? hermes.meta.hermes_status : 'loading',
       nordrouter_status: nordrouter ? nordrouter.meta.nordrouter_status : 'loading',
       nordrouter_fetched_at_utc: nordrouter ? nordrouter.meta.nordrouter_fetched_at_utc : null,
@@ -1721,11 +1731,10 @@ function savedOpenClawNotice(state) {
   var openclaw = state.parts.openclaw;
   var meta = openclaw && openclaw.meta;
   if (!meta || meta.openclaw_status !== 'cached') return null;
-  var stamp = meta.openclaw_cached_at_utc ? new Date(meta.openclaw_cached_at_utc).getTime() : NaN;
-  var age = relativeAge(stamp);
-  return 'OpenClaw Gateway unavailable: ' + (meta.openclaw_error || 'live read failed') +
-    '. Showing saved OpenClaw usage from ' + time(meta.openclaw_cached_at_utc) +
-    (age ? ' (' + age + ')' : '') + ', the last successful fetch of this window; it is not live data.';
+  return 'OpenClaw: saved ' + (meta.openclaw_snapshot_complete ? 'complete' : 'unverified') +
+    ' snapshot ' + time(meta.openclaw_cached_at_utc) +
+    (meta.openclaw_refreshing ? ' · refreshing' : ' · latest read ' + (meta.openclaw_upstream_status || 'unavailable')) +
+    (meta.openclaw_error ? ' (' + meta.openclaw_error + ')' : '');
 }
 function renderAvailable(state) {
   var models = partialModels(state);
@@ -1793,13 +1802,39 @@ function loadSources(version, state, requested, fresh) {
           if (previous && (previous.meta.start_date !== models.meta.start_date ||
               previous.meta.end_date !== models.meta.end_date)) delete state.parts[other];
         });
-        state.parts[source] = models;
+        var previous = state.parts[source];
+        // Never downgrade an exact-window complete observation to an incomplete
+        // transport response. Retain its own timestamp, not the new request's.
+        if (source === 'openclaw' && previous && previous.meta.openclaw_snapshot_complete &&
+            !models.meta.openclaw_snapshot_complete && previous.meta.start_date === models.meta.start_date &&
+            previous.meta.end_date === models.meta.end_date) {
+          previous.meta.openclaw_status = 'cached';
+          previous.meta.openclaw_cached_at_utc = previous.meta.openclaw_source_at_utc || previous.meta.openclaw_cached_at_utc;
+          previous.meta.openclaw_upstream_status = models.meta.openclaw_upstream_status || models.meta.openclaw_status;
+          previous.meta.openclaw_refreshing = models.meta.openclaw_refreshing;
+          previous.sources.openclaw.complete = false;
+        } else state.parts[source] = models;
+        if (source === 'openclaw' && models.meta.openclaw_refreshing && (state.openclawRetries || 0) < 7) {
+          state.openclawRetries = (state.openclawRetries || 0) + 1;
+          clearTimeout(openclawRetryTimers[version]);
+          openclawRetryTimers[version] = setTimeout(function () {
+            if (current()) loadSources(version, state, ['openclaw'], false);
+          }, 8000);
+        }
         state.modelsDirty = true;
         delete state.errors[source];
         renderAvailable(state);
       }).catch(function (error) {
         if (!current()) return;
         state.errors[source] = error.message;
+        var previous = state.parts[source];
+        if (source === 'openclaw' && previous) {
+          previous.meta.openclaw_status = 'cached';
+          previous.meta.openclaw_cached_at_utc = previous.meta.openclaw_cached_at_utc || previous.meta.openclaw_source_at_utc;
+          previous.meta.openclaw_upstream_status = 'unavailable';
+          previous.meta.openclaw_error = error.message;
+          previous.meta.openclaw_refreshing = false;
+        }
         state.modelsDirty = true;
         renderAvailable(state);
       });
@@ -1810,9 +1845,16 @@ function reload(force, nextDays) {
   var days = nextDays || selectedDays;
   var version = ++loadVersion;
   selectedDays = days;
-  var state = lastLoaded && lastLoaded.days === days ? lastLoaded :
+  Object.keys(openclawRetryTimers).forEach(function (key) { clearTimeout(openclawRetryTimers[key]); delete openclawRetryTimers[key]; });
+  var state = periodStates[days] ||
     { days: days, quotas: null, quotaParts: {}, quotaPending: {}, parts: {}, errors: {}, requests: {} };
+  // A cached period is reusable only on the same UTC calendar day.
+  var utcEnd = new Date().toISOString().slice(0, 10);
+  if (state.utcDay && state.utcDay !== utcEnd) state.parts = {};
+  state.utcDay = utcEnd;
   state.errors = {};
+  state.openclawRetries = 0;
+  periodStates[days] = state;
   lastLoaded = state;
   busy = !nextDays;
   var button = $('refresh');

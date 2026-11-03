@@ -51,8 +51,10 @@ READER_SOURCE = textwrap.dedent('''
 
 def live_read(start_date, end_date):
     """A successful Gateway read; the aggregate is copied so tests cannot alias it."""
-    return {'aggregates': json.loads(json.dumps(AGGREGATE)),
-            'cacheStatus': {'status': 'fresh'}}
+    aggregates = json.loads(json.dumps(AGGREGATE))
+    for row in aggregates['modelDaily']:
+        row['date'] = end_date
+    return {'aggregates': aggregates, 'cacheStatus': {'status': 'fresh'}}
 
 
 def failing_read(*_args):
@@ -205,8 +207,10 @@ def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
         'modelDaily': [{'date': '2026-10-07', 'provider': 'xai',
                         'model': 'grok-4.7', 'tokens': 10, 'cost': 0.2},
                        {'date': '2026-10-07', 'provider': 'nordrouter',
-                        'model': 'nr-model', 'tokens': 21, 'cost': 0.5}],
-    }})
+                        'model': 'nr-model', 'tokens': 21, 'cost': 0.5},
+                       {'date': '2026-10-07', 'provider': 'local',
+                        'model': 'local-test', 'tokens': 2}],
+    }, 'cacheStatus': {'status': 'fresh'}})
     class DirectClient:
         def __init__(self, key):
             assert key == 'fixture-key'
@@ -262,7 +266,8 @@ def test_successful_live_read_is_saved_aggregate_only_and_replayed(cache):
     assert record['window'] == {'days': 7, 'start_date': START, 'end_date': END}
     assert datetime.fromisoformat(record['fetched_at_utc']).tzinfo is not None
     # Only the projected aggregate survives; no other Gateway field is stored.
-    assert set(record['data']) == {'aggregates'}
+    assert set(record['data']) == {'aggregates', 'cacheStatus'}
+    assert record['data']['cacheStatus']['status'] == 'fresh'
     assert set(record['data']['aggregates']) == {'byModel', 'modelDaily'}
     assert openclaw_usage.db_file().exists()
 
@@ -317,8 +322,9 @@ def test_unrecognized_response_shapes_fall_back_instead_of_raising(cache):
         return {'aggregates': AGGREGATE, 'cacheStatus': 'refreshing'}
 
     loaded = openclaw_usage.load_with_cache(7, START, END, fetch=odd_read)
-    assert loaded['status'] == 'ok'
-    assert loaded['gateway_cache_status'] is None
+    assert loaded['status'] == 'cached'
+    assert loaded['upstream_status'] == 'unknown'
+    assert loaded['snapshot_complete'] is True
 
     for bad in ({'aggregates': 'nope'}, {}, None, {'other': 1}):
         result = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_, b=bad: b)
@@ -335,8 +341,12 @@ def test_unrecognized_response_shapes_fall_back_instead_of_raising(cache):
     assert saved_window() == before
     empty = openclaw_usage.load_with_cache(
         7, START, END, fetch=lambda *_: {'aggregates': {'byModel': [], 'modelDaily': []}})
-    assert empty['status'] == 'ok'  # explicit, valid zero remains distinguishable
-    assert empty['response']['aggregates']['byModel'] == []
+    assert empty['status'] == 'cached'  # a valid but unverified zero cannot erase a full window
+    assert empty['response']['aggregates']['byModel']
+    verified_zero = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_: {
+        'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'fresh'}})
+    assert verified_zero['status'] == 'ok'
+    assert verified_zero['response']['aggregates']['byModel'] == []
 
 
 def test_repeated_failures_never_promote_or_rewrite_the_saved_window(cache):
@@ -579,7 +589,7 @@ def test_cached_and_live_breakdowns_agree_except_for_staleness(cache, monkeypatc
     # generation timestamps of the two separate calls.
     changed = {key for key in live['meta'] if live['meta'][key] != cached['meta'][key]}
     assert changed <= {'generated_at', 'generated_at_utc', 'openclaw_status',
-                       'openclaw_cached_at_utc', 'openclaw_error'}
+                       'openclaw_cached_at_utc', 'openclaw_error', 'openclaw_upstream_status', 'openclaw_source_at_utc'}
     assert {'openclaw_status', 'openclaw_cached_at_utc', 'openclaw_error'} <= changed
 
 
@@ -898,3 +908,175 @@ def test_partial_gateway_snapshot_never_completes_overview(cache, monkeypatch, s
     assert result['sources']['openclaw']['complete'] is False
     assert result['sources']['openclaw']['tokens'] == 10
     assert result['totals']['total'] is None
+
+
+@pytest.mark.parametrize('status', ['refreshing', 'partial', 'stale'])
+def test_incomplete_zero_cannot_replace_full_models_or_original_time(cache, status):
+    original = datetime(2026, 10, 7, 10, 0, tzinfo=timezone.utc)
+    full = live_read(START, END)
+    full.update(startDate=START, endDate=END, updatedAt=1791366000000)
+    openclaw_usage.write_snapshot(7, START, END, full, fetched_at=original)
+    before = snapshot_row()
+    partial = {'aggregates': {'byModel': [], 'modelDaily': []},
+               'startDate': START, 'endDate': END,
+               'cacheStatus': {'status': status, 'pendingFiles': 2},
+               'partial': {'reason': 'time-budget'}}
+    for _ in range(2):
+        result = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_: partial)
+        assert result['status'] == 'cached'
+        assert result['snapshot_complete'] is True
+        assert result['upstream_status'] == status
+        assert result['cached_at_utc'] == original.isoformat()
+        assert result['source_at_utc'] == openclaw_usage._source_instant(full, None)
+        assert result['response']['aggregates'] == full['aggregates']
+        assert snapshot_row() == before
+
+
+def test_budget_and_coverage_survive_sanitization_even_when_file_counts_are_zero(cache):
+    response = {**live_read(START, END), 'startDate': START, 'endDate': END,
+                'cacheStatus': {'status': 'fresh', 'pendingFiles': 0, 'staleFiles': 0},
+                'partial': {'reason': 'time-budget', 'message': 'private diagnostic'},
+                'coverage': {'strategy': 'all-agents-exact-empty-page-v1', 'complete': False,
+                             'sessions': ['private'], 'requests': [{'status': 'partial', 'secret': 'never retain'}]},
+                'sessions': ['private'], 'token': 'never retain'}
+    result = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_: response)
+    assert result['snapshot_complete'] is False
+    assert result['gateway_cache_status'] == 'partial'
+    stored = saved_window()['data']
+    assert stored['partial'] == {'reason': 'time-budget'}
+    assert stored['coverage']['complete'] is False
+    assert 'private' not in json.dumps(stored)
+    assert 'never retain' not in json.dumps(stored)
+
+
+def test_legacy_or_partial_checkpoint_is_not_certified_and_only_full_can_replace_it(cache):
+    unknown = {'aggregates': AGGREGATE}
+    openclaw_usage.write_snapshot(7, START, END, unknown)
+    before = snapshot_row()
+    loaded = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_: {
+        'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'refreshing'}})
+    assert loaded['status'] == 'cached' and not loaded['snapshot_complete']
+    assert snapshot_row() == before
+    recovered = openclaw_usage.load_with_cache(7, START, END, fetch=live_read)
+    assert recovered['snapshot_complete'] and recovered['status'] == 'ok'
+    assert snapshot_row() != before
+
+
+@pytest.mark.parametrize('changed', [
+    {'startDate': '2026-09-30'},
+    {'endDate': '2026-10-06'},
+    {'aggregates': {'byModel': AGGREGATE['byModel'], 'modelDaily': [
+        {**AGGREGATE['modelDaily'][0], 'date': '2026-10-08'}]}},
+])
+def test_window_mismatch_cannot_admit_or_advance_snapshot(cache, changed):
+    openclaw_usage.load_with_cache(7, START, END, fetch=live_read)
+    before = snapshot_row()
+    result = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_: {**live_read(START, END), **changed})
+    assert result['status'] == 'cached'
+    assert snapshot_row() == before
+
+
+def test_fresh_label_with_missing_daily_rows_is_not_full(cache):
+    reply = live_read(START, END)
+    reply['aggregates']['modelDaily'] = []
+    result = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_: reply)
+    assert result['snapshot_complete'] is False
+    assert result['gateway_cache_status'] == 'partial'
+
+
+def test_request_driven_refresh_is_fast_single_flight_and_keeps_full_data(cache, monkeypatch):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    openclaw_usage.load_with_cache(7, START, END, fetch=live_read)
+    before = snapshot_row()
+    began, release = threading.Event(), threading.Event()
+    calls = []
+    def blocked(*_):
+        calls.append(1)
+        began.set()
+        assert release.wait(3)
+        return {'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'refreshing'}}
+    try:
+        start = time.monotonic()
+        first = openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True)
+        assert time.monotonic() - start < .5
+        assert began.wait(1)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            rows = list(pool.map(lambda _: openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True), range(8)))
+        assert len(calls) == 1
+        assert all(r['refreshing'] and r['snapshot_complete'] for r in [first, *rows])
+        assert all(r['response']['aggregates'] == AGGREGATE for r in rows)
+        release.set()
+        with openclaw_usage._flight_lock:
+            future = next(f for (path, key), (f, _) in openclaw_usage._flights.items() if path == str(openclaw_usage.db_file()))
+        settled = future.result(3)
+        assert settled['status'] == 'cached' and not settled['refreshing']
+        assert snapshot_row() == before
+        assert openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True)['upstream_status'] == 'refreshing'
+        assert len(calls) == 1
+    finally:
+        release.set()
+
+
+def test_cold_background_response_is_bounded_without_inventing_empty_tokens(cache, monkeypatch):
+    import threading
+    import time
+    began, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(openclaw_usage, 'BACKGROUND_COLD_WAIT_SECONDS', .01)
+    def blocked(*_):
+        began.set()
+        assert release.wait(3)
+        return live_read(START, END)
+    try:
+        start = time.monotonic()
+        result = openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True)
+        assert time.monotonic() - start < .5
+        assert result['status'] == 'refreshing' and result['response'] is None
+        assert result['source_at_utc'] is None and not result['snapshot_complete']
+        assert began.wait(1)
+    finally:
+        release.set()
+        with openclaw_usage._flight_lock:
+            future = next(f for (path, key), (f, _) in openclaw_usage._flights.items() if path == str(openclaw_usage.db_file()))
+        assert future.result(3)['snapshot_complete']
+
+
+def test_sdk_shim_resolution_is_literal_and_uses_public_readonly_helper(tmp_path):
+    node = _make_executable(tmp_path / 'node')
+    entry = tmp_path / 'build' / 'dist' / 'index.js'
+    sdk = entry.parent / 'plugin-sdk' / 'gateway-runtime.js'
+    sdk.parent.mkdir(parents=True)
+    sdk.write_text('export const callGatewayFromCli = () => {};')
+    shim = _make_executable(tmp_path / 'openclaw')
+    shim.write_text(f'#!/bin/sh\nexec {node} --max-old-space-size=512 {entry} "$@"\n')
+    command = openclaw_usage._sdk_command(str(shim))
+    assert command[0] == str(node)
+    assert command[-1] == str(sdk)
+    assert command[-2].endswith('openclaw_gateway_read.mjs')
+
+
+def test_first_partial_insert_cannot_race_over_a_complete_writer(cache, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    partial_ready, full_written = threading.Event(), threading.Event()
+    store = dashboard_store.store_snapshot
+    def reordered(*args, **kwargs):
+        payload = json.loads(args[6])
+        if payload['cacheStatus']['status'] == 'partial':
+            partial_ready.set()
+            assert full_written.wait(3)
+        result = store(*args, **kwargs)
+        if payload['cacheStatus']['status'] == 'fresh':
+            full_written.set()
+        return result
+    monkeypatch.setattr(dashboard_store, 'store_snapshot', reordered)
+    partial = {'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'partial'}}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(openclaw_usage.load_with_cache, 7, START, END, fetch=lambda *_: partial)
+        assert partial_ready.wait(2)
+        openclaw_usage.write_snapshot(7, START, END, live_read(START, END))
+        settled = first.result(3)
+    assert settled['status'] == 'cached' and settled['snapshot_complete']
+    assert saved_window()['data']['aggregates'] == AGGREGATE
+    assert saved_window()['data']['cacheStatus']['status'] == 'fresh'

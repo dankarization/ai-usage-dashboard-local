@@ -196,7 +196,9 @@ def model_breakdown(response: Response, days: int = 30, daily: bool = True, refr
     key = ('models', start, end, days, daily, source)
     def collect():
         if source == 'all':
-            return build_model_breakdown(days=days, include_daily=daily)
+            return build_model_breakdown(days=days, include_daily=daily, openclaw_background=True)
+        if source == 'openclaw':
+            return build_model_breakdown(days=days, include_daily=daily, source=source, openclaw_background=True)
         return build_model_breakdown(days=days, include_daily=daily, source=source)
     value, status = _source_cache.get(key, collect, force=refresh)
     response.headers['X-Dashboard-Source-Cache'] = status

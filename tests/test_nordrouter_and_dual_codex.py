@@ -272,7 +272,7 @@ def test_failed_export_uses_only_its_profile_cache(monkeypatch, tmp_path):
 def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypatch):
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
-    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'fresh'}})
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
     start, end, _, _ = usage.get_model_date_range(7)
     matched = analytics(7)
@@ -310,7 +310,8 @@ def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(monkeypatc
         requested.append(('gateway', first, last))
         return {'aggregates': {'byModel': [
             {'provider': 'xai', 'model': 'grok', 'totals': {'totalTokens': 5, 'totalCost': 0.01}}],
-            'modelDaily': [{'date': end, 'provider': 'xai', 'model': 'grok', 'tokens': 5}]}}
+            'modelDaily': [{'date': end, 'provider': 'xai', 'model': 'grok', 'tokens': 5}]},
+                'cacheStatus': {'status': 'fresh'}}
 
     def analytics_day(self, endpoint, **params):
         requested.append((endpoint, params['days']))
@@ -459,7 +460,7 @@ def test_account_top_list_residual_and_duplicate_days(monkeypatch):
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
     monkeypatch.setattr(usage, 'get_model_date_range', lambda days: ('2026-10-02', '2026-10-02', None, None))
-    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}})
+    monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'fresh'}})
     monkeypatch.setattr(usage._hermes_usage, 'state_dbs', lambda: [])
     body = {'window_days': 1, 'totals': {'amount_usd': 1},
             'daily': [{'date': '2026-10-02', 'tokens': 100, 'amount_usd': 1}],

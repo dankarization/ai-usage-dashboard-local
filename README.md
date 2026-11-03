@@ -21,8 +21,27 @@ unresolved difference, not gray usage. Exact history counts in the table and
 reported route drilldowns reconcile the chart separately from account-window
 balances and agent comparisons. Cache reads are already included once in totals.
 
-Missing data stays unknown, not zero. If OpenClaw is unavailable, a saved window
-for the same period is labelled with its original fetch time.
+Missing data stays unknown, not zero. Total tokens shows the chart's known
+subtotal when coverage is incomplete, not a fabricated combined total.
+
+OpenClaw keeps exact UTC windows separately. A partial/refreshing/malformed
+reply cannot overwrite a saved observation or advance its timestamp; only a
+complete response can replace it. Pre-coverage snapshots remain unverified.
+The API distinguishes current completeness, saved-snapshot completeness,
+original source time and the latest read status. Request-driven revalidation
+has one flight per window, two workers, three queued/running windows and a
+60-second transport deadline. Saved data returns immediately; a cold HTTP
+request waits at most two seconds for this source. The page retains each period
+and makes at most seven follow-up reads, eight seconds apart, while revalidating.
+
+When a supported public SDK is available beside the installed CLI shim, the
+adapter requests exact all-agent aggregates with an empty session page. Paging
+does not change aggregate inputs; this avoids unused page-context hydration.
+It deliberately does not use the Gateway's committed-only overview projection.
+Other CLI installations retain the bounded CLI fallback. Upstream time-budget
+or coverage warnings are never interpreted as a full snapshot, even when
+pending-file counters are zero. No Gateway state or credentials are changed.
+
 
 ## Run locally
 

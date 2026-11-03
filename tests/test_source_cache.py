@@ -86,3 +86,19 @@ def test_api_period_cache_force_and_quota_isolation(monkeypatch):
     client.get('/api/v1/model-breakdown?days=1&source=openclaw')
     client.get('/api/v1/model-breakdown?days=7&daily=false&source=openclaw')
     assert len(calls) == 4
+
+
+def test_background_read_response_does_not_hide_finished_result_for_normal_ttl(monkeypatch):
+    import source_cache
+    clock = [100.]
+    monkeypatch.setattr(source_cache.time, 'monotonic', lambda: clock[0])
+    cache = SourceCache()
+    calls = []
+    def collect():
+        calls.append(1)
+        return {'meta': {'openclaw_status': 'cached', 'openclaw_refreshing': len(calls) == 1}}
+    assert cache.get('same-window', collect)[1] == 'fresh'
+    assert cache.get('same-window', collect)[1] == 'cached'
+    clock[0] += 1.1
+    assert cache.get('same-window', collect)[1] == 'fresh'
+    assert len(calls) == 2

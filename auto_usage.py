@@ -2854,7 +2854,7 @@ def model_key(model: str) -> str:
     return MODEL_KEY_SUFFIX.sub('', base)
 
 
-def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source: str = 'all') -> dict[str, object]:
+def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source: str = 'all', openclaw_background: bool = False) -> dict[str, object]:
     """Agent rollups for comparison; direct NordRouter is canonical for its route.
 
     OpenClaw Gateway and Hermes native sessions both report per-model usage.
@@ -2872,11 +2872,12 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     gateway_status = 'pending'
     gateway_cached_at_utc = None
     gateway_error = None
+    loaded = {}
     if source in ('all', 'openclaw'):
         # A failed Gateway read falls back to the snapshot this window already
-        # retained from an earlier successful live read; only such a read
-        # writes it, and no background job fills it.
-        loaded = openclaw_usage.load_with_cache(days, start_str, end_str)
+        # retained from an earlier read. Incomplete replies cannot replace it;
+        # service reads can request bounded request-driven revalidation.
+        loaded = openclaw_usage.load_with_cache(days, start_str, end_str, background=True) if openclaw_background else openclaw_usage.load_with_cache(days, start_str, end_str)
         gateway_status = loaded['status']
         gateway_cached_at_utc = loaded['cached_at_utc']
         gateway_error = loaded['error']
@@ -2992,9 +2993,11 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
     hermes_source = agent_source('hermes')
     # A saved snapshot is not current: the Gateway kept accruing while it was
     # unreachable, so it stays incomplete and never becomes the canonical total.
-    openclaw_source['complete'] = gateway_status in ('ok', 'fresh')
+    openclaw_source['complete'] = gateway_status in ('ok', 'fresh') and loaded.get('snapshot_complete', True)
+    openclaw_source['snapshot_complete'] = loaded.get('snapshot_complete', False)
+    openclaw_source['source_at_utc'] = loaded.get('source_at_utc')
     hermes_source['complete'] = hermes_status in ('ok', 'not_configured')
-    if gateway_status in ('unavailable', 'pending'):
+    if gateway_status in ('unavailable', 'pending') or loaded.get('response', 'pending') is None:
         openclaw_source['tokens'] = None
     if hermes_status in ('unavailable', 'pending'):
         hermes_source['tokens'] = None
@@ -3027,6 +3030,11 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             'openclaw_status': gateway_status, 'hermes_status': hermes_status,
             'openclaw_cached_at_utc': gateway_cached_at_utc,
             'openclaw_error': gateway_error,
+            'openclaw_source_at_utc': loaded.get('source_at_utc'),
+            'openclaw_upstream_status': loaded.get('upstream_status'),
+            'openclaw_snapshot_complete': loaded.get('snapshot_complete', False),
+            'openclaw_refreshing': loaded.get('refreshing', False),
+            'openclaw_coverage': (loaded.get('response') or {}).get('coverage'),
             'nordrouter_status': nr_status, 'nordrouter_fetched_at_utc': nr_fetched_at,
             'omniroute_status': router['status'],
         },

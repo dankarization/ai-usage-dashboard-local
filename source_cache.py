@@ -48,7 +48,8 @@ class SourceCache:
                           for row in value.get('quotas', []))
             with self._condition:
                 if generation == self._generation:
-                    self._entries[key] = (time.monotonic() + (self.failure_ttl if failed else self.ttl), value)
+                    lifetime = 1 if meta.get('openclaw_refreshing') else self.failure_ttl if failed else self.ttl
+                    self._entries[key] = (time.monotonic() + lifetime, value)
                     self._entries.move_to_end(key)
                     while len(self._entries) > self.limit:
                         self._entries.popitem(last=False)

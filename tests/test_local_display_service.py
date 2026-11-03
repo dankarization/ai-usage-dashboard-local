@@ -499,7 +499,7 @@ def test_model_breakdown_returns_per_model_shape(monkeypatch):
             },
         ],
     }
-    monkeypatch.setattr(local_display_service, "build_model_breakdown", lambda days=30, include_daily=True: fake_breakdown)
+    monkeypatch.setattr(local_display_service, "build_model_breakdown", lambda days=30, include_daily=True, openclaw_background=False: fake_breakdown)
 
     response = TestClient(local_display_service.app).get("/api/v1/model-breakdown?days=30")
 
@@ -521,15 +521,15 @@ def test_model_breakdown_returns_per_model_shape(monkeypatch):
 def test_model_breakdown_accepts_one_day_window(monkeypatch):
     requested = []
 
-    def build(days=30, include_daily=True):
-        requested.append((days, include_daily))
+    def build(days=30, include_daily=True, openclaw_background=False):
+        requested.append((days, include_daily, openclaw_background))
         return {"meta": {"start_date": "2026-10-08", "end_date": "2026-10-08", "days": days},
                 "totals": {"total": 0}, "models": []}
 
     monkeypatch.setattr(local_display_service, "build_model_breakdown", build)
     response = TestClient(local_display_service.app).get("/api/v1/model-breakdown?days=1&daily=true")
     assert response.status_code == 200
-    assert requested == [(1, True)]
+    assert requested == [(1, True, True)]
     assert response.json()["meta"]["days"] == 1
     assert response.json()["meta"]["start_date"] == response.json()["meta"]["end_date"]
 
@@ -543,7 +543,7 @@ def test_period_views_do_not_wait_for_provider_refresh(monkeypatch):
         assert release_refresh.wait(timeout=10)
         return {"meta": {}, "summary": {"total_tokens": 0}, "daily": []}
 
-    def breakdown(days=30, include_daily=True):
+    def breakdown(days=30, include_daily=True, openclaw_background=False):
         return {"meta": {"start_date": "2026-10-08", "end_date": "2026-10-08", "days": days},
                 "totals": {"total": 0}, "models": []}
 
@@ -579,7 +579,7 @@ def test_model_breakdown_daily_false_omits_daily_entries(monkeypatch):
 
     captured = {}
 
-    def mock_build(days=30, include_daily=True):
+    def mock_build(days=30, include_daily=True, openclaw_background=False):
         captured["include_daily"] = include_daily
         return fake_breakdown
 
@@ -605,7 +605,7 @@ def test_model_breakdown_null_fields_for_total_only_sources(monkeypatch):
              "daily": []},
         ],
     }
-    monkeypatch.setattr(local_display_service, "build_model_breakdown", lambda days=30, include_daily=True: fake_breakdown)
+    monkeypatch.setattr(local_display_service, "build_model_breakdown", lambda days=30, include_daily=True, openclaw_background=False: fake_breakdown)
 
     response = TestClient(local_display_service.app).get("/api/v1/model-breakdown")
 

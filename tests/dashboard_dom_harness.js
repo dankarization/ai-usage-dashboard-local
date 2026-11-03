@@ -636,7 +636,7 @@ touch(sol, 'pointerup', 6, 100, 100);
 windowListeners.scroll();
 assertEqual(tip.style.visibility, 'hidden', 'scroll dismisses an already open touch tooltip');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
-assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'), 'missing source is not zero');
+assert(registry.get('hero').textContent.includes('loading sources'), 'missing source is not zero');
 assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,
   'incomplete overview must not show numeric source chips');
 selectedDays = 30;
@@ -1368,7 +1368,7 @@ async function waitForReload() {
   await settle();
   assert(registry.get('models').textContent.includes('direct-7d'), 'direct model renders before OpenClaw');
   assert(registry.get('history').textContent.includes('NR unresolved 7'), 'account-only arrival is unresolved, never a gray allocation');
-  assert(registry.get('hero').textContent.includes('incomplete source'), 'incomplete canonical total is not invented');
+  assert(registry.get('hero').textContent.includes('loading sources'), 'an account-only unresolved balance is not a fabricated total');
   request(urlFor(7, 'openclaw')).reject(new Error('slow Gateway timeout'));
   initialUpdate.reject(new Error('provider refresh failed'));
   await settle();
@@ -1530,27 +1530,81 @@ async function waitForReload() {
   await settle();
   assert(registry.get('models').textContent.includes(savedModel),
     'the saved OpenClaw window is still shown');
-  assert(registry.get('error').textContent.includes('Showing saved OpenClaw usage from ' + time(savedStamp)),
+  assert(registry.get('error').textContent.includes('OpenClaw: saved unverified snapshot ' + time(savedStamp)),
     'the warning names the original successful fetch time');
   assert(registry.get('error').textContent.includes(savedError),
     'the warning names the live failure');
-  assert(registry.get('error').textContent.includes('not live data'),
+  assert(registry.get('error').textContent.includes('latest read unavailable'),
     'the saved window is never presented as current');
   assert(registry.get('model-stamp').textContent.includes('OpenClaw cached (saved ' + time(savedStamp) + ')'),
     'the models stamp repeats the saved fetch time');
-  assert(registry.get('hero').textContent.includes('incomplete source · total unavailable'),
-    'a saved window never becomes the canonical total');
+  assert(registry.get('hero').textContent.includes('known subtotal · incomplete coverage'),
+    'saved measured history stays visible without claiming a live complete total');
   assert(!registry.get('hero').textContent.includes('0 tokens'),
     'a stale read is never rendered as zero usage');
   savedOpenClaw = false;
   registry.get('refresh').listeners.click[0]();
   await waitForReload();
   await settle();
-  assert(!registry.get('error').textContent.includes('Showing saved OpenClaw usage'),
+  assert(!registry.get('error').textContent.includes('OpenClaw: saved'),
     'a successful live read clears the saved-window warning');
   assert(registry.get('models').textContent.includes(liveModel), 'live OpenClaw rows replace the saved ones');
   assert(!registry.get('models').textContent.includes(savedModel),
     'the saved row is replaced, not duplicated');
+
+  // A transient successful-but-partial response is not a replacement for a
+  // complete exact-window snapshot. Its timestamp belongs to the attempted
+  // refresh, not to the data that remains on screen.
+  const originalStamp = '2026-10-03T10:00:00+00:00';
+  const fullPart = modelFor(selectedDays, 'openclaw');
+  fullPart.meta = {...fullPart.meta, openclaw_snapshot_complete:true,
+    openclaw_source_at_utc:originalStamp, openclaw_status:'ok'};
+  fullPart.sources.openclaw.bucket_comparison_tokens = 1;
+  lastLoaded.parts.openclaw = fullPart;
+  lastLoaded.modelsDirty = true;
+  renderAvailable(lastLoaded);
+  const retainedState = lastLoaded;
+  const retainedHero = registry.get('hero').textContent;
+  const originalSetTimeout = global.setTimeout;
+  const retryCallbacks = [];
+  let sourceReads = 0;
+  global.setTimeout = (fn, milliseconds) => milliseconds === 8000
+    ? (retryCallbacks.push(fn), 90000 + retryCallbacks.length)
+    : originalSetTimeout(fn, milliseconds);
+  global.fetch = (url) => {
+    if (url.includes('source=openclaw')) {
+      sourceReads++;
+      return Promise.resolve({ok:true,json:()=>Promise.resolve({...fullPart,
+        meta:{...fullPart.meta,openclaw_status:'refreshing',openclaw_snapshot_complete:false,
+          openclaw_refreshing:true,openclaw_source_at_utc:'2026-10-03T11:00:00+00:00'},
+        models:[],sources:{openclaw:{complete:false,tokens:null}}})});
+    }
+    if (url.startsWith('/api/v1/quotas')) return Promise.resolve({ok:true,json:()=>Promise.resolve(quotaResponse(url))});
+    return Promise.resolve({ok:true,json:()=>Promise.resolve(modelFor(selectedDays,sourceOf(url)))});
+  };
+  try {
+    lastLoaded.openclawRetries = 0;
+    loadSources(loadVersion,lastLoaded,['openclaw'],false);
+    await settle();
+    assertEqual(lastLoaded.parts.openclaw.models[0].model,fullPart.models[0].model,
+      'refreshing empty rows cannot wipe a complete model history');
+    assertEqual(lastLoaded.parts.openclaw.meta.openclaw_source_at_utc,originalStamp,
+      'an incomplete refresh cannot advance the displayed observation timestamp');
+    assertEqual(registry.get('hero').textContent,retainedHero,
+      'the known total stays stable when a refresh loses coverage');
+    while (retryCallbacks.length) {retryCallbacks.shift()(); await settle();}
+    assertEqual(sourceReads,8,'revalidation has a finite per-period request budget');
+    const otherPeriod = selectedDays === 1 ? 7 : 1;
+    clickPeriod(otherPeriod); await settle();
+    clickPeriod(retainedState.days);
+    assertEqual(lastLoaded,retainedState,'switching back reuses the exact saved period state immediately');
+    assertEqual(lastLoaded.parts.openclaw.models[0].model,fullPart.models[0].model,
+      'period switching does not blank retained model history');
+    await settle();
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    Object.keys(openclawRetryTimers).forEach(key => {clearTimeout(openclawRetryTimers[key]);delete openclawRetryTimers[key];});
+  }
 
   if (process.argv[3]) {
     const actual = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
