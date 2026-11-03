@@ -124,6 +124,7 @@ def test_multi_day_row_is_attributed_to_its_last_activity_day(tmp_path):
     entries = hermes_usage.model_entries((today - timedelta(days=6)).isoformat(),
                                          today.isoformat(), root=tmp_path)
     assert [day['date'] for day in entries[0]['daily']] == [today.isoformat()]
+    assert entries[0]['daily'][0]['account_day_compatible'] is False
 
 
 def test_named_profiles_are_summed_into_one_entry(tmp_path):
@@ -137,7 +138,7 @@ def test_named_profiles_are_summed_into_one_entry(tmp_path):
     assert entries[0]['totals']['total'] == 25
     assert entries[0]['daily'] == [
         {'date': today.isoformat(), 'input': 25, 'output': 0, 'cache_read': 0,
-         'cache_write': 0, 'total': 25}]
+         'cache_write': 0, 'total': 25, 'account_day_compatible': False}]
 
 
 def test_nordrouter_rows_never_claim_a_second_price(tmp_path):

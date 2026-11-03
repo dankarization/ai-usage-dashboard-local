@@ -159,7 +159,10 @@ def model_entries(start_date: str, end_date: str, *, include_daily: bool = True,
                 days = daily.setdefault(key, {})
                 entry = days.setdefault(day.isoformat(),
                                         {'input': 0, 'output': 0, 'cache_read': 0,
-                                         'cache_write': 0, 'total': 0})
+                                         'cache_write': 0, 'total': 0,
+                                         'account_day_compatible': True})
+                # Last-activity attribution is not an exact account-day split.
+                entry['account_day_compatible'] &= (_row_date(row['first_seen'], row['first_seen']) == day)
                 for field in ('input', 'output', 'cache_read', 'cache_write', 'total'):
                     entry[field] += tokens[field]
 

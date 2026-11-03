@@ -13,8 +13,8 @@ these invariants:
 * No external assets: no ``<script src=``, no ``<link>``, no ``innerHTML``.
 * No invented data: every number comes from a live endpoint, and a window with
   no percentage renders as "unavailable"/"not configured", never as 0%.
-* Honest history: the daily chart uses Gateway model-day and direct NordRouter
-  account-day buckets; resizing reuses the same snapshot.
+* Honest history: reported serving/model days are counted once; NordRouter
+  account days constrain overlap, never model shares. Resizing reuses the snapshot.
 * Honest snapshot time: the header renders the offset-aware ``generated_at_utc``
   in the viewer's own timezone with a relative age, and marks a stale snapshot
   instead of presenting it as current.
@@ -300,7 +300,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
   </section>
 
-  <footer class="foot"><p class="note" id="models-note">One row per model: spellings that bill as one model are summed. NordRouter bills every agent, so its per-source token count is unknown; when retained router history covers the window, the crossed-out agent total → direct figure is the account residual outside proven router-bucket overlap, not the full account amount. When that history does not cover the window, the NordRouter cell is the exclusive residual only, the bucket row stays, and those two are not joined by a combined figure. Bucket prices are router-wide estimates and are not added to that account bill. Input/output/cache on a covered-window row are agent comparisons, not direct token types.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
+  <footer class="foot"><p class="note" id="models-note">History counts reported serving routes and direct agent usage once. Gray is verified unmatched NordRouter usage; incomplete coverage stays unresolved. Table history counts reconcile the chart; account-window balances and crossed-out agent comparisons are not additional tokens. Billing and router estimates are not additive.</p><p>Auto-refresh every 5m · data never leaves this machine</p></footer>
 </main>
 
 <script>
@@ -884,13 +884,15 @@ function nordrouterOverlap(models, routerStatus, nrDaily) {
     nrDaily.forEach(function (day) { if (day && day.date) nrDates[day.date] = true; });
   }
   function windowTokens(route) {
-    var total = routeTokens(route);
+    var totals = route.reported_totals || ((route.usage_provenance === 'estimated' || route.usage_provenance === 'mixed') ? null : route.totals);
+    var total = totals && totals.total;
     if (!total) return 0;
     var days = route.daily || [];
     if (!nrDates) return total;
     if (!days.length) return 0;
     return days.reduce(function (sum, day) {
-      var n = day.totals && number(day.totals.total) && day.totals.total > 0 ? day.totals.total : 0;
+      var totals = day.reported_totals || day.totals;
+      var n = totals && number(totals.total) && totals.total > 0 ? totals.total : 0;
       return nrDates[day.date] ? sum + n : sum;
     }, 0);
   }
@@ -946,93 +948,165 @@ function nordrouterOverlap(models, routerStatus, nrDaily) {
     unknown: unknown, proven: proven, matchedBuckets: matchedBuckets };
 
 }
-// Account billing is counted once, without assigning its days to model samples.
-// Outside that pool, use independent agents and proven non-NordRouter serving
-// observations. Router agent buckets are comparisons, not extra consumption.
+// Count physical serving observations once, not agent comparisons of the same
+// router calls. Account days constrain the ledger; they are never model weights.
 function routerHistoryKey(route) {
   return 'router/' + JSON.stringify([route.provider, route.model, route.price_id, route.nordrouter]);
 }
+function reportedRouteTotals(route, slice) {
+  if (slice && slice.reported_totals) return slice.reported_totals;
+  return route.usage_provenance === 'reported' && !route.unverified_requests ? (slice || route).totals : null;
+}
 function historySeries(payload) {
   var byDate = new Map(), categories = new Map(), accountDays = new Map(), invalidDates = new Set();
-  var meta = payload.meta || {};
+  var ledger = new Map(), rowTotals = new Map(), meta = payload.meta || {}, sources = payload.sources || {};
+  var accountFamilies = new Set((payload.models || []).filter(function (row) {
+    return row.source === 'nordrouter' || (AGENT_SOURCES[row.source] && String(row.provider).toLowerCase() === 'nordrouter');
+  }).map(rowKey));
   function inWindow(date) {
     return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
       (!meta.start_date || date >= meta.start_date) && (!meta.end_date || date <= meta.end_date);
   }
-  ((payload.source_daily || {}).nordrouter || []).forEach(function (day) {
-    if (!day || !inWindow(day.date)) return;
-    if (!Number.isSafeInteger(day.tokens) || day.tokens < 0 || accountDays.has(day.date) || invalidDates.has(day.date)) {
-      accountDays.delete(day.date); invalidDates.add(day.date); return;
-    }
-    accountDays.set(day.date, day.tokens);
-  });
-  var accountMode = accountDays.size > 0 || invalidDates.size > 0;
-  var partialDates = new Set(invalidDates);
-  var incomplete = ['openclaw', 'hermes'].some(function (source) {
-    return ((payload.sources || {})[source] || {}).complete === false;
-  });
-  function add(date, category, amount) {
-    if (!inWindow(date) || !number(amount) || amount < 0) return;
+  function count(n) { return Number.isSafeInteger(n) && n >= 0; }
+  function day(date) {
+    if (!ledger.has(date)) ledger.set(date, {date: date, account: null, covered_unique: 0,
+      residual: 0, unknown: null, router_reported: 0, direct_agents: 0,
+      unverified_router: 0, unverified_requests: 0, incompatible_agent_days: 0,
+      independent: 0, non_account_router: 0, reasons: [], candidates: []});
+    return ledger.get(date);
+  }
+  function add(date, category, amount, tableKey) {
+    if (!inWindow(date) || !count(amount)) return;
     if (!categories.has(category.key)) categories.set(category.key, Object.assign({total: 0}, category));
     if (!byDate.has(date)) byDate.set(date, new Map());
     var buckets = byDate.get(date);
     buckets.set(category.key, (buckets.get(category.key) || 0) + amount);
-    if (amount > 0 && category.kind !== 'account') chartedModelRows.add(category.key);
+    if (tableKey) rowTotals.set(tableKey, (rowTotals.get(tableKey) || 0) + amount);
   }
-  var rows = tableModels(payload);
-  rows.forEach(function (model) {
-    if (model.source === 'nordrouter' || String(model.provider).toLowerCase() === 'nordrouter' ||
-        model.token_scope === 'router-wide' || (accountMode && (model.bucket || String(model.provider).toLowerCase() === 'omniroute'))) return;
-    var category = {key: rowKey(model), label: model.model, kind: 'agent'};
-    (model.daily || []).forEach(function (day) { add(day.date, category, day.total); });
-  });
-  if (accountMode) {
-    incomplete = incomplete || rows.some(function (model) {
-      return model.bucket && (!model.bucket_usage || model.bucket_usage.retention_limited);
-    });
-    accountDays.forEach(function (amount, date) {
-      add(date, {key: 'direct-nordrouter-unattributed', label: 'NordRouter (model split unavailable)', kind: 'account'}, amount);
-    });
-    (payload.models || []).filter(function (row) { return row.source === 'omniroute' && row.bucket_usage; })
-      .forEach(function (row) {
-        (row.bucket_usage.routes || []).forEach(function (route) {
-          // Unknown origin can overlap the account; it cannot be added as zero
-          // or as a second model estimate. Unmatched model aliases on a
-          // proven NordRouter route are already inside the account pool.
-          if (route.nordrouter === true) return;
-          if (route.nordrouter !== false) { incomplete = true; return; }
-          var category = {key: routerHistoryKey(route), label: route.model + ' (retained router)', kind: 'router'};
-          (route.daily || []).forEach(function (day) { add(day.date, category, (day.totals || {}).total); });
-        });
-      });
-    if (meta.start_date && meta.end_date) {
-      var date = new Date(meta.start_date + 'T00:00:00Z');
-      for (var count = 0; count < 366 && Number.isFinite(date.getTime()); count++) {
-        var key = date.toISOString().slice(0, 10);
-        if (key > meta.end_date) break;
-        if (!accountDays.has(key)) {
-          partialDates.add(key);
-          if (!byDate.has(key)) byDate.set(key, new Map());
-        }
-        date.setUTCDate(date.getUTCDate() + 1);
-      }
+  ((payload.source_daily || {}).nordrouter || []).forEach(function (row) {
+    if (!row || !inWindow(row.date)) return;
+    day(row.date);
+    if (!count(row.tokens) || accountDays.has(row.date) || invalidDates.has(row.date)) {
+      accountDays.delete(row.date); invalidDates.add(row.date); return;
     }
-    byDate.forEach(function (_, date) { if (!accountDays.has(date)) partialDates.add(date); });
+    accountDays.set(row.date, row.tokens);
+  });
+  var accountMode = accountDays.size > 0 || invalidDates.size > 0;
+  var partialDates = new Set(invalidDates);
+  var routerRows = (payload.models || []).filter(function (row) { return row.source === 'omniroute' && row.bucket_usage; });
+  var knownBuckets = new Set(routerRows.map(rowKey));
+  (payload.models || []).filter(function (row) { return AGENT_SOURCES[row.source]; }).forEach(function (row) {
+    var key = rowKey(row), nord = String(row.provider).toLowerCase() === 'nordrouter';
+    var bucket = row.bucket_comparison || String(row.provider).toLowerCase() === 'omniroute';
+    // A router-wide serving record already contains OpenClaw/Hermes samples.
+    // With an account present, an unobserved bucket has unknown origin/retention.
+    if (bucket && (knownBuckets.has(key) || accountMode)) return;
+    if (!nord && accountFamilies.has(key)) key = 'agent/' + key;
+    var category = {key: key, label: displayName(row.model), kind: nord ? 'covered' : 'agent', color_key: row.model};
+    var dates = new Set(), repeated = new Set();
+    (row.daily || []).forEach(function (slice) { if (dates.has(slice.date)) repeated.add(slice.date); dates.add(slice.date); });
+    dates = new Set();
+    (row.daily || []).forEach(function (slice) {
+      if (!slice || !inWindow(slice.date)) return;
+      var dd = day(slice.date);
+      if (!count(slice.total) || repeated.has(slice.date)) { dd.reasons.push('invalid_agent_day'); return; }
+      dates.add(slice.date);
+      if (nord) {
+        if (slice.account_day_compatible === false) {
+          dd.incompatible_agent_days += slice.total; dd.reasons.push('session_spans_days'); return;
+        }
+        dd.direct_agents += slice.total;
+        dd.candidates.push({category: category, tokens: slice.total, tableKey: key});
+      } else {
+        dd.independent += slice.total; add(slice.date, category, slice.total, key);
+      }
+    });
+  });
+  routerRows.forEach(function (row) {
+    (row.bucket_usage.routes || []).forEach(function (route) {
+      var category = {key: routerHistoryKey(route), label: route.model,
+        kind: route.nordrouter === true ? 'covered' : 'router', color_key: route.model};
+      var dates = new Set(), slices = route.daily || [];
+      var reported = reportedRouteTotals(route, route);
+      var sum = slices.reduce(function (n, slice) {
+        var totals = reportedRouteTotals(route, slice); return n + (totals && count(totals.total) ? totals.total : 0);
+      }, 0);
+      var consistent = reported && count(reported.total) && sum === reported.total &&
+        new Set(slices.map(function (slice) { return slice.date; })).size === slices.length;
+      slices.forEach(function (slice) {
+        if (!slice || !inWindow(slice.date)) return;
+        var dd = day(slice.date), totals = reportedRouteTotals(route, slice), n = totals && totals.total;
+        if (!consistent || !count(n) || dates.has(slice.date)) { dd.reasons.push('invalid_route_days'); return; }
+        dates.add(slice.date);
+        var raw = (slice.totals || {}).total;
+        dd.unverified_router += count(raw) ? Math.max(0, raw - n) : 0;
+        dd.unverified_requests += slice.unverified_requests || 0;
+        if (route.nordrouter === true) {
+          dd.router_reported += n;
+          dd.candidates.push({category: category, tokens: n, tableKey: rowKey(row)});
+        } else if (route.nordrouter === false) {
+          dd.non_account_router += n; add(slice.date, category, n, rowKey(row));
+        } else dd.reasons.push('unknown_route_origin');
+      });
+      if (!slices.length && routeTokens(route)) ledger.forEach(function (dd) { dd.reasons.push('missing_route_days'); });
+    });
+  });
+  if (meta.start_date && meta.end_date) {
+    var cursor = new Date(meta.start_date + 'T00:00:00Z');
+    for (var i = 0; i < 366 && Number.isFinite(cursor.getTime()); i++) {
+      var key = cursor.toISOString().slice(0, 10);
+      if (key > meta.end_date) break;
+      day(key); cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
   }
-  if (incomplete) byDate.forEach(function (_, date) { partialDates.add(date); });
-  return {byDate: byDate, categories: categories, accountMode: accountMode, partialDates: partialDates};
+  var incompleteAgents = ['openclaw', 'hermes'].some(function (name) { return (sources[name] || {}).complete !== true; });
+  ledger.forEach(function (dd, date) {
+    var observed = dd.router_reported + dd.direct_agents;
+    dd.account = accountDays.has(date) ? accountDays.get(date) : null;
+    if (dd.account === null) dd.reasons.push('account_day_unavailable');
+    // Do not cap/scale a conflicting model split: no request subset was proved.
+    var conflict = dd.account !== null && observed > dd.account;
+    if (conflict) {
+      dd.reasons.push('observed_exceeds_account'); dd.unknown = dd.account;
+    } else {
+      dd.covered_unique = observed;
+      dd.candidates.forEach(function (item) { add(date, item.category, item.tokens, item.tableKey); });
+      var remainder = dd.account === null ? null : dd.account - observed;
+      // Retained-from alone does not prove gap-free history. Only an explicit
+      // completeness contract can make a difference a genuinely unmatched count.
+      var complete = !incompleteAgents && (sources.nordrouter || {}).complete === true &&
+        (sources.omniroute || {}).history_complete === true &&
+        meta.omniroute_status === 'ok' && !dd.unverified_requests &&
+        !dd.incompatible_agent_days && !dd.reasons.length &&
+        date < new Date().toISOString().slice(0, 10);
+      if (complete && remainder !== null) dd.residual = remainder;
+      else dd.unknown = remainder;
+      if (dd.residual > 0) add(date, {key: 'direct-nordrouter-unattributed',
+        label: 'NordRouter unmatched', kind: 'account'}, dd.residual);
+    }
+    if (dd.unknown > 0) dd.reasons.push('coverage_incomplete');
+    if (dd.unverified_requests) dd.reasons.push('unreported_router_usage');
+    if (incompleteAgents) dd.reasons.push('partial_agent_source');
+    if (dd.reasons.length) partialDates.add(date);
+    if (!byDate.has(date)) byDate.set(date, new Map());
+    delete dd.candidates;
+  });
+  var unresolved = Array.from(ledger.values()).reduce(function (sum, dd) { return sum + (dd.unknown || 0); }, 0);
+  return {byDate: byDate, categories: categories, accountMode: accountMode, partialDates: partialDates,
+    ledger: ledger, rowTotals: rowTotals, unresolved: unresolved};
 }
 function renderHistory(payload) {
   lastHistoryData = payload;
   chartedModelRows = new Set();
   if (activeHistoryTooltip) activeHistoryTooltip.hide();
   var history = historySeries(payload);
-  var title = history.accountMode ? 'Reported tokens · UTC days · NordRouter unallocated' : 'Agent-reported tokens · UTC days';
+  var title = 'Reported tokens · UTC days';
   if (history.partialDates.size) title += ' · partial history';
   else if (!history.accountMode && (payload.meta || {}).nordrouter_status && payload.meta.nordrouter_status !== 'not_configured') title += ' · account unavailable';
-  drawHistory($('history'), history.byDate, history.categories, title, history.partialDates);
+  drawHistory($('history'), history.byDate, history.categories, title, history.partialDates, history.unresolved);
+  history.categories.forEach(function (category, key) { if (category.kind !== 'account' && category.total > 0) chartedModelRows.add(key); });
 }
-function drawHistory(root, byDate, categories, title, partialDates) {
+function drawHistory(root, byDate, categories, title, partialDates, unresolved) {
   root.replaceChildren();
   node('p', title, root).className = 'note';
   var unattributedKey = 'direct-nordrouter-unattributed';
@@ -1044,13 +1118,13 @@ function drawHistory(root, byDate, categories, title, partialDates) {
   }).sort(function (a, b) { return a.date.localeCompare(b.date); });
   var peak = series.reduce(function (max, day) { return Math.max(max, day.total_tokens); }, 0);
   if (!series.length || peak <= 0) {
-    node('p', partialDates.size ? 'Daily usage incomplete.' : series.length ? 'No reported usage in this snapshot.' : 'No historical usage data available.', root).className = 'empty';
+    node('p', unresolved ? 'NR unresolved ' + tokens(unresolved) + ' tokens · history incomplete.' : partialDates.size ? 'Daily usage incomplete.' : series.length ? 'No reported usage in this snapshot.' : 'No historical usage data available.', root).className = 'empty';
     return;
   }
   var modelCategories = Array.from(categories.values()).filter(function (category) { return category.key !== unattributedKey && category.total > 0; })
     .sort(function (a, b) { return a.label.localeCompare(b.label); });
   modelCategories.forEach(function (category) {
-    category.color = modelColor(category.key);
+    category.color = modelColor(category.color_key || category.key);
   });
   var unattributed = categories.get(unattributedKey);
   if (unattributed && unattributed.total > 0) unattributed.color = '#8491a3';
@@ -1067,8 +1141,8 @@ function drawHistory(root, byDate, categories, title, partialDates) {
     return Math.max(max, Array.from(day.buckets.values()).reduce(function (sum, value) { return sum + visualWeight(value); }, 0));
   }, 0) : peak;
   var svg = svgEl('svg', { class: 'chart', viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', role: 'img',
-    'aria-label': balanced ? 'Daily usage by model and unattributed account; fourth-root visual weighting per segment, not a token axis' :
-      'Daily token usage by model and unattributed account; linear token axis' }, root);
+    'aria-label': balanced ? 'Daily usage by measured model and unmatched NordRouter residual; fourth-root visual weighting per segment, not a token axis' :
+      'Daily token usage by measured model and unmatched NordRouter residual; linear token axis' }, root);
   for (var g = 0; g <= 2; g++) {
     var y = padT + (plotH * g) / 2;
     svgEl('line', { x1: padL, y1: y, x2: width - padR, y2: y, stroke: '#343434', 'stroke-width': 1 }, svg);
@@ -1159,7 +1233,7 @@ function drawHistory(root, byDate, categories, title, partialDates) {
       xl.textContent = dateOnly(day.date);
     }
   });
-  node('div', (balanced ? 'visual weight relative to tallest day · raw token peak ' : 'daily tokens · peak ') + tokens(peak), root).className = 'chart-summary';
+  node('div', (balanced ? 'visual weight relative to tallest day · raw token peak ' : 'daily tokens · peak ') + tokens(peak) + (unresolved ? ' · NR unresolved ' + tokens(unresolved) : ''), root).className = 'chart-summary';
 
 }
 
@@ -1229,6 +1303,7 @@ function tableModels(data) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   });
+  var history = historySeries(data);
   var grouped = Array.from(groups.entries()).map(function (entry) {
     var rows = entry[1];
     var direct = rows.filter(function (row) { return row.source === 'nordrouter'; });
@@ -1297,6 +1372,7 @@ function tableModels(data) {
     }
     return {
       model: preferredName(rows), model_key: entry[0],
+      history_total: history.rowTotals.has(entry[0]) ? history.rowTotals.get(entry[0]) : null,
       source: billed ? 'nordrouter' : (shown[0] || {}).source,
       provider: billed ? 'nordrouter' : (providers[0] || 'unknown'),
       totals: totals, cost_usd: cost,
@@ -1391,13 +1467,13 @@ function renderModels(data) {
     }
     node('span', row.model || '—', modelName);
     if (row.listing === 'residual')
-      node('div', 'direct residual', modelCell).className = 'cost-kind';
+      node('div', 'unresolved window balance', modelCell).className = 'cost-kind';
     else if (row.exclusive_status === 'partial_retention')
-      node('div', 'partial retention; residual may include older bucket traffic', modelCell).className = 'cost-kind';
+      node('div', 'window balance · partial retention', modelCell).className = 'cost-kind';
     else if (row.overlap_proven_tokens)
-      node('div', 'direct residual', modelCell).className = 'cost-kind';
+      node('div', 'unresolved window balance', modelCell).className = 'cost-kind';
     if (row.overlap_unknown_tokens)
-      node('div', 'unmatched serving ' + tokens(row.overlap_unknown_tokens) + ' not deducted', modelCell).className = 'cost-kind';
+      node('div', 'unmapped model alias ' + tokens(row.overlap_unknown_tokens), modelCell).className = 'cost-kind';
     if (row.overlap_unreconciled_tokens)
       node('div', 'unreconciled overlap ' + tokens(row.overlap_unreconciled_tokens) + ' kept on bucket', modelCell).className = 'cost-kind';
     if (row.exclusive_status === 'no_route_map')
@@ -1444,11 +1520,16 @@ function renderModels(data) {
       var actual = node('span', tokens(total), pair);
       actual.className = 'direct';
       actual.title = row.overlap_proven_tokens
-        ? 'NordRouter residual outside proven bucket overlap: ' + total.toLocaleString() +
+        ? 'NordRouter model-window balance after retained reported routes: ' + total.toLocaleString() +
           ' tokens; account billed ' + (row.account_billed_tokens || 0).toLocaleString() + ' is not an additive invoice'
         : (number(total) ? 'Direct NordRouter reported: ' + total.toLocaleString() + ' tokens' : 'Direct NordRouter tokens unavailable');
     } else {
       node('span', tokens(total), tokCell);
+    }
+    if ((row.bucket || row.source === 'nordrouter') && number(row.history_total)) {
+      var historyCount = node('span', 'history ' + tokens(row.history_total), tokCell);
+      historyCount.className = 'cost-kind';
+      historyCount.title = 'Exact reported model-day tokens in the chart; account-window balances and agent/router comparisons are not extra consumption';
     }
     if (total && top > 0) {
       var mini = node('div', undefined, tokCell); mini.className = 'bar-mini';
@@ -1487,16 +1568,19 @@ function bucketDetailRow(body, totals, cost, kind) {
   return { row: tr, source: source, model: model };
 }
 function routeLine(route, body) {
-  var line = bucketDetailRow(body, route.totals, route.cost_usd,
+  var reported = reportedRouteTotals(route, route);
+  var line = bucketDetailRow(body, reported || {total: null}, route.cost_usd,
     number(route.cost_usd) ? 'router-wide estimated' : 'unknown: ' + route.unknown_reason);
   node('span', route.nordrouter === true ? 'NordRouter' : route.provider, line.source).className = 'src';
   var name = node('span', undefined, line.model); name.className = 'src';
   if (chartedModelRows.has(routerHistoryKey(route))) {
     var swatch = node('span', undefined, name); swatch.className = 'model-swatch';
-    swatch.style.background = modelColor(routerHistoryKey(route));
+    swatch.style.background = modelColor(route.model);
     swatch.setAttribute('aria-hidden', 'true');
   }
   node('span', route.model, name);
+  var unverified = reported && route.totals ? route.totals.total - reported.total : (route.totals || {}).total;
+  if (unverified > 0) node('span', 'unverified ' + tokens(unverified), line.model).className = 'cost-kind';
   return line.row;
 }
 function servingModels(routes, date) {
@@ -1507,9 +1591,14 @@ function servingModels(routes, date) {
       var key = JSON.stringify([route.provider, route.model, route.price_id, route.nordrouter]);
       var total = grouped.get(key);
       if (!total) {
-        total = Object.assign({}, route, { totals: {}, cost_usd: 0 });
+        total = Object.assign({}, route, { totals: {}, reported_totals: null, cost_usd: 0 });
         grouped.set(key, total);
       }
+      var reported = reportedRouteTotals(route, slice);
+      if (reported) Object.keys(reported).forEach(function (field) {
+        if (!total.reported_totals) total.reported_totals = {};
+        total.reported_totals[field] = (total.reported_totals[field] || 0) + reported[field];
+      });
       Object.keys(slice.totals).forEach(function (field) {
         total.totals[field] = (total.totals[field] || 0) + slice.totals[field];
       });

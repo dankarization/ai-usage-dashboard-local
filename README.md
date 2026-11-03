@@ -7,19 +7,19 @@ A self-hosted dashboard for AI token usage, provider quotas, and costs, based on
 
 ## What it shows
 
-- Agent-reported model history and a separate NordRouter account-day chart, with 1-, 7-, and 30-day UTC windows.
+- One model usage history chart with 1-, 7-, and 30-day UTC windows.
 - OpenClaw and Hermes usage, plus configured provider quota windows.
 - NordRouter balance, billed spend, and top models.
 - API-equivalent cost estimates, separate from billed spend.
 
-Account-day totals have no daily model split: the dashboard never allocates them
-using agent model shares. Model history uses the same measured agent rows as the
-table; account history is a separate, non-additive view. Router-wide observations
-remain drill-down comparisons, not replacements for agent bucket counts. When
-router agent usage may overlap account billing, the combined total is unavailable
-rather than double-counted. Account top-list omissions have an explicit
-unattributed-model residual. Input, output, cache reads and cache writes are
-separate categories; cached input is included once in total tokens.
+History uses provider-reported serving model-days from retained router logs and
+non-overlapping direct agent model-days. Router agent samples are comparisons,
+not extra consumption. Account totals are reconciled against those observations,
+never distributed by model shares. Gray means only a verified unmatched residual;
+missing retention, uncertain attempts and partial sources leave an explicitly
+unresolved difference, not gray usage. Exact history counts in the table and
+reported route drilldowns reconcile the chart separately from account-window
+balances and agent comparisons. Cache reads are already included once in totals.
 
 Missing data stays unknown, not zero. If OpenClaw is unavailable, a saved window
 for the same period is labelled with its original fetch time.

@@ -186,6 +186,7 @@ class ModelDailyEntry(ApiEstimateFields):
     """One day of token usage for one model."""
 
     date: str = Field(description='Calendar date, YYYY-MM-DD.')
+    account_day_compatible: Optional[bool] = Field(default=None, description='False for a multi-day Hermes session aggregate: its last-activity day cannot establish account-day overlap.')
     input: Optional[int] = Field(default=None, description='Non-cached input tokens for this day. None when the source does not provide per-category breakdown.')
     output: Optional[int] = Field(default=None, description='Output tokens for this day. None when the source does not provide per-category breakdown.')
     cache_read: Optional[int] = Field(default=None, description='Cache-read input tokens for this day. None when the source does not provide per-category breakdown.')

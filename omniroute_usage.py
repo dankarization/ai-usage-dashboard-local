@@ -148,6 +148,9 @@ def aggregate(body, pricing, start, end, *, status='ok', fetched_at=None, pricin
                        'provider': row['provider'], 'model': row['model'], 'price_id': exact,
                        'route_path': row.get('route_path'), 'usage_provenance': row.get('usage_provenance'),
                        'requests': row['requests'], 'totals': tokens,
+                       # Estimated/error prompt sizes are not reported consumption.
+                       'reported_totals': tokens if valid and row.get('usage_provenance') == 'reported' else {f: 0 for f in tokens},
+                       'unverified_requests': 0 if valid and row.get('usage_provenance') == 'reported' else row['requests'],
                        'cost_usd': cost, 'nordrouter': nord,
                        'unknown_reason': None if cost is not None else ('invalid_or_missing_usage' if not valid else 'unverified_provider_origin' if nord is not True else 'no_exact_tariff')})
     entries = []
@@ -186,24 +189,28 @@ def aggregate(body, pricing, start, end, *, status='ok', fetched_at=None, pricin
         grouped = {}
         for r in routes:
             key = tuple(r[k] for k in ('provider', 'model', 'price_id', 'route_path', 'nordrouter', 'unknown_reason'))
-            target = grouped.setdefault(key, {**r, 'requests': 0, 'totals': {f: 0 for f in totals}, 'cost_usd': 0.0 if r['cost_usd'] is not None else None, 'daily': []})
+            target = grouped.setdefault(key, {**r, 'requests': 0, 'totals': {f: 0 for f in totals}, 'reported_totals': {f: 0 for f in totals}, 'unverified_requests': 0, 'cost_usd': 0.0 if r['cost_usd'] is not None else None, 'daily': []})
             if target['usage_provenance'] != r['usage_provenance']:
                 target['usage_provenance'] = 'mixed'
             if include_daily:
                 day = next((d for d in target['daily'] if d['date'] == r['date']), None)
                 if day is None:
-                    day = {'date': r['date'], 'totals': {f: 0 for f in totals}, 'requests': 0,
+                    day = {'date': r['date'], 'totals': {f: 0 for f in totals}, 'reported_totals': {f: 0 for f in totals}, 'unverified_requests': 0, 'requests': 0,
                            'cost_usd': 0.0 if r['cost_usd'] is not None else None}
                     target['daily'].append(day)
                 day['requests'] += r['requests']
+                day['unverified_requests'] += r['unverified_requests']
                 for field in totals:
                     day['totals'][field] += r['totals'][field]
+                    day['reported_totals'][field] += r['reported_totals'][field]
                 if r['cost_usd'] is not None:
                     day['cost_usd'] += r['cost_usd']
             target.pop('date', None)
             target['requests'] += r['requests']
+            target['unverified_requests'] += r['unverified_requests']
             for field in totals:
                 target['totals'][field] += r['totals'][field]
+                target['reported_totals'][field] += r['reported_totals'][field]
             if r['cost_usd'] is not None:
                 target['cost_usd'] += r['cost_usd']
         entries.append({'source': 'omniroute', 'provider': 'omniroute', 'model': name,
@@ -260,7 +267,7 @@ def _token_total(totals):
 
 def _window_tokens(route, nr_dates):
     """Tokens that can overlap this account window. Outside dates are not deducted."""
-    total = _token_total(route.get('totals'))
+    total = _token_total(route.get('reported_totals', route.get('totals') if route.get('usage_provenance') not in ('estimated', 'mixed') else None))
     if not total:
         return 0
     days = route.get('daily') or []
@@ -268,7 +275,7 @@ def _window_tokens(route, nr_dates):
         return total
     if not days:
         return 0
-    return sum(_token_total(day.get('totals')) or 0 for day in days if day.get('date') in nr_dates)
+    return sum(_token_total(day.get('reported_totals', day.get('totals'))) or 0 for day in days if day.get('date') in nr_dates)
 
 
 def account_overlap(models, *, router_status=None, nr_daily=None):
@@ -354,7 +361,7 @@ def account_overlap(models, *, router_status=None, nr_daily=None):
         matched_by_date = defaultdict(int)
         for route, _row, kind in movable:
             days = route.get('daily') or []
-            covered = sum(_token_total(day.get('totals')) or 0 for day in days)
+            covered = sum(_token_total(day.get('reported_totals', day.get('totals'))) or 0 for day in days)
             if not days or (nr_dates is None and covered != _token_total(route.get('totals'))):
                 days_ready = False
                 break
@@ -362,7 +369,7 @@ def account_overlap(models, *, router_status=None, nr_daily=None):
                 for day in days:
                     if nr_dates is not None and day.get('date') not in nr_dates:
                         continue
-                    value = _token_total(day.get('totals')) or 0
+                    value = _token_total(day.get('reported_totals', day.get('totals'))) or 0
                     if value:
                         matched_by_date[day['date']] += value
         if days_ready:

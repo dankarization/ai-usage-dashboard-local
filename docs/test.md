@@ -37,14 +37,17 @@ Keep local credentials, exports, generated payloads/charts, logs, and unredacted
 Usage-day windows are UTC for Gateway, Hermes, router observations and account
 analytics; snapshot timestamps still use the viewer's clock. The legacy export payload
 keeps its existing host-local date window independently of model analytics. One history
-chart counts account daily totals once as a neutral, model-unattributed segment,
-plus independent agent model-days and retained, proven non-NordRouter router
-model-days. Agent bucket and NordRouter-route comparisons are not added to that
-pool. Without account daily data, show measured agent history only. Do not infer
-account-model days from small agent samples. Missing/duplicate account days,
-partial router retention and unknown route origins leave explicit known subtotals;
-the table preserves the full agent bucket comparison independently. Independent provider rows sharing an
-account model name are not account-route comparisons.
+chart counts reported serving model-days and direct agent model-days once.
+Compare account / covered unique / verified unmatched residual / unknown per UTC
+day. Gray is only a certified unmatched remainder: retained-from timestamps alone
+do not prove complete history. Estimated/error prompt sizes remain observations,
+not reported coverage. Preserve cache reads once, exact serving IDs, known model
+colors, and explicit unresolved differences. Never scale a model sample to an
+account total or cap conflicting models arbitrarily. An account-day conflict
+withholds that split; other independent measurements remain visible. The table's
+history count and reported serving drilldown reconcile chart counts independently
+of its non-additive agent comparisons and account-window balances. A multi-day
+Hermes session assigned to last activity cannot prove an account-day split.
 
 `daily=false` omits presentation arrays after overlap reconciliation; it must not
 change account/residual tokens. Malformed Gateway aggregates cannot replace a

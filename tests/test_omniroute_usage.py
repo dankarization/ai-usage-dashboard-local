@@ -230,3 +230,31 @@ def test_integration_preserves_overview_and_direct_nr_separately(monkeypatch):
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: pytest.fail('unexpected Gateway read'))
     monkeypatch.setattr(nr.Client, 'get', lambda *a, **kw: pytest.fail('unexpected account analytics'))
     usage.build_model_breakdown(7, source='omniroute')
+
+
+def test_reported_counts_survive_mixed_provenance_without_double_counting_cache():
+    reported = route()
+    estimated = route()
+    estimated.update(usage_provenance='estimated', prompt=30_000, output=0,
+                     cache_read=0, cache_write=0)
+    error = route()
+    error.update(usage_provenance=None, status=499, prompt=10_000, output=0,
+                 cache_read=0, cache_write=0)
+    result = om.aggregate(snapshot([reported, estimated, error]), prices(),
+                          '2026-10-23', '2026-10-23')
+    bucket, = result['models']
+    serving, = bucket['bucket_usage']['routes']
+    assert serving['usage_provenance'] == 'mixed'
+    assert serving['totals']['total'] == 1_140_000  # retained observations
+    assert serving['reported_totals'] == {
+        'input': 300_000, 'output': 100_000, 'cache_read': 600_000,
+        'cache_write': 100_000, 'total': 1_100_000}
+    assert serving['unverified_requests'] == 2
+    assert serving['daily'][0]['reported_totals'] == serving['reported_totals']
+    assert serving['daily'][0]['unverified_requests'] == 2
+    account = {'source': 'nordrouter', 'model': 'vendor/a:fjord',
+               'totals': {'total': 1_120_000}, 'cost_usd': 2}
+    overlap = om.account_overlap([account, bucket], router_status='ok',
+                                nr_daily=[{'date': '2026-10-23', 'tokens': 1_120_000}])
+    assert overlap['proven_tokens'] == 1_100_000
+    assert overlap['exclusive_tokens'] == 20_000
