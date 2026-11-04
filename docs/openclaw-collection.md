@@ -63,8 +63,11 @@ Reuse the existing .venv; no dependencies need installation.
     systemctl --user show ai-usage-openclaw-collect.service -p Result -p ControlGroup
     systemctl --user enable --now ai-usage-openclaw-collect.timer
 
-The installer changes only these two user units. The timer is hourly with up to
-60 seconds jitter, Persistent=false (no missed-run queue). There is no collector
+The installer changes only these two user units. The timer waits one hour after
+oneshot completion, with up to 60 seconds jitter; its initial activation check is
+one minute after timer start. Persistent=false means no missed-run queue. A
+monotonic completion-relative interval avoids calendar jitter colliding with the
+persisted one-hour cooldown and accidentally skipping alternate hours. There is no collector
 daemon. flock and a pre-attempt persisted next_allowed_at enforce cross-process,
 restart-safe spacing: success >=1 hour, errors 1/2/4-hour exponential backoff.
 Manual runs use the same service, not a bypassing CLI. To override backoff after

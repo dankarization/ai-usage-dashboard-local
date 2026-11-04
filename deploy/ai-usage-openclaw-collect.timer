@@ -1,7 +1,8 @@
 [Unit]
 Description=Hourly committed OpenClaw aggregate snapshot
 [Timer]
-OnCalendar=hourly
+OnActiveSec=1min
+OnUnitInactiveSec=1h
 RandomizedDelaySec=60
 AccuracySec=1s
 Persistent=false
