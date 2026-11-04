@@ -2952,8 +2952,8 @@ def build_model_breakdown(days: int = 30, *, include_daily: bool = True, source:
             continue
         row.update(estimate_api_tokens(row['model'], row['totals'], row['provider']))
         for day in row.get('daily', []):
-            # Gateway daily rows contain only total tokens, not category counts.
-            # Never keep their partial native dollars or invent a daily split.
+            # Estimate only from measured per-model/day token categories;
+            # legacy rows without categories remain explicitly unpriced.
             day.update(estimate_api_tokens(row['model'], day, row['provider']))
     for row in models:
         if row['source'] in ('openclaw', 'hermes') and _omniroute_usage.is_bucket(row):

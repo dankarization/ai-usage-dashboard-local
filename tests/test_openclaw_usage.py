@@ -16,6 +16,7 @@ import dashboard_store
 import openclaw_usage
 from auto_usage import build_model_breakdown
 
+
 REPO = Path(__file__).resolve().parent.parent
 START, END = '2026-10-01', '2026-10-07'
 AGGREGATE = {
@@ -93,29 +94,6 @@ def stored_rows():
         return [row[0] for row in conn.execute(
             'SELECT window_key FROM openclaw_usage_snapshot'
             ' ORDER BY fetched_at_utc DESC, rowid DESC')]
-
-class _Result:
-    """Minimal ``subprocess.run`` result for a stubbed CLI."""
-
-    def __init__(self, stdout=''):
-        self.stdout = stdout
-
-
-class _StubSubprocess:
-    """A ``subprocess`` stand-in so CLI-selection tests never spawn a process."""
-
-    def __init__(self, run):
-        self.run = run
-        self.TimeoutExpired = subprocess.TimeoutExpired
-        self.CalledProcessError = subprocess.CalledProcessError
-        self.SubprocessError = subprocess.SubprocessError
-
-
-def _make_executable(path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('#!/bin/sh\nexit 0\n')
-    path.chmod(0o700)
-    return path
 
 
 def test_openclaw_model_projection_includes_comparison_route_without_account():
@@ -195,7 +173,7 @@ def test_breakdown_reprices_all_categories_despite_partial_native_cost(monkeypat
     assert source['unpriced_models'] == 1
 
 
-def test_breakdown_uses_gateway_and_direct_nordrouter_only(monkeypatch):
+def test_breakdown_uses_gateway_and_direct_nordrouter_only(offline_legacy_loader, monkeypatch):
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *_: {'aggregates': {
         'byModel': [{'provider': 'xai', 'model': 'grok-4.7',
                      'totals': {'input': 5, 'output': 3, 'cacheRead': 2,
@@ -298,20 +276,17 @@ def test_saved_window_survives_a_fresh_process(cache, tmp_path):
 
 def test_live_timeout_serves_the_saved_window(cache):
     """A bounded wait ends in the saved window, never in a fabricated zero."""
-    assert 0 < openclaw_usage.ATTEMPT_TIMEOUT_SECONDS <= 120
-    assert (openclaw_usage.ATTEMPT_TIMEOUT_SECONDS
-            <= openclaw_usage.FETCH_DEADLINE_SECONDS <= 180)
     openclaw_usage.load_with_cache(7, START, END, fetch=live_read)
 
     def slow_read(start_date, end_date):
         raise subprocess.TimeoutExpired('openclaw gateway call',
-                                        openclaw_usage.ATTEMPT_TIMEOUT_SECONDS)
+                                        30)
 
     loaded = openclaw_usage.load_with_cache(7, START, END, fetch=slow_read)
     assert loaded['status'] == 'cached'
     assert loaded['response']['aggregates']['byModel']
     # The banner names the timeout and its bound instead of a truncated command line.
-    assert loaded['error'] == f'TimeoutExpired: gateway command exceeded {openclaw_usage.ATTEMPT_TIMEOUT_SECONDS:g}s'
+    assert loaded['error'] == 'TimeoutExpired: gateway command exceeded 30s'
 
 
 def test_unrecognized_response_shapes_fall_back_instead_of_raising(cache):
@@ -397,7 +372,7 @@ def test_only_the_exact_window_is_reused(cache):
 
 
 @pytest.mark.parametrize('has_older_window', [False, True])
-def test_api_gateway_failure_requires_exact_saved_window(cache, monkeypatch, has_older_window):
+def test_api_gateway_failure_requires_exact_saved_window(offline_legacy_loader, cache, monkeypatch, has_older_window):
     """A failed Gateway read returns unavailable, not a 500 or another window."""
     from fastapi.testclient import TestClient
     import local_display_service
@@ -540,7 +515,7 @@ def test_failure_text_is_bounded_and_free_of_paths_and_secrets(cache):
         'CalledProcessError: gateway command failed with exit status 1'
 
 
-def test_breakdown_serves_the_saved_window_with_time_and_failure_text(cache, monkeypatch):
+def test_breakdown_serves_the_saved_window_with_time_and_failure_text(offline_legacy_loader, cache, monkeypatch):
     """The API reports a saved window as stale, with its original fetch time."""
     monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: (START, END, None, None))
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
@@ -565,7 +540,7 @@ def test_breakdown_serves_the_saved_window_with_time_and_failure_text(cache, mon
     assert build_model_breakdown(days=7, source='openclaw')['meta']['openclaw_status'] == 'unavailable'
 
 
-def test_cached_and_live_breakdowns_agree_except_for_staleness(cache, monkeypatch):
+def test_cached_and_live_breakdowns_agree_except_for_staleness(offline_legacy_loader, cache, monkeypatch):
     """Identical input must produce identical accounting, stale status aside."""
     monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: (START, END, None, None))
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda *_: [])
@@ -591,130 +566,6 @@ def test_cached_and_live_breakdowns_agree_except_for_staleness(cache, monkeypatc
     assert changed <= {'generated_at', 'generated_at_utc', 'openclaw_status',
                        'openclaw_cached_at_utc', 'openclaw_error', 'openclaw_upstream_status', 'openclaw_source_at_utc'}
     assert {'openclaw_status', 'openclaw_cached_at_utc', 'openclaw_error'} <= changed
-
-
-# --- CLI candidate selection ----------------------------------------------
-
-
-def test_cli_candidates_prefer_the_runtime_shim_then_semantic_versions(monkeypatch, tmp_path):
-    """The lexicographic pick used to select a build that cannot open Gateway data."""
-    home = tmp_path / 'openclaw-home'
-    shim = _make_executable(home / 'tmp' / 'agent-cli' / 'openclaw')
-    elsewhere = tmp_path / 'elsewhere'
-    installs = elsewhere / '.local' / 'share' / 'openclaw-installations'
-    for name in ('2026.9.8-e91822a4b477', '2026.9.8-0cb72a738de8',
-                 '2026.10.4-6945af4198bd', '2026.10.7-npm-20261025T0045',
-                 '2026.10.7-npm-20261025T0042'):
-        _make_executable(installs / name / 'bin' / 'openclaw')
-    # Path.home() and the runtime home both come from the environment.
-    monkeypatch.setenv('HOME', str(elsewhere))
-    monkeypatch.setenv('OPENCLAW_STATE_DIR', str(home))
-    monkeypatch.delenv('OPENCLAW_USAGE_CLI', raising=False)
-    openclaw_usage.release_cli_cache()
-
-    candidates = openclaw_usage.cli_candidates()
-    assert candidates[0] == str(shim)
-    assert [Path(path).parent.parent.name for path in candidates[1:]] == [
-        '2026.10.7-npm-20261025T0045', '2026.10.7-npm-20261025T0042',
-        '2026.10.4-6945af4198bd', '2026.9.8-e91822a4b477', '2026.9.8-0cb72a738de8']
-    assert openclaw_usage._cli() == str(shim)
-
-    # An explicit override is honored first, even when it is not executable yet.
-    monkeypatch.setenv('OPENCLAW_USAGE_CLI', str(tmp_path / 'custom-openclaw'))
-    assert openclaw_usage.cli_candidates()[0] == str(tmp_path / 'custom-openclaw')
-
-    # A derived path that is not executable is never a candidate.
-    monkeypatch.delenv('OPENCLAW_USAGE_CLI')
-    (home / 'bin').mkdir(parents=True, exist_ok=True)
-    (home / 'bin' / 'openclaw').write_text('not executable')
-    assert str(home / 'bin' / 'openclaw') not in openclaw_usage.cli_candidates()
-    assert openclaw_usage._version_key('2026.10.7-npm-20261025T0045') > \
-        openclaw_usage._version_key('2026.9.8-e91822a4b477')
-
-
-def test_fetch_usage_uses_the_first_candidate_with_a_valid_aggregate(monkeypatch):
-    """Candidates are tried in order, and the winner is memoized for the process."""
-    openclaw_usage.release_cli_cache()
-    tried = []
-    payload = json.dumps({'aggregates': AGGREGATE})
-
-    def run(argv, **kwargs):
-        tried.append(argv[0])
-        assert kwargs['timeout'] <= openclaw_usage.ATTEMPT_TIMEOUT_SECONDS
-        if argv[0] == '/fake/old':
-            raise subprocess.CalledProcessError(1, argv)
-        if argv[0] == '/fake/garbage':
-            return _Result('{}')
-        if argv[0] == '/fake/working':
-            return _Result(payload)
-        raise AssertionError('no candidate after a success may be tried')
-
-    monkeypatch.setattr(openclaw_usage, 'subprocess', _StubSubprocess(run))
-    monkeypatch.setattr(openclaw_usage, 'cli_candidates',
-                        lambda: ['/fake/old', '/fake/garbage', '/fake/working', '/fake/later'])
-    assert openclaw_usage.fetch_usage(START, END)['aggregates']['byModel'] == AGGREGATE['byModel']
-    assert tried == ['/fake/old', '/fake/garbage', '/fake/working']
-
-    # The memoized winner is tried first, so a healthy CLI is not re-probed.
-    assert openclaw_usage.fetch_usage(START, END)
-    assert tried == ['/fake/old', '/fake/garbage', '/fake/working', '/fake/working']
-    openclaw_usage.release_cli_cache()
-    assert openclaw_usage.cli_candidates()
-
-
-def test_fetch_usage_reports_an_honest_failure_and_writes_no_snapshot(monkeypatch, cache):
-    """No working candidate is an unavailable source, never an empty zero window."""
-    openclaw_usage.release_cli_cache()
-
-    def run(argv, **kwargs):
-        raise subprocess.CalledProcessError(1, argv)
-
-    monkeypatch.setattr(openclaw_usage, 'subprocess', _StubSubprocess(run))
-    monkeypatch.setattr(openclaw_usage, 'cli_candidates', lambda: ['/fake/one', '/fake/two'])
-    with pytest.raises(RuntimeError) as excinfo:
-        openclaw_usage.fetch_usage(START, END)
-    text = openclaw_usage._sanitize_error(excinfo.value)
-    assert len(text) <= 200
-    assert 'CalledProcessError' in text
-
-    loaded = openclaw_usage.load_with_cache(7, START, END)
-    assert loaded['status'] == 'unavailable'
-    assert loaded['response'] is None
-    assert not openclaw_usage.db_file().exists()
-
-    monkeypatch.setattr(openclaw_usage, 'cli_candidates', lambda: [])
-    with pytest.raises(RuntimeError):
-        openclaw_usage.fetch_usage(START, END)
-    openclaw_usage.release_cli_cache()
-
-
-def test_fetch_usage_stops_at_the_shared_deadline(monkeypatch):
-    """A hung or broken candidate cannot stretch the page beyond one deadline."""
-    openclaw_usage.release_cli_cache()
-    tried = []
-
-    class FakeTime:
-        clock = 0.0
-
-        @classmethod
-        def monotonic(cls):
-            return cls.clock
-
-    def run(argv, **kwargs):
-        tried.append(argv[0])
-        FakeTime.clock += openclaw_usage.ATTEMPT_TIMEOUT_SECONDS  # the attempt used its bound
-        raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
-
-    monkeypatch.setattr(openclaw_usage, 'time', FakeTime)
-    monkeypatch.setattr(openclaw_usage, 'subprocess', _StubSubprocess(run))
-    monkeypatch.setattr(openclaw_usage, 'cli_candidates',
-                        lambda: [f'/fake/{index}' for index in range(5)])
-    with pytest.raises(RuntimeError) as excinfo:
-        openclaw_usage.fetch_usage(START, END)
-    budget = openclaw_usage.FETCH_DEADLINE_SECONDS // openclaw_usage.ATTEMPT_TIMEOUT_SECONDS
-    assert 0 < len(tried) <= budget
-    assert len(tried) < 5, 'the deadline must stop the candidate sweep'
-    assert len(openclaw_usage._sanitize_error(excinfo.value)) <= 200
 
 
 # --- dashboard-owned database ---------------------------------------------
@@ -871,33 +722,8 @@ def test_a_foreign_or_broken_database_is_never_repaired(cache):
     assert target.read_bytes() == before
 
 
-def test_a_failed_read_stores_nothing(cache):
-    """Failure, timeout, and a spent deadline leave the database exactly as it was."""
-    openclaw_usage.release_cli_cache()
-
-    def dead_run(argv, **kwargs):
-        raise subprocess.CalledProcessError(1, argv)
-
-    monkeypatch = pytest.MonkeyPatch()
-    try:
-        monkeypatch.setattr(openclaw_usage, 'subprocess', _StubSubprocess(dead_run))
-        monkeypatch.setattr(openclaw_usage, 'cli_candidates', lambda: ['/fake/one'])
-        assert openclaw_usage.load_with_cache(
-            7, START, END)['status'] == 'unavailable'
-        assert not openclaw_usage.db_file().exists()
-
-        openclaw_usage.write_snapshot(7, START, END, live_read(START, END))
-        before = snapshot_row()
-        assert openclaw_usage.load_with_cache(
-            1, '2026-10-07', '2026-10-07')['status'] == 'unavailable'
-        assert snapshot_row() == before, 'a failed window must not touch stored ones'
-    finally:
-        monkeypatch.undo()
-        openclaw_usage.release_cli_cache()
-
-
 @pytest.mark.parametrize('status', ['partial', 'stale', 'refreshing'])
-def test_partial_gateway_snapshot_never_completes_overview(cache, monkeypatch, status):
+def test_partial_gateway_snapshot_never_completes_overview(offline_legacy_loader, cache, monkeypatch, status):
     monkeypatch.setattr('auto_usage.get_model_date_range', lambda days: (START, END, None, None))
     monkeypatch.setattr('auto_usage._hermes_usage.state_dbs', lambda: [])
     monkeypatch.delenv('NORDROUTER_API_KEY', raising=False)
@@ -982,78 +808,6 @@ def test_fresh_label_with_missing_daily_rows_is_not_full(cache):
     result = openclaw_usage.load_with_cache(7, START, END, fetch=lambda *_: reply)
     assert result['snapshot_complete'] is False
     assert result['gateway_cache_status'] == 'partial'
-
-
-def test_request_driven_refresh_is_fast_single_flight_and_keeps_full_data(cache, monkeypatch):
-    import threading
-    import time
-    from concurrent.futures import ThreadPoolExecutor
-    openclaw_usage.load_with_cache(7, START, END, fetch=live_read)
-    before = snapshot_row()
-    began, release = threading.Event(), threading.Event()
-    calls = []
-    def blocked(*_):
-        calls.append(1)
-        began.set()
-        assert release.wait(3)
-        return {'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'refreshing'}}
-    try:
-        start = time.monotonic()
-        first = openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True)
-        assert time.monotonic() - start < .5
-        assert began.wait(1)
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            rows = list(pool.map(lambda _: openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True), range(8)))
-        assert len(calls) == 1
-        assert all(r['refreshing'] and r['snapshot_complete'] for r in [first, *rows])
-        assert all(r['response']['aggregates'] == AGGREGATE for r in rows)
-        release.set()
-        with openclaw_usage._flight_lock:
-            future = next(f for (path, key), (f, _) in openclaw_usage._flights.items() if path == str(openclaw_usage.db_file()))
-        settled = future.result(3)
-        assert settled['status'] == 'cached' and not settled['refreshing']
-        assert snapshot_row() == before
-        assert openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True)['upstream_status'] == 'refreshing'
-        assert len(calls) == 1
-    finally:
-        release.set()
-
-
-def test_cold_background_response_is_bounded_without_inventing_empty_tokens(cache, monkeypatch):
-    import threading
-    import time
-    began, release = threading.Event(), threading.Event()
-    monkeypatch.setattr(openclaw_usage, 'BACKGROUND_COLD_WAIT_SECONDS', .01)
-    def blocked(*_):
-        began.set()
-        assert release.wait(3)
-        return live_read(START, END)
-    try:
-        start = time.monotonic()
-        result = openclaw_usage.load_with_cache(7, START, END, fetch=blocked, background=True)
-        assert time.monotonic() - start < .5
-        assert result['status'] == 'refreshing' and result['response'] is None
-        assert result['source_at_utc'] is None and not result['snapshot_complete']
-        assert began.wait(1)
-    finally:
-        release.set()
-        with openclaw_usage._flight_lock:
-            future = next(f for (path, key), (f, _) in openclaw_usage._flights.items() if path == str(openclaw_usage.db_file()))
-        assert future.result(3)['snapshot_complete']
-
-
-def test_sdk_shim_resolution_is_literal_and_uses_public_readonly_helper(tmp_path):
-    node = _make_executable(tmp_path / 'node')
-    entry = tmp_path / 'build' / 'dist' / 'index.js'
-    sdk = entry.parent / 'plugin-sdk' / 'gateway-runtime.js'
-    sdk.parent.mkdir(parents=True)
-    sdk.write_text('export const callGatewayFromCli = () => {};')
-    shim = _make_executable(tmp_path / 'openclaw')
-    shim.write_text(f'#!/bin/sh\nexec {node} --max-old-space-size=512 {entry} "$@"\n')
-    command = openclaw_usage._sdk_command(str(shim))
-    assert command[0] == str(node)
-    assert command[-1] == str(sdk)
-    assert command[-2].endswith('openclaw_gateway_read.mjs')
 
 
 def test_first_partial_insert_cannot_race_over_a_complete_writer(cache, monkeypatch):

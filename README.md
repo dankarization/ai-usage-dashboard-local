@@ -24,15 +24,14 @@ balances and agent comparisons. Cache reads are already included once in totals.
 Missing data stays unknown, not zero. Total tokens shows the chart's known
 subtotal when coverage is incomplete, not a fabricated combined total.
 
-OpenClaw keeps exact UTC windows separately. A partial/refreshing/malformed
-reply cannot overwrite a saved observation or advance its timestamp; only a
-complete response can replace it. Pre-coverage snapshots remain unverified.
-The API distinguishes current completeness, saved-snapshot completeness,
-original source time and the latest read status. Request-driven revalidation
-has one flight per window, two workers, three queued/running windows and a
-60-second transport deadline. Saved data returns immediately; a cold HTTP
-request waits at most two seconds for this source. The page retains each period
-and makes at most seven follow-up reads, eight seconds apart, while revalidating.
+OpenClaw pages read one shared 90-day UTC committed-aggregate snapshot, never
+triggering collection. A bounded hourly systemd oneshot reads only indexed
+numeric usage caches from agent databases, without SDK/CLI, the shared runtime
+DB, transcripts, refresh/backfill or DB copies. Smaller periods retain their own
+measured token categories. Collection time, producer time and incomplete
+coverage are explicit; errors preserve the last admitted artifact. Old-format
+and ambiguous cache entries are not silently treated as zero. See
+[collection setup, coverage and rollback](docs/openclaw-collection.md).
 
 When a supported public SDK is available beside the installed CLI shim, the
 adapter requests exact all-agent aggregates with an empty session page. Paging
@@ -66,7 +65,7 @@ beyond your machine: usage data and account details are private.
 Edit the ignored `.env`, using [.env.example](.env.example) as the reference.
 Enable only the sources you use:
 
-- **OpenClaw:** a running local Gateway and a working OpenClaw CLI.
+- **OpenClaw:** compatible committed agent usage caches and the [hourly collector](docs/openclaw-collection.md). No CLI/SDK is invoked by Dashboard.
 - **Hermes:** existing native profile databases; `HERMES_HOME` can override discovery.
 - **Provider accounts:** optional keys/cookies and Codex profile settings listed in `.env.example`.
 - **OmniRoute:** optional `OMNIROUTE_USAGE_CONTAINER` plus `NORDROUTER_API_KEY`.

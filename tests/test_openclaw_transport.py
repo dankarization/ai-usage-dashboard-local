@@ -1,13 +1,9 @@
-"""Exercise the actual public-SDK request builder with a deterministic RPC peer."""
-from pathlib import Path
-import shutil
-import subprocess
-
+"""The removed runtime transport cannot be revived by configuration."""
 import pytest
+import openclaw_usage
 
 
-@pytest.mark.skipif(not shutil.which('node'), reason='Node required')
-def test_exact_aggregate_transport_contract():
-    script = Path(__file__).with_name('openclaw_gateway_read_test.mjs')
-    result = subprocess.run(['node', str(script)], capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stdout + result.stderr
+def test_live_transport_removed(monkeypatch):
+    monkeypatch.setenv('OPENCLAW_USAGE_CLI', '/must-not-execute')
+    with pytest.raises(RuntimeError, match='transport removed'):
+        openclaw_usage.fetch_usage('2026-10-01','2026-10-07')

@@ -26,6 +26,7 @@ def isolated_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_BILLING_SESSION_FILE", str(tmp_path / "missing-session.json"))
     monkeypatch.delenv("OPENAI_BILLING_SESSION_KEY", raising=False)
     before = dict(os.environ)
+    os.environ['OPENCLAW_AGGREGATE_SNAPSHOT'] = str(tmp_path / 'committed.json')
     os.environ['OPENCLAW_USAGE_CACHE_DIR'] = str(tmp_path / 'openclaw-cache')
     os.environ['AI_USAGE_DASHBOARD_DB'] = str(tmp_path / 'dashboard.sqlite')
     try:
@@ -33,3 +34,12 @@ def isolated_environment(tmp_path, monkeypatch):
     finally:
         os.environ.clear()
         os.environ.update(before)
+
+
+@pytest.fixture
+def offline_legacy_loader(monkeypatch):
+    """Historical accounting fixtures opt into a fake injected legacy reader only."""
+    import openclaw_usage
+    original = openclaw_usage.load_with_cache
+    monkeypatch.setattr(openclaw_usage, 'load_with_cache',
+        lambda days, start, end, **kwargs: original(days, start, end, fetch=openclaw_usage.fetch_usage))

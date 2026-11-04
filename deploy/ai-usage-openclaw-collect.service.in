@@ -1,0 +1,29 @@
+[Unit]
+Description=Bounded committed OpenClaw usage snapshot (no runtime imports)
+# The unit remains deactivating while an unkillable cgroup member remains.
+# Never restart a failed collector automatically.
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=@PYTHON@ @ROOT@/openclaw_collect.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=OPENCLAW_AGGREGATE_SNAPSHOT=@ROOT@/data/openclaw-committed.json
+UMask=0077
+Restart=no
+TimeoutStartSec=35
+TimeoutStopSec=5
+KillMode=control-group
+SendSIGKILL=yes
+Delegate=no
+MemoryMax=256M
+TasksMax=16
+CPUQuota=50%
+IOWeight=10
+NoNewPrivileges=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallFilter=~@network-io fork vfork clone clone3
+ProtectSystem=strict
+ReadWritePaths=@ROOT@/data
+ReadOnlyPaths=%h/.openclaw/agents
+InaccessiblePaths=-%h/.openclaw/state -%h/.openclaw/openclaw.json

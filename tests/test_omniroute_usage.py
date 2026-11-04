@@ -190,7 +190,7 @@ def test_pricing_sanitization_exact_ids_and_missing_categories():
     assert om.route_cost({'input': 2, 'output': 3, 'cache_read': 1, 'cache_write': 0}, clean['data'][0]) is None
 
 
-def test_integration_preserves_overview_and_direct_nr_separately(monkeypatch):
+def test_integration_preserves_overview_and_direct_nr_separately(offline_legacy_loader, monkeypatch):
     import auto_usage as usage
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fixture')

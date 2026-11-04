@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly committed OpenClaw aggregate snapshot
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=60
+AccuracySec=1s
+Persistent=false
+Unit=ai-usage-openclaw-collect.service
+[Install]
+WantedBy=timers.target

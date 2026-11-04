@@ -1730,7 +1730,14 @@ function partialModels(state) {
 function savedOpenClawNotice(state) {
   var openclaw = state.parts.openclaw;
   var meta = openclaw && openclaw.meta;
-  if (!meta || meta.openclaw_status !== 'cached') return null;
+  if (!meta) return null;
+  if (meta.openclaw_upstream_status === 'committed_only') {
+    return 'OpenClaw: committed snapshot ' + time(meta.openclaw_cached_at_utc) +
+      (meta.openclaw_status === 'stale' ? ' · stale' : ' · hourly') +
+      ' · live coverage unverified' +
+      (meta.openclaw_coverage && !meta.openclaw_coverage.committedRowsComplete ? ' · incomplete history' : '');
+  }
+  if (meta.openclaw_status !== 'cached') return null;
   return 'OpenClaw: saved ' + (meta.openclaw_snapshot_complete ? 'complete' : 'unverified') +
     ' snapshot ' + time(meta.openclaw_cached_at_utc) +
     (meta.openclaw_refreshing ? ' · refreshing' : ' · latest read ' + (meta.openclaw_upstream_status || 'unavailable')) +

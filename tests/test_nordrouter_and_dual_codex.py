@@ -269,7 +269,7 @@ def test_failed_export_uses_only_its_profile_cache(monkeypatch, tmp_path):
     assert usage.load_codex() == {}
 
 
-def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypatch):
+def test_model_breakdown_includes_nordrouter_cost_without_invented_days(offline_legacy_loader, monkeypatch):
     import openclaw_usage
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
     monkeypatch.setattr(openclaw_usage, 'fetch_usage', lambda *a: {'aggregates': {'byModel': [], 'modelDaily': []}, 'cacheStatus': {'status': 'fresh'}})
@@ -298,7 +298,7 @@ def test_model_breakdown_includes_nordrouter_cost_without_invented_days(monkeypa
     assert mismatched['sources']['nordrouter']['complete'] is False
 
 
-def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(monkeypatch):
+def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(offline_legacy_loader, monkeypatch):
     import openclaw_usage
 
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
@@ -332,7 +332,7 @@ def test_one_day_breakdown_uses_current_calendar_day_for_both_sources(monkeypatc
     assert {entry['model'] for entry in result['models']} == {'grok', 'direct'}
 
 
-def test_source_breakdowns_do_not_collect_the_other_source(monkeypatch):
+def test_source_breakdowns_do_not_collect_the_other_source(offline_legacy_loader, monkeypatch):
     import openclaw_usage
 
     monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
@@ -367,41 +367,6 @@ def test_source_breakdowns_do_not_collect_the_other_source(monkeypatch):
     assert gateway_only['meta']['nordrouter_status'] == 'pending'
 
 
-def test_direct_source_http_finishes_while_gateway_source_is_stalled(monkeypatch):
-    import openclaw_usage
-
-    monkeypatch.setenv('NORDROUTER_API_KEY', 'fake')
-    monkeypatch.setattr(service, 'load_env', lambda: None)
-    started = threading.Event()
-    release = threading.Event()
-    end = usage.get_model_date_range(1)[1]
-
-    def slow_gateway(*args):
-        started.set()
-        assert release.wait(timeout=5)
-        raise TimeoutError('Gateway timed out')
-
-    monkeypatch.setattr(openclaw_usage, 'fetch_usage', slow_gateway)
-    monkeypatch.setattr(nr.Client, 'get', lambda *args, **kwargs: ({
-        'window_days': 1, 'totals': {'amount_usd': 0.25},
-        'daily': [{'date': end, 'tokens': 10, 'amount_usd': 0.25}],
-        'top_models': [{'id': 'direct', 'tokens': 10, 'amount_usd': 0.25}],
-    }, False))
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        gateway = executor.submit(TestClient(service.app).get,
-                                  '/api/v1/model-breakdown?days=1&source=openclaw')
-        try:
-            assert started.wait(timeout=2)
-            direct = executor.submit(TestClient(service.app).get,
-                                     '/api/v1/model-breakdown?days=1&source=nordrouter')
-            response = direct.result(timeout=2)
-            assert response.status_code == 200
-            assert [row['model'] for row in response.json()['models']] == ['direct']
-            assert not gateway.done()
-        finally:
-            release.set()
-        assert gateway.result(timeout=2).json()['meta']['openclaw_status'] == 'unavailable'
 
 
 def test_one_day_window_rolls_over_at_utc_midnight(monkeypatch):

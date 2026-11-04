@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Install reproducible user units. Does not start/restart any service."""
+from pathlib import Path
+import subprocess
+
+root = Path(__file__).resolve().parent.parent
+python = root / '.venv/bin/python'
+assert python.exists()
+assert not any(c in str(root) for c in (' ', '%', '\n', '"'))
+(root / 'data').mkdir(exist_ok=True)
+destination = Path.home() / '.config/systemd/user'
+destination.mkdir(parents=True, exist_ok=True)
+template = (root / 'deploy/ai-usage-openclaw-collect.service.in').read_text()
+(destination / 'ai-usage-openclaw-collect.service').write_text(
+    template.replace('@ROOT@', str(root)).replace('@PYTHON@', str(python)))
+(destination / 'ai-usage-openclaw-collect.timer').write_text(
+    (root / 'deploy/ai-usage-openclaw-collect.timer').read_text())
+subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True, timeout=10)
+print('Installed; start the oneshot, inspect its result, then enable --now the timer.')
