@@ -512,7 +512,8 @@ assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('strip-
   'Total tokens,NordRouter billed cost,Estimated cost',
   'the strip keeps three figures and drops both agent comparisons');
 assert(!/(?:7|30)d/.test(heroText), 'overview headings contain no period suffix');
-assert(heroText.includes('Total tokens') && heroText.includes('30'), 'default overview uses canonical 30d total');
+assert(heroText.includes('Total tokens42') && heroText.includes('observed subtotal · account conflict'),
+  'conflicting account cannot make an invented canonical total; show raw observations');
 let heroPills = all(registry.get('hero')).filter((e) => e.classList.contains('pill'));
 assertEqual(heroPills.map((e) => e.textContent).join(','),
   'direct NordRouter 20,other OpenClaw 10,other Hermes 6',
@@ -540,8 +541,9 @@ assert(registry.get('models-note').textContent.includes('direct agent usage once
 assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
-assertEqual(segments.length, 2, 'conflicting account observations cannot acquire an invented model split or gray pool');
-assert(segments.every((e) => segmentLabel(e).includes('day known subtotal 16')), 'withhold contradictory NR split, retain independent measurements');
+assertEqual(segments.length, 3, 'conflicting account retains reported observations, not a fabricated split or gray pool');
+assert(segments.every((e) => segmentLabel(e).includes('day observed subtotal (account conflict) 42')),
+  'contradictory observations retain raw numbers and explicit conflict labels');
 assertEqual(historySeries(MODELS).ledger.get('2026-10-03').unknown, 20, 'the full conflicting account count stays explicitly unresolved');
 assertEqual(all(chart).filter((e) => e.tagName === 'SVG').length, 1, 'exactly one chart');
 assert(!registry.has('account-history'), 'no second chart container');
@@ -550,7 +552,7 @@ const initialGrokColor = chartColor('grok-test');
 renderHistory({ ...MODELS, models: [...MODELS.models].reverse() });
 assertEqual(chartColor('grok-test'), initialGrokColor, 'sort order does not recolor models');
 windowListeners.resize();
-assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 2, 'resize preserves counts');
+assertEqual(all(chart).filter((e) => e.tagName === 'RECT').length, 3, 'resize preserves counts');
 assertEqual(historyScale, 'linear', 'linear scale is default');
 registry.get('history-scale').listeners.click[0]();
 assertEqual(historyScale, 'balanced', 'balanced toggle works');
@@ -637,8 +639,26 @@ windowListeners.scroll();
 assertEqual(tip.style.visibility, 'hidden', 'scroll dismisses an already open touch tooltip');
 renderHero({ sources: { nordrouter: { complete: false }, openclaw: { complete: true, tokens: 5 } }, totals: { total: null } });
 assert(registry.get('hero').textContent.includes('loading sources'), 'missing source is not zero');
-assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 0,
-  'incomplete overview must not show numeric source chips');
+assertEqual(all(registry.get('hero')).filter((e) => e.classList.contains('pill')).length, 3,
+  'incomplete overview keeps source chips without claiming completeness');
+assert(registry.get('hero').textContent.includes('direct NordRouter — · unavailable') &&
+  registry.get('hero').textContent.includes('other OpenClaw 5') &&
+  registry.get('hero').textContent.includes('other Hermes — · unavailable'), 'missing chips stay unknown, not zero');
+const committedHero = {
+  meta: {openclaw_status:'partial',hermes_status:'ok',nordrouter_status:'ok'},
+  sources: {openclaw:{tokens:7,complete:false,bucket_comparison_tokens:6},
+    hermes:{tokens:0,complete:true},nordrouter:{tokens:20,complete:true}}, totals:{total:null}
+};
+const heroBefore = JSON.stringify(committedHero);
+renderHero(committedHero);
+assert(registry.get('hero').textContent.includes('OpenClaw 7 · partial · comparison, not additive'),
+  'committed-only partial source remains visible and router overlap is not labelled other');
+assert(registry.get('hero').textContent.includes('other Hermes 0') &&
+  registry.get('hero').textContent.includes('direct NordRouter 20'), 'independent complete/zero chips remain visible');
+assertEqual(JSON.stringify(committedHero), heroBefore, 'rendering chips cannot change source coverage');
+committedHero.meta.openclaw_status='stale';
+renderHero(committedHero);
+assert(registry.get('hero').textContent.includes('OpenClaw 7 · stale'), 'stale chip never claims fresh partial data');
 selectedDays = 30;
 
 const knownZeroCategories = tableModels({models:[{source:'openclaw',provider:'local',model:'zero-cache',
@@ -1212,9 +1232,42 @@ for(const days of [1,7,30]) {
  assertEqual(h.byDate.get(date).get(routerHistoryKey(fixture.models.at(-1).bucket_usage.routes[0])),600,days+'d preserves serving model colors/counts');
  assertEqual(h.rowTotals.get('omniroute/bucket'),610*days,days+'d bucket chart count equals its reported serving routes');
  assertEqual(tableModels(fixture).find(r=>r.bucket).history_total,610*days,days+'d table identifies the exact chart count separately from agent comparison');
+ const bucketSwatches=all(modelRow('bucket','omniroute')).filter(e=>e.classList.contains('model-swatch'));
+ assertEqual(bucketSwatches.length,2,days+'d bucket maps to its two serving categories, not its unrelated bucket key');
+ for(const route of fixture.models.at(-1).bucket_usage.routes) {
+   const swatch=bucketSwatches.find(e=>e.title.endsWith(routerHistoryKey(route)));
+   assert(swatch && swatch.style.background===chartColor(route.model),days+'d parent swatch matches exact plotted serving category');
+   assertEqual(all(routeLine(route,new Element('tbody'))).find(e=>e.classList.contains('model-swatch')).style.background,
+     swatch.style.background,days+'d route detail and bucket share chart color');
+   assertEqual(swatch.style.background,modelColor(route.model),days+'d colors survive period switching');
+ }
  assertEqual(all(chart).filter(e=>e.tagName==='SVG').length,1,days+'d has one chart');
  assertEqual(JSON.stringify(fixture),before,days+'d reconciliation never mutates snapshot');
 }
+// Exact identities survive identical labels, variants and routes shared by buckets.
+const identities=windowFixture(1),originalRoute=identities.models.at(-1).bucket_usage.routes[0];
+identities.models.at(-1).bucket_usage.routes=[
+ {...originalRoute,model:'a:variant',price_id:'price-one'},
+ {...originalRoute,model:'a:variant',provider:'other-provider',price_id:'price-two'}
+];
+identities.models.push({...identities.models.at(-1),model:'bucket-two',model_key:'omniroute/bucket-two',
+ bucket_usage:{routes:[{...identities.models.at(-1).bucket_usage.routes[0]}]}});
+renderHistory(identities);renderModels(identities);
+const ih=historySeries(identities),ik=routerHistoryKey(identities.models.at(-1).bucket_usage.routes[0]);
+assertEqual(ih.byDate.get(identities.meta.end_date).get(ik),1200,'same serving identity aggregates actual observations from two buckets');
+assertEqual(ih.rowTotals.get('omniroute/bucket'),1200,'first bucket keeps both exact route counts');
+assertEqual(ih.rowTotals.get('omniroute/bucket-two'),600,'shared route does not replace second bucket identity/count');
+assertEqual(chartedModelRows.get('omniroute/bucket').length,2,'provider/price identity not collapsed by equal model labels');
+assertEqual(chartedModelRows.get('omniroute/bucket-two').length,1,'one shared route produces one bucket color');
+assert(ih.conflictDates.size===1 && ih.ledger.get(identities.meta.end_date).residual===0,
+ 'conflicting observations remain unscaled without additive account or residual');
+const unavailableRoute=windowFixture(1);
+delete unavailableRoute.models.at(-1).bucket_usage.routes[0].usage_provenance;
+delete unavailableRoute.models.at(-1).bucket_usage.routes[0].reported_totals;
+renderHistory(unavailableRoute);renderModels(unavailableRoute);
+assertEqual(chartedModelRows.get('omniroute/bucket').length,1,'invalid/unverified route does not borrow a previously plotted color');
+assert(!chartedCategories.has(routerHistoryKey(unavailableRoute.models.at(-1).bucket_usage.routes[0])),
+ 'missing provenance never becomes a measured category');
 const partial=windowFixture(30),date=partial.meta.end_date;
 partial.sources.omniroute.history_complete=false;partial.models.at(-1).bucket_usage.retention_limited=true;
 let h=historySeries(partial),d=h.ledger.get(date);
@@ -1243,7 +1296,15 @@ const conflict=windowFixture(1);conflict.source_daily.nordrouter[0].tokens=100;
 h=historySeries(conflict);d=h.ledger.get(conflict.meta.end_date);
 assertEqual(d.covered_unique,0,'conflict cannot be resolved by arbitrary caps or proportional shares');
 assertEqual(d.unknown,100,'contradictory account remains unresolved');
-assertEqual(chartTotal(h,conflict.meta.end_date),17,'only independent scopes survive contradictory account split');
+assertEqual(chartTotal(h,conflict.meta.end_date),917,'conflict retains exact serving/direct observations without account addition');
+renderHistory(conflict);renderModels(conflict);renderHero(conflict);
+assert(registry.get('history').textContent.includes('Measured values shown unchanged; account not added.'),
+  'account conflict is explained beside the chart');
+assert(all(chart).filter(e=>e.tagName==='RECT').every(e=>segmentLabel(e).includes('account conflict')),
+  'conflict tooltips distinguish observations from a proven account split');
+assert(!h.categories.has('direct-nordrouter-unattributed'),'conflict never invents an unmatched residual');
+assert(registry.get('hero').textContent.includes('observed subtotal · account conflict'),
+  'hero does not promote conflicting observations to canonical total');
 const missing=windowFixture(1);missing.source_daily.nordrouter=[];
 h=historySeries(missing);assertEqual(h.ledger.get(missing.meta.end_date).account,null,'missing account never becomes zero');
 assertEqual(chartTotal(h,missing.meta.end_date),917,'account outage retains reported measurements without adding agent bucket comparisons');
@@ -1590,8 +1651,10 @@ async function waitForReload() {
       'refreshing empty rows cannot wipe a complete model history');
     assertEqual(lastLoaded.parts.openclaw.meta.openclaw_source_at_utc,originalStamp,
       'an incomplete refresh cannot advance the displayed observation timestamp');
-    assertEqual(registry.get('hero').textContent,retainedHero,
-      'the known total stays stable when a refresh loses coverage');
+    assertEqual(registry.get('hero').textContent.replace(' · cached',''),retainedHero,
+      'the known figures stay stable when a refresh loses coverage; chip states the saved fallback');
+    assert(registry.get('hero').textContent.includes('OpenClaw 2 · cached'),
+      'retained values do not hide the cached-source state');
     while (retryCallbacks.length) {retryCallbacks.shift()(); await settle();}
     assertEqual(sourceReads,8,'revalidation has a finite per-period request budget');
     const otherPeriod = selectedDays === 1 ? 7 : 1;

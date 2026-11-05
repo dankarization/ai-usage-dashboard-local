@@ -44,7 +44,12 @@ do not prove complete history. Estimated/error prompt sizes remain observations,
 not reported coverage. Preserve cache reads once, exact serving IDs, known model
 colors, and explicit unresolved differences. Never scale a model sample to an
 account total or cap conflicting models arbitrarily. An account-day conflict
-withholds that split; other independent measurements remain visible. The table's
+keeps the unchanged serving/direct observations visible, explicitly labelled as
+observations rather than a reconciled account split. The account is not added;
+no gray residual is invented. Exact route identities map each bucket's swatches
+to its actual plotted serving colors (several swatches for a multi-model bucket).
+Source chips remain visible with partial/cached/stale/unavailable states; router
+agent comparisons are labelled non-additive, never independent consumption. The table's
 history count and reported serving drilldown reconcile chart counts independently
 of its non-additive agent comparisons and account-window balances. A multi-day
 Hermes session assigned to last activity cannot prove an account-day split.

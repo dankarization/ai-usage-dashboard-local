@@ -22,7 +22,11 @@ reported route drilldowns reconcile the chart separately from account-window
 balances and agent comparisons. Cache reads are already included once in totals.
 
 Missing data stays unknown, not zero. Total tokens shows the chart's known
-subtotal when coverage is incomplete, not a fabricated combined total.
+subtotal when coverage is incomplete, not a fabricated combined total. Source
+chips remain visible with explicit coverage states and non-additive comparison
+labels. Account conflicts retain unchanged measured observations with a warning,
+not a fabricated account split or a hidden model-day. Bucket swatches match the
+actual serving-model colors in the chart, including multi-model buckets.
 
 OpenClaw pages read one shared 90-day UTC committed-aggregate snapshot, never
 triggering collection. A bounded hourly systemd oneshot reads only indexed

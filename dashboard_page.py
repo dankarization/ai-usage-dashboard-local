@@ -778,26 +778,35 @@ function renderHero(payload) {
   var overlapUnknown = [gateway, hermes].some(function (source) { return (source.bucket_comparison_tokens || 0) > 0; });
   var full = direct.complete && gateway.complete && hermes.complete && !overlapUnknown;
   var history = historySeries(payload), subtotal = null;
+  full = full && !history.conflictDates.size;
   if (history.categories.size) {
     subtotal = 0; history.byDate.forEach(function (segments) { segments.forEach(function (n) { subtotal += n; }); });
   }
   stripItem(root, 'Total tokens', tokens(full ? payload.totals.total : subtotal),
-    full ? null : number(subtotal) ? 'known subtotal · incomplete coverage' : 'loading sources', !full);
+    full ? null : number(subtotal) ? (history.conflictDates.size ? 'observed subtotal · account conflict' :
+      'known subtotal · incomplete coverage') : 'loading sources', !full);
   stripItem(root, 'NordRouter billed cost', usd(direct.billed_cost_usd),
     null, !number(direct.billed_cost_usd));
   stripItem(root, 'Estimated cost', usd(agentCost),
     'API estimate · standard rates, short-context baseline' +
       (unpriced ? ' · partial: ' + unpriced + ' models with unknown pricing' : ''), !number(agentCost));
-  if (full) {
-    var pills = node('div', undefined, root); pills.className = 'pillrow';
-    node('span', 'direct NordRouter ' + tokens(direct.tokens), pills).className = 'pill';
-    var gatewayPill = node('span', 'other OpenClaw ' + tokens(gateway.tokens), pills);
-    gatewayPill.className = 'pill';
-    gatewayPill.title = 'OpenClaw tokens outside the NordRouter account';
-    var hermesPill = node('span', 'other Hermes ' + tokens(hermes.tokens), pills);
-    hermesPill.className = 'pill';
-    hermesPill.title = 'Hermes tokens outside the NordRouter account';
-  }
+  // Source observations remain useful even when they cannot prove a complete,
+  // disjoint total. A router comparison must never be labelled "other" usage.
+  var pills = node('div', undefined, root); pills.className = 'pillrow';
+  [['nordrouter', direct], ['openclaw', gateway], ['hermes', hermes]].forEach(function (item) {
+    var name = item[0], source = item[1], comparison = (source.bucket_comparison_tokens || 0) > 0;
+    var status = (payload.meta || {})[name + '_status'];
+    var state = status && !['ok', 'fresh'].includes(status) ? status :
+      source.complete ? '' : number(source.tokens) ? 'partial' : 'unavailable';
+    var label = name === 'nordrouter' ? 'direct NordRouter' :
+      (comparison ? '' : 'other ') + (name === 'openclaw' ? 'OpenClaw' : 'Hermes');
+    var pill = node('span', label + ' ' + tokens(source.tokens) + (state ? ' · ' + state : '') +
+      (comparison ? ' · comparison, not additive' : ''), pills);
+    pill.className = 'pill';
+    pill.title = name === 'nordrouter' ? 'Account-reported tokens; not added to the serving observations in the chart' :
+      comparison ? 'Agent observations include router calls already covered by account/serving data; do not sum these chips' :
+      'Agent tokens outside the NordRouter account; ' + (state || 'complete') + ' source coverage';
+  });
 }
 
 /* ---------- history chart ---------- */
@@ -805,7 +814,8 @@ function renderHero(payload) {
 var AGENT_SOURCES = { openclaw: true, hermes: true };
 var lastHistoryData = null;
 var historyScale = 'linear';
-var chartedModelRows = new Set();
+var chartedModelRows = new Map();
+var chartedCategories = new Map();
 // Keep the active model set far apart; name-based assignments survive sorting and period changes.
 var MODEL_COLORS = {
     'deepseek/deepseek-v4.1-flash:fjord': '#e658b4',
@@ -963,7 +973,8 @@ function reportedRouteTotals(route, slice) {
 }
 function historySeries(payload) {
   var byDate = new Map(), categories = new Map(), accountDays = new Map(), invalidDates = new Set();
-  var ledger = new Map(), rowTotals = new Map(), meta = payload.meta || {}, sources = payload.sources || {};
+  var ledger = new Map(), rowTotals = new Map(), rowCategories = new Map(), conflictDates = new Set();
+  var meta = payload.meta || {}, sources = payload.sources || {};
   var accountFamilies = new Set((payload.models || []).filter(function (row) {
     return row.source === 'nordrouter' || (AGENT_SOURCES[row.source] && String(row.provider).toLowerCase() === 'nordrouter');
   }).map(rowKey));
@@ -986,6 +997,10 @@ function historySeries(payload) {
     var buckets = byDate.get(date);
     buckets.set(category.key, (buckets.get(category.key) || 0) + amount);
     if (tableKey) rowTotals.set(tableKey, (rowTotals.get(tableKey) || 0) + amount);
+    if (tableKey && amount > 0) {
+      if (!rowCategories.has(tableKey)) rowCategories.set(tableKey, new Set());
+      rowCategories.get(tableKey).add(category.key);
+    }
   }
   ((payload.source_daily || {}).nordrouter || []).forEach(function (row) {
     if (!row || !inWindow(row.date)) return;
@@ -1068,13 +1083,15 @@ function historySeries(payload) {
     var observed = dd.router_reported + dd.direct_agents;
     dd.account = accountDays.has(date) ? accountDays.get(date) : null;
     if (dd.account === null) dd.reasons.push('account_day_unavailable');
-    // Do not cap/scale a conflicting model split: no request subset was proved.
+    // Preserve measured serving/direct observations even when the account
+    // snapshot disagrees. They are NOT a proven split of that account total.
+    dd.candidates.forEach(function (item) { add(date, item.category, item.tokens, item.tableKey); });
     var conflict = dd.account !== null && observed > dd.account;
     if (conflict) {
+      conflictDates.add(date);
       dd.reasons.push('observed_exceeds_account'); dd.unknown = dd.account;
     } else {
       dd.covered_unique = observed;
-      dd.candidates.forEach(function (item) { add(date, item.category, item.tokens, item.tableKey); });
       var remainder = dd.account === null ? null : dd.account - observed;
       // Retained-from alone does not prove gap-free history. Only an explicit
       // completeness contract can make a difference a genuinely unmatched count.
@@ -1097,20 +1114,35 @@ function historySeries(payload) {
   });
   var unresolved = Array.from(ledger.values()).reduce(function (sum, dd) { return sum + (dd.unknown || 0); }, 0);
   return {byDate: byDate, categories: categories, accountMode: accountMode, partialDates: partialDates,
-    ledger: ledger, rowTotals: rowTotals, unresolved: unresolved};
+    ledger: ledger, rowTotals: rowTotals, rowCategories: rowCategories, conflictDates: conflictDates, unresolved: unresolved};
 }
 function renderHistory(payload) {
   lastHistoryData = payload;
-  chartedModelRows = new Set();
+  chartedModelRows = new Map();
+  chartedCategories = new Map();
   if (activeHistoryTooltip) activeHistoryTooltip.hide();
   var history = historySeries(payload);
   var title = 'Reported tokens · UTC days';
   if (history.partialDates.size) title += ' · partial history';
   else if (!history.accountMode && (payload.meta || {}).nordrouter_status && payload.meta.nordrouter_status !== 'not_configured') title += ' · account unavailable';
-  drawHistory($('history'), history.byDate, history.categories, title, history.partialDates, history.unresolved);
-  history.categories.forEach(function (category, key) { if (category.kind !== 'account' && category.total > 0) chartedModelRows.add(key); });
+  if (history.conflictDates.size) title += ' · account conflict';
+  drawHistory($('history'), history.byDate, history.categories, title, history.partialDates, history.unresolved, history.conflictDates);
+  history.categories.forEach(function (category, key) {
+    if (category.kind !== 'account' && category.total > 0) chartedCategories.set(key, category);
+  });
+  history.rowCategories.forEach(function (keys, row) {
+    chartedModelRows.set(row, Array.from(keys).sort().map(function (key) { return chartedCategories.get(key); }).filter(Boolean));
+  });
+  history.conflictDates.forEach(function (date) {
+    var dd = history.ledger.get(date);
+    var note = node('p', dateOnly(date) + ': reported observations ' + tokens(dd.router_reported + dd.direct_agents) +
+      ' exceed NordRouter account ' + tokens(dd.account) + '. Measured values shown unchanged; account not added.', $('history'));
+    note.className = 'note';
+    note.title = date + ': observations ' + (dd.router_reported + dd.direct_agents).toLocaleString() +
+      '; account ' + dd.account.toLocaleString() + ' tokens. Account coverage is unresolved.';
+  });
 }
-function drawHistory(root, byDate, categories, title, partialDates, unresolved) {
+function drawHistory(root, byDate, categories, title, partialDates, unresolved, conflictDates) {
   root.replaceChildren();
   node('p', title, root).className = 'note';
   var unattributedKey = 'direct-nordrouter-unattributed';
@@ -1188,9 +1220,11 @@ function drawHistory(root, byDate, categories, title, partialDates, unresolved) 
       var rect = svgEl('rect', {
         x: x, y: padT + plotH * (1 - stacked / scaleMax), width: barW, height: barH,
         fill: category.color, tabindex: 0,
+        'data-series-key': category.key, 'data-date': day.date, 'data-tokens': amount,
       }, svg);
       var label = category.label + ' · ' + tokens(amount) + ' tokens · day ' +
-        (partialDates.has(day.date) ? 'known subtotal ' : 'total ') + tokens(day.total_tokens);
+        (conflictDates.has(day.date) ? 'observed subtotal (account conflict) ' :
+          partialDates.has(day.date) ? 'known subtotal ' : 'total ') + tokens(day.total_tokens);
       rect.setAttribute('aria-label', label);
       rect.addEventListener('pointerenter', function (event) {
         if (event.pointerType === 'mouse') showTooltip(rect, label, event.clientX, event.clientY, false);
@@ -1431,6 +1465,15 @@ function syncModelSortHeaders() {
     $('model-sort-' + key).title = view.title;
   });
 }
+function modelSwatches(categories, parent) {
+  (categories || []).forEach(function (category) {
+    var swatch = node('span', undefined, parent); swatch.className = 'model-swatch';
+    swatch.style.background = category.color;
+    // A bucket can contain several exact serving routes, not one bucket model.
+    swatch.title = category.label + ' · ' + category.key;
+    swatch.setAttribute('aria-hidden', 'true');
+  });
+}
 function renderModels(data) {
   lastModelsData = data;
   var meta = data.meta || {};
@@ -1464,11 +1507,7 @@ function renderModels(data) {
     node('span', row.source === 'nordrouter' ? 'NordRouter' : row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
     var modelName = node('span', undefined, modelCell); modelName.className = 'model-name';
-    if (chartedModelRows.has(row.model_key)) {
-      var swatch = node('span', undefined, modelName); swatch.className = 'model-swatch';
-      swatch.style.background = modelColor(row.model_key || row.model || 'unknown');
-      swatch.setAttribute('aria-hidden', 'true');
-    }
+    modelSwatches(chartedModelRows.get(row.model_key), modelName);
     node('span', row.model || '—', modelName);
     if (row.listing === 'residual')
       node('div', 'unresolved window balance', modelCell).className = 'cost-kind';
@@ -1577,11 +1616,7 @@ function routeLine(route, body) {
     number(route.cost_usd) ? 'router-wide estimated' : 'unknown: ' + route.unknown_reason);
   node('span', route.nordrouter === true ? 'NordRouter' : route.provider, line.source).className = 'src';
   var name = node('span', undefined, line.model); name.className = 'src';
-  if (chartedModelRows.has(routerHistoryKey(route))) {
-    var swatch = node('span', undefined, name); swatch.className = 'model-swatch';
-    swatch.style.background = modelColor(route.model);
-    swatch.setAttribute('aria-hidden', 'true');
-  }
+  modelSwatches([chartedCategories.get(routerHistoryKey(route))].filter(Boolean), name);
   node('span', route.model, name);
   var unverified = reported && route.totals ? route.totals.total - reported.total : (route.totals || {}).total;
   if (unverified > 0) node('span', 'unverified ' + tokens(unverified), line.model).className = 'cost-kind';
