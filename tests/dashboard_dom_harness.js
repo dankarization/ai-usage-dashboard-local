@@ -128,11 +128,12 @@ const QUOTAS = {
     { provider: 'grok_bot', label: 'Weekly Grok Bot Limit', status: 'ok',
       used_percentage: 100, remaining_percentage: 0, next_reset_time_ms: 1791537783029 },
     { status: 'ok', balance_usd: 17.075988, spend_today_usd: 5.070795,
-      today_provider_total_usd: 5.070795, today_models_total_usd: 5.070794, today_daily_bucket_usd: 4.58538,
+      today_provider_total_usd: 5.070795, today_models_total_usd: 5.070795, today_daily_bucket_usd: 4.58538,
       spend_7d_usd: 15.006731,
       spend_30d_usd: 46.459125, provider: 'nordrouter', label: 'NordRouter USD',
       used_percentage: null, remaining_percentage: null,
-      top_models_today: [{ id: 'z-ai/glm-5.3', tokens: 11735928, amount_usd: 0.9477 }],
+      top_models_today: [{ id: 'deepseek/deepseek-v4.1-flash:fjord', tokens: 719461910, amount_usd: 4.269996 },
+                         { id: 'z-ai/glm-5.3', tokens: 18093312, amount_usd: 0.800799 }],
       top_models_7d: [{ id: 'z-ai/glm-5.3', tokens: 61934392, amount_usd: 7.8224 }],
       today_complete: true, today_basis: 'NordRouter days=1 analytics (Asia/Tbilisi day)' },
   ],
@@ -494,17 +495,21 @@ assertEqual(orderGroups([{ provider: 'glm', account: '' }, { provider: 'grok', a
   .map((g) => g.provider + (g.account || '')).join(','),
   'codexcodex_1,codexcodex_2,grok,glm',
   'quota order must be Codex accounts, then Grok, then the rest');
-assert(registry.get('metrics').textContent.includes('provider day window'),
-  'today spend must be labelled with its basis, got: ' + registry.get('metrics').textContent);
-assert(registry.get('metrics').textContent.includes('provider day bucket'),
-  'a divergent provider day bucket must be shown separately, got: ' + registry.get('metrics').textContent);
 assert(registry.get('metrics').textContent.includes('$17.08'),
   'NordRouter balance must render as USD, got: ' + registry.get('metrics').textContent);
+assert(registry.get('metrics').textContent.includes('Spend today · current day'),
+  'today spend keeps the plain label, got: ' + registry.get('metrics').textContent);
+assert(!/provider day window|provider day bucket|independent read|provider analytics totals/.test(registry.get('metrics').textContent),
+  'the card must not add basis sub-labels, got: ' + registry.get('metrics').textContent);
 assertEqual(registry.get('nr-status').textContent, '',
   'a complete day window must not raise a partial-day note');
-assert(registry.get('today').textContent.includes('provider day rows'),
-  'the day rows must state their basis, got: ' + registry.get('today').textContent);
 assert(registry.get('today').textContent.includes('z-ai/glm-5.3'), 'top models today must render');
+// Numbers stay reconciled without the removed labels: the day rows sum to the
+// provider day total, which is what the plain cells display.
+const todayRowsSum = QUOTAS.quotas.find((row) => row.provider === 'nordrouter')
+  .top_models_today.reduce((sum, row) => sum + row.amount_usd, 0);
+assert(Math.abs(todayRowsSum - 5.070795) < 1e-9,
+  'day rows must reconcile with the provider day total, got: ' + todayRowsSum);
 
 /* ---------------- period, totals, history, and source tables ---------------- */
 renderPeriod(MODELS, QUOTAS);
@@ -1478,8 +1483,6 @@ async function waitForReload() {
   assert(registry.get('hero').textContent.includes('Total tokens') &&
     registry.get('hero').textContent.includes('3'), 'canonical one-day total completes');
   assert(registry.get('metrics').textContent.includes('$0.1250'), 'one-day billed spend uses direct source');
-  assert(registry.get('metrics').textContent.includes('independent read'),
-    'one-day billed spend must name its provider-basis, got: ' + registry.get('metrics').textContent);
 
   // Late responses from superseded periods cannot repaint or report errors.
   const beforeThirty = pendingFetches.length;
