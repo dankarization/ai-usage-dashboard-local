@@ -161,7 +161,7 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = '
     for item in payload.get("quotas") or []:
         used_percentage = max(0, min(100, int(item["percentage"]))) if item.get("percentage") is not None else None
         quota_items.append({
-            **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis", "product_usage", "billing") if k in item},
+            **{k: item[k] for k in ("account", "account_label", "status", "balance_usd", "spend_today_usd", "today_provider_total_usd", "today_models_total_usd", "today_daily_bucket_usd", "spend_7d_usd", "spend_30d_usd", "top_models_today", "top_models_7d", "today_complete", "today_basis", "product_usage", "billing") if k in item},
             **({'plan_type': item['plan_type']} if item.get('provider') == 'codex' and isinstance(item.get('plan_type'), str) and item['plan_type'] in {'prolite', 'pro', 'pro500', 'plus'} else {}),
             "provider": item.get("provider", "unknown"),
             "label": item.get("label", "unknown"),

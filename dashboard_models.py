@@ -92,13 +92,16 @@ class AccountMetrics(BaseModel):
     plan_type: Optional[Literal['prolite', 'pro', 'pro500', 'plus']] = Field(default=None, description='Explicit Codex plan_type from the existing ChatGPT wham/usage response; unknown or historical fallback plans are omitted. Generic pro does not imply pro500.')
     status: Optional[str] = Field(default=None, description='ok, stale, unavailable, or not_configured.')
     balance_usd: Optional[float] = Field(default=None, description='NordRouter prepaid balance in USD.')
-    spend_today_usd: Optional[float] = Field(default=None, description='Today spend; see today_basis and today_complete.')
+    spend_today_usd: Optional[float] = Field(default=None, description='Today spend on the provider day-window basis; see today_basis and today_complete.')
+    today_provider_total_usd: Optional[float] = Field(default=None, description="NordRouter days=1 window total for the local day. Same measurement as spend_today_usd; kept explicit so the basis is visible.")
+    today_models_total_usd: Optional[float] = Field(default=None, description='Sum of the local-day top-model rows. The provider row list is bounded, so this is a lower bound, never a fabricated day total.')
+    today_daily_bucket_usd: Optional[float] = Field(default=None, description="The provider's own days=1 daily bucket for the local day. Reported separately because it can lag the window total; never silently averaged in.")
     spend_7d_usd: Optional[float] = Field(default=None, description='NordRouter server 7-day analytics spend.')
     spend_30d_usd: Optional[float] = Field(default=None, description='NordRouter server 30-day analytics spend.')
     top_models_today: Optional[list[dict]] = Field(default=None, description='Top five local-day models by spend; partial if today_complete=false.')
     top_models_7d: Optional[list[dict]] = Field(default=None, description='Top five models by 7-day spend.')
     today_complete: Optional[bool] = Field(default=None, description='Whether all timestamped usage rows for the local day were collected.')
-    today_basis: Optional[str] = Field(default=None, description='Time basis of today spend; fallback uses the server daily bucket.')
+    today_basis: Optional[str] = Field(default=None, description='Named measurement basis of today spend, e.g. the NordRouter days=1 analytics window.')
 
 
 class QuotaSnapshot(AccountMetrics):

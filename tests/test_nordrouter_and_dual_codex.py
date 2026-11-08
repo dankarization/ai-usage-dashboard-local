@@ -110,28 +110,57 @@ def test_local_today_ranking_not_rolling_totals(monkeypatch):
         ], "has_more": True}, False
     monkeypatch.setattr(nr.Client, "get", get)
     summary = nr.collect(key="fake", now=datetime(2026, 10, 2, 3, tzinfo=timezone.utc))
-    assert summary["spend_today_usd"] == .5
-    assert summary["top_models_today"][0]["id"] == "local-today"
+    # The local day comes from the provider's own windows, not from the bounded
+    # usage-row sample; the day rows and the day total share one basis.
+    assert summary["spend_today_usd"] == 9
+    assert summary["today_provider_total_usd"] == 9
+    assert summary["today_models_total_usd"] == 2
+    assert summary["today_daily_bucket_usd"] == 2
+    assert summary["top_models_today"][0]["id"] == "model-a"
     assert summary["today_complete"] is True
     assert summary["spend_7d_usd"] == 9
     assert "daily" not in nr.quota(summary)
 
 
-def test_partial_usage_is_explicit_and_bounded(monkeypatch):
-    pages = []
+def test_day_basis_uses_one_provider_window_and_reports_bucket_divergence(monkeypatch):
+    """The day total and day rows share the days=1 window; a lagging bucket is
+    reported separately and never averaged in or scaled onto the window."""
+    def analytics_body(days):
+        if days == 1:
+            return {"window_days": 1, "totals": {"amount_usd": 5.070795},
+                    "daily": [{"date": "2026-10-02", "tokens": 730127885, "amount_usd": 4.58538}],
+                    "top_models": [{"id": "deepseek-v4.1", "tokens": 719461910, "amount_usd": 4.269996},
+                                   {"id": "glm-5.3-flash", "tokens": 18093312, "amount_usd": 0.563225}]}
+        return analytics(days)
+    def get(self, endpoint, **params):
+        if endpoint == "balance":
+            return {"balance_usd": 13.15, "currency": "USD"}, False
+        if endpoint == "analytics":
+            return analytics_body(params["days"]), False
+        raise AssertionError("no usage scan for the day basis")
+    monkeypatch.setattr(nr.Client, "get", get)
+    summary = nr.collect(key="fake", now=datetime(2026, 10, 2, 3, tzinfo=timezone.utc))
+    assert summary["spend_today_usd"] == 5.070795
+    assert summary["today_models_total_usd"] == round(4.269996 + 0.563225, 6)
+    assert summary["today_daily_bucket_usd"] == 4.58538
+    assert summary["today_complete"] is True
+    assert summary["today_basis"] == "NordRouter days=1 analytics (Asia/Tbilisi day)"
+
+
+def test_partial_day_window_is_flagged_without_substitution(monkeypatch):
     def get(self, endpoint, **params):
         if endpoint == "balance":
             return None, True
         if endpoint == "analytics":
-            return analytics(), False
-        pages.append(params["page"])
-        return {"data": [{"created_at": "2026-10-02T01:00:00Z",
-            "model": "fake", "total_tokens": 1, "cost_usd": .1}], "has_more": True}, False
+            if params["days"] == 1:
+                return {"window_days": 7, "totals": {"amount_usd": 9},
+                        "daily": [], "top_models": []}, False
+            return analytics(params["days"]), False
+        raise AssertionError("no usage scan for the day basis")
     monkeypatch.setattr(nr.Client, "get", get)
     summary = nr.collect(key="fake", now=datetime(2026, 10, 2, 3, tzinfo=timezone.utc))
-    assert len(pages) == 8
     assert summary["today_complete"] is False
-    assert summary["spend_today_usd"] == 2
+    assert summary["spend_today_usd"] == 9
     assert summary["status"] == "stale"
 
 

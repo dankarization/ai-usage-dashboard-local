@@ -9,7 +9,7 @@ A self-hosted dashboard for AI token usage, provider quotas, and costs, based on
 
 - One model usage history chart with 1-, 7-, and 30-day UTC windows.
 - OpenClaw and Hermes usage, plus configured provider quota windows.
-- NordRouter balance, billed spend, and top models.
+- NordRouter balance, billed spend, and top models. The local day is reported on the provider's `days=1` analytics basis: "Spend today" and the day rows share that window; a provider daily bucket that lags the window is shown separately and never averaged in.
 - API-equivalent cost estimates, separate from billed spend.
 
 History uses provider-reported serving model-days from retained router logs and

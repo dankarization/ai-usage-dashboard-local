@@ -127,12 +127,14 @@ const QUOTAS = {
       product_usage: [{ product: 2, label: 'Grok Build', usage_percent: 100 }] },
     { provider: 'grok_bot', label: 'Weekly Grok Bot Limit', status: 'ok',
       used_percentage: 100, remaining_percentage: 0, next_reset_time_ms: 1791537783029 },
-    { status: 'ok', balance_usd: 17.075988, spend_today_usd: 0.0, spend_7d_usd: 15.006731,
+    { status: 'ok', balance_usd: 17.075988, spend_today_usd: 5.070795,
+      today_provider_total_usd: 5.070795, today_models_total_usd: 5.070794, today_daily_bucket_usd: 4.58538,
+      spend_7d_usd: 15.006731,
       spend_30d_usd: 46.459125, provider: 'nordrouter', label: 'NordRouter USD',
       used_percentage: null, remaining_percentage: null,
       top_models_today: [{ id: 'z-ai/glm-5.3', tokens: 11735928, amount_usd: 0.9477 }],
       top_models_7d: [{ id: 'z-ai/glm-5.3', tokens: 61934392, amount_usd: 7.8224 }],
-      today_complete: false, today_basis: 'server daily date' },
+      today_complete: true, today_basis: 'NordRouter days=1 analytics (Asia/Tbilisi day)' },
   ],
 };
 
@@ -155,7 +157,7 @@ const MODELS = {
     openclaw_nordrouter_comparison_tokens: 21,
     hermes: { tokens: 6, estimated_cost_usd: 0.1, unpriced_models: 0, complete: true },
     hermes_nordrouter_comparison_tokens: 5 },
-  source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 20 }] },
+  source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 20, amount_usd: 15.006731 }] },
   models: [
     { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3', cost_usd: 0.4, totals: { total: 19 }, daily: [] },
     { source: 'openclaw', provider: 'nordrouter', model: 'nr-route', cost_usd: 0.5, totals: { total: 21 }, daily: [{ date: '2026-10-03', total: 21 }] },
@@ -492,10 +494,16 @@ assertEqual(orderGroups([{ provider: 'glm', account: '' }, { provider: 'grok', a
   .map((g) => g.provider + (g.account || '')).join(','),
   'codexcodex_1,codexcodex_2,grok,glm',
   'quota order must be Codex accounts, then Grok, then the rest');
-assert(registry.get('nr-status').textContent.includes('incomplete'),
-  'NordRouter partial-today note must be surfaced');
+assert(registry.get('metrics').textContent.includes('provider day window'),
+  'today spend must be labelled with its basis, got: ' + registry.get('metrics').textContent);
+assert(registry.get('metrics').textContent.includes('provider day bucket'),
+  'a divergent provider day bucket must be shown separately, got: ' + registry.get('metrics').textContent);
 assert(registry.get('metrics').textContent.includes('$17.08'),
   'NordRouter balance must render as USD, got: ' + registry.get('metrics').textContent);
+assertEqual(registry.get('nr-status').textContent, '',
+  'a complete day window must not raise a partial-day note');
+assert(registry.get('today').textContent.includes('provider day rows'),
+  'the day rows must state their basis, got: ' + registry.get('today').textContent);
 assert(registry.get('today').textContent.includes('z-ai/glm-5.3'), 'top models today must render');
 
 /* ---------------- period, totals, history, and source tables ---------------- */
@@ -1470,6 +1478,8 @@ async function waitForReload() {
   assert(registry.get('hero').textContent.includes('Total tokens') &&
     registry.get('hero').textContent.includes('3'), 'canonical one-day total completes');
   assert(registry.get('metrics').textContent.includes('$0.1250'), 'one-day billed spend uses direct source');
+  assert(registry.get('metrics').textContent.includes('independent read'),
+    'one-day billed spend must name its provider-basis, got: ' + registry.get('metrics').textContent);
 
   // Late responses from superseded periods cannot repaint or report errors.
   const beforeThirty = pendingFetches.length;

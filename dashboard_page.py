@@ -268,6 +268,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="sec-head"><h2 id="h-nord">NordRouter</h2></div>
     <div class="panel">
       <div id="metrics" class="nr-grid"></div>
+      <p id="nr-status" class="note"></p>
       <div class="two-col">
         <div><h3>Top-5 models today</h3><div id="today"></div></div>
         <div><h3 id="selected-top-label">Top-5 models</h3><div id="week"></div></div>
@@ -713,24 +714,53 @@ function renderQuotas(data, models, pending) {
   }
 
   var nr = rows.find(function (row) { return row.provider === 'nordrouter'; }) || {};
-  var nrStatus = $('nr-status');
-  if (nrStatus) {
-    var text = nr.today_complete === false ? 'Today model list incomplete; spend may use a fallback' : '';
-    nrStatus.textContent = text;
-  }
-
   $('metrics').replaceChildren();
-  var billedSpend = selectedDays === 1 ? (models.sources || {}).nordrouter : null;
-  [['Balance · current', nr.balance_usd], ['Spend today · current day', nr.spend_today_usd],
-   ['Billed spend', selectedDays === 1 ? billedSpend && billedSpend.billed_cost_usd :
-     nr[selectedDays === 30 ? 'spend_30d_usd' : 'spend_7d_usd']]]
-    .forEach(function (pair) {
-      var box = node('div', undefined, $('metrics')); box.className = 'nr-cell';
-      node('div', pair[0], box).className = 'k';
-      var value = node('div', usd(pair[1]), box);
-      value.className = 'v' + (number(pair[1]) ? '' : ' unknown');
-    });
+  // The provider exposes the local day through two independent measurements: a
+  // day-window aggregate (its `totals`, which matches the row list) and a daily
+  // bucket series that can lag. Show each under an explicit basis and never
+  // average, scale, or silently prefer one. The model list below shares the
+  // day-window basis so it agrees with "Spend today".
+  var nrNotes = [];
+  if (nr.today_complete === false) nrNotes.push('Today provider day window unavailable; saved values shown.');
+  var billedSource = selectedDays === 1 ? (models.sources || {}).nordrouter : null;
+  var billedValue = selectedDays === 1 ? billedSource && billedSource.billed_cost_usd
+    : nr[selectedDays === 30 ? 'spend_30d_usd' : 'spend_7d_usd'];
+  var cells = [['Balance · current', nr.balance_usd, null]];
+  if (number(nr.spend_today_usd))
+    cells.push(['Spend today · provider day window', nr.spend_today_usd, 'days=1 analytics; same basis as the day rows']);
+  if (number(nr.today_daily_bucket_usd) &&
+      (!number(nr.today_provider_total_usd) ||
+       Math.abs(nr.today_daily_bucket_usd - nr.today_provider_total_usd) >= 0.01))
+    cells.push(['Spend today · provider day bucket', nr.today_daily_bucket_usd, 'provider daily series; can lag the day window']);
+  cells.push(['Billed spend · provider ' + selectedDays + '-day total', billedValue,
+    selectedDays === 1 ? 'provider days=1 total, independent read' : 'provider analytics totals']);
+  cells.forEach(function (pair) {
+    var box = node('div', undefined, $('metrics')); box.className = 'nr-cell';
+    node('div', pair[0], box).className = 'k';
+    var value = node('div', usd(pair[1]), box);
+    value.className = 'v' + (number(pair[1]) ? '' : ' unknown');
+    if (pair[2]) node('div', pair[2], box).className = 's';
+  });
+  var periodDaily = (models.source_daily || {}).nordrouter || [];
+  var periodDailySum = periodDaily.reduce(function (sum, row) {
+    return sum + (number(row.amount_usd) ? row.amount_usd : 0); }, 0);
+  // The provider's own measurements can disagree: its daily series lags its
+  // window total, and two reads of the same day window drift as usage accrues.
+  // Surface each gap explicitly; both measured values stay unchanged.
+  if (selectedDays === 1 && number(billedValue) && number(nr.spend_today_usd) &&
+      Math.abs(billedValue - nr.spend_today_usd) >= 0.01)
+    nrNotes.push('Provider day-window reads differ (' + usd(nr.spend_today_usd) + ' vs ' + usd(billedValue) +
+      '); they come from separate reads and can drift as usage accrues.');
+  if (selectedDays !== 1 && number(billedValue) &&
+      Math.abs(periodDailySum - billedValue) > Math.max(0.05, billedValue * 0.005))
+    nrNotes.push('Provider daily series for this period sums to ' + usd(periodDailySum) + ' vs its ' +
+      usd(billedValue) + ' window total; recent day buckets lag and both are shown unchanged.');
+  var nrStatus = $('nr-status');
+  if (nrStatus) nrStatus.textContent = nrNotes.join(' ');
   topModels('today', nr.top_models_today);
+  if (number(nr.today_models_total_usd))
+    node('p', 'Top-5 of provider day rows · row total ' + usd(nr.today_models_total_usd) +
+      (nr.today_basis ? ' (' + nr.today_basis + ')' : ''), $('today')).className = 'note';
   topModels('week', (models.models || []).filter(function (row) { return row.source === 'nordrouter'; })
     .map(function (row) { return { id: row.model, tokens: row.totals.total, amount_usd: row.cost_usd }; }));
 

@@ -9,7 +9,6 @@ import math
 import os
 import re
 import time
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -172,7 +171,7 @@ def collect(days=30, *, key=None, cache_dir=None, now=None):
     stale = False
     windows = {}
     # Fixed windows avoid issuing requests for every arbitrary dashboard range.
-    for window in (30, 7):
+    for window in (1, 7, 30):
         body, old = client.get("analytics", days=window)
         windows[window] = body or {}
         stale |= old
@@ -183,46 +182,36 @@ def collect(days=30, *, key=None, cache_dir=None, now=None):
     balance, old = client.get("balance")
     stale |= old
     daily = windows.get(90, windows[30]).get("daily", [])
-    today_row = next((row for row in daily if row["date"] == today), None)
-    # Usage provides timestamped rows for local-day model ranking. Bound to eight
-    # pages per refresh (<10/min), explicitly flag partial results on large days.
-    by_model = defaultdict(lambda: {"tokens": 0, "amount_usd": 0.0})
-    complete = False
-    for page in range(8):
-        usage, old = client.get("usage", days=2, limit=100, page=page)
-        stale |= old
-        if not usage:
-            break
-        stamps = []
-        for row in usage["data"]:
-            stamp = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if stamp.tzinfo is None:
-                stamp = stamp.replace(tzinfo=ZoneInfo("UTC"))
-            stamps.append(stamp)
-            if stamp.astimezone(TZ).date().isoformat() == today:
-                model = by_model[row["model"]]
-                model["tokens"] += int(row["total_tokens"])
-                model["amount_usd"] += float(row["cost_usd"])
-        # API pages are newest-first (verified against live responses). Once
-        # an ordered page crosses local midnight, all of today's rows are seen.
-        crossed_midnight = bool(stamps and stamps == sorted(stamps, reverse=True)
-                                and stamps[-1].astimezone(TZ).date().isoformat() < today)
-        if not usage["has_more"] or crossed_midnight:
-            complete = True
-            break
-    top_today = sorted(({"id": model, **values} for model, values in by_model.items()),
-                       key=lambda x: x["amount_usd"], reverse=True)[:5]
+    # The provider exposes one local day through three measurements that may
+    # disagree: the day bucket, the day-window total, and the top-model rows for
+    # that window. Report each measured value under its own basis; never scale
+    # one onto another and never derive a day total from a bounded row sample.
+    day_one = windows.get(1) or {}
+    day_row = next((row for row in day_one.get("daily", []) if row["date"] == today), None)
+    day_models = sorted(day_one.get("top_models", []), key=lambda x: x["amount_usd"], reverse=True)
+    day_total = (day_one.get("totals") or {}).get("amount_usd")
+    day_models_total = (round(sum(float(row["amount_usd"]) for row in day_models), 6)
+                        if day_models else None)
+    complete = day_one.get("window_days") == 1 and day_row is not None
     return {
         "provider": "nordrouter", "label": "NordRouter USD",
         "status": "stale" if stale else "ok",
         "balance_usd": (balance or {}).get("balance_usd"),
-        "spend_today_usd": round(sum(v["amount_usd"] for v in by_model.values()), 6) if complete else (today_row or {}).get("amount_usd"),
+        # One basis for the day: the provider's own day-window analytics. The
+        # model list is the same window's rows, so they agree instead of mixing
+        # a bucket sample with a row sample. A divergent day bucket is reported
+        # separately, never silently preferred or averaged in.
+        "spend_today_usd": day_total,
+        "today_provider_total_usd": day_total,
+        "today_models_total_usd": day_models_total,
+        "today_daily_bucket_usd": (day_row or {}).get("amount_usd"),
         "spend_7d_usd": windows[7].get("totals", {}).get("amount_usd"),
         "spend_30d_usd": windows[30].get("totals", {}).get("amount_usd"),
-        "top_models_today": top_today,
+        "top_models_today": [{"id": row["id"], "tokens": int(row["tokens"]),
+                              "amount_usd": float(row["amount_usd"])} for row in day_models[:5]],
         "top_models_7d": sorted(windows[7].get("top_models", []), key=lambda x: x["amount_usd"], reverse=True)[:5],
         "today_complete": complete,
-        "today_basis": "Asia/Tbilisi timestamps" if complete else "server daily date (Asia/Tbilisi date selection)",
+        "today_basis": "NordRouter days=1 analytics (Asia/Tbilisi day)",
         "daily": daily,
     }
 
