@@ -1202,8 +1202,15 @@ function drawHistory(root, byDate, categories, title, partialDates, unresolved, 
     tooltip.textContent = label;
     tooltip.style.visibility = 'visible';
     var viewportW = window.innerWidth || 360, viewportH = window.innerHeight || 640;
-    var tipW = tooltip.offsetWidth || 220, tipH = tooltip.offsetHeight || 44;
-    tooltip.style.left = Math.max(8, Math.min(x + 12, viewportW - tipW - 8)) + 'px';
+    // Measure after the text is set and the tooltip is visible so layout has a
+    // real width; never fall back to 0, which would push a sliver off-screen.
+    var box = tooltip.getBoundingClientRect ? tooltip.getBoundingClientRect() : null;
+    var tipW = tooltip.offsetWidth || (box && box.width) || 220;
+    var tipH = tooltip.offsetHeight || (box && box.height) || 44;
+    // Keep the full-width tooltip on screen. If it does not fit to the right of
+    // the cursor, place it to the left instead of clamping (which squeezed it).
+    var left = x + 12 + tipW + 8 > viewportW ? Math.max(8, x - tipW - 12) : x + 12;
+    tooltip.style.left = left + 'px';
     tooltip.style.top = Math.max(8, Math.min(y - tipH - 12 < 8 ? y + 12 : y - tipH - 12,
       viewportH - tipH - 8)) + 'px';
     activeHistoryTooltip = { rect: rect, hide: hideTooltip, touch: touch };

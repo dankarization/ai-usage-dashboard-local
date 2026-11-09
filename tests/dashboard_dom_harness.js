@@ -640,6 +640,18 @@ touch(sol, 'pointerup', 4, 100, 130);
 assertEqual(tip.style.visibility, 'hidden', 'scroll-like movement does not open tooltip');
 sol.listeners.pointerenter[0]({ pointerType: 'mouse', clientX: 120, clientY: 150 });
 assertEqual(tip.style.visibility, 'visible', 'desktop hover opens tooltip');
+var tipW = tip.offsetWidth;
+assert(Number.parseInt(tip.style.left, 10) > 120,
+  'a cursor with room to the right keeps the tooltip on the right, got: ' + tip.style.left);
+// A bar near the right edge: the tooltip must flip to the left of the cursor and
+// keep its full width instead of being clamped into a squeezed sliver.
+sol.listeners.pointermove[0]({ pointerType: 'mouse', clientX: 380, clientY: 150 });
+var rightEdgeLeft = Number.parseInt(tip.style.left, 10);
+assert(rightEdgeLeft + tipW <= 380,
+  'right-edge tooltip must sit left of the cursor, got: ' + tip.style.left + ' width ' + tipW);
+assert(rightEdgeLeft >= 8 && rightEdgeLeft + tipW <= 390,
+  'right-edge tooltip must stay fully on screen, got: ' + tip.style.left + ' width ' + tipW);
+assertEqual(tip.style.visibility, 'visible', 'right-edge tooltip stays visible');
 sol.listeners.pointerleave[0]({ pointerType: 'mouse' });
 assertEqual(tip.style.visibility, 'hidden', 'desktop pointer leave closes tooltip');
 touch(sol, 'pointerdown', 5, 100, 100);
