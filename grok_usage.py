@@ -20,8 +20,9 @@ GROK_CREDITS_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCredits
 GROK_BOT_URL = 'wss://grok.com/ws/bot/'
 # Verified against live CLI-proxy samples in CodexBar's Grok provider notes:
 # https://github.com/steipete/CodexBar/blob/main/docs/grok.md
+# Product 6 is Voice, confirmed against the provider UI by the operator.
 # Other ids remain unnamed until independently established.
-PRODUCT_LABELS = {2: 'Grok Build', 4: 'Grok Chat'}
+PRODUCT_LABELS = {2: 'Grok Build', 4: 'Grok Chat', 6: 'Voice'}
 # Empty GetGrokCreditsConfigRequest inside a grpc-web data frame.
 _GRPC_WEB_EMPTY_REQUEST = b'\x00\x00\x00\x00\x00'
 

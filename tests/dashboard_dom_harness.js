@@ -429,6 +429,26 @@ assert(liveGrok.segments[0].style.backgroundColor !== liveGrok.segments[1].style
   'products are visually distinguishable');
 assert(!liveGrok.root.textContent.includes('shared credits'), 'unwanted suffix is absent');
 
+const voiceProducts = [
+  { product: 2, label: 'Grok Build', usage_percent: 55 },
+  { product: 6, label: 'Voice', usage_percent: 1 },
+];
+const voiceGrok = renderedGrok(56, voiceProducts);
+const unnamedVoiceGrok = renderedGrok(56, voiceProducts.map((item) =>
+  Object.assign({}, item, { label: item.product === 6 ? 'Product 6 (unknown)' : item.label })));
+assertEqual(voiceGrok.entries.map((e) => e.textContent).join(','),
+  'Grok Build: 55%,Voice: 1%', 'product 6 renders as Voice with unchanged percentages');
+assert(voiceGrok.bar.getAttribute('aria-valuetext').includes('Voice 1%'),
+  'accessible product name also reads Voice');
+assertEqual(voiceGrok.fill.style.width, unnamedVoiceGrok.fill.style.width,
+  'renaming Voice does not change shared usage');
+assertEqual(voiceGrok.segments.map((s) => s.style.width).join(','),
+  unnamedVoiceGrok.segments.map((s) => s.style.width).join(','), 'renaming does not change segment widths');
+assertEqual(voiceGrok.segments.map((s) => s.style.backgroundColor).join(','),
+  unnamedVoiceGrok.segments.map((s) => s.style.backgroundColor).join(','), 'renaming does not change colors');
+assertEqual(voiceGrok.entries.map((e) => e.children[0].style.backgroundColor).join(','),
+  voiceGrok.segments.map((s) => s.style.backgroundColor).join(','), 'Voice swatch matches its unchanged segment');
+
 for (const [total, level] of [[3, 'ok'], [60, 'warn'], [90, 'danger'], [100, 'full']]) {
   const amounts = Array.from({ length: 12 }, () => total / 12);
   const many = renderedGrok(total, amounts.map((amount, index) =>

@@ -70,14 +70,41 @@ def test_parse_grok_credits_response_weekly_pool():
     assert parsed['product_usage'][0]['usage_percent'] == 12.5
 
 
-def test_export_preserves_product_code_without_inventing_name(monkeypatch):
+@pytest.mark.parametrize(('product_id', 'label'), [
+    (2, 'Grok Build'),
+    (4, 'Grok Chat'),
+    (6, 'Voice'),
+    (99, 'Product 99 (unknown)'),
+])
+def test_export_preserves_product_code_without_inventing_name(monkeypatch, product_id, label):
     import grok_usage
-    product = _key(1, 0) + _varint(2) + _float_field(2, 12.5)
+    product = _key(1, 0) + _varint(product_id) + _float_field(2, 12.5)
     body = _envelope(_len_field(1, _float_field(1, 12.5) + _len_field(7, product)))
     monkeypatch.setattr(grok_usage, 'fetch_grok_credits_config', lambda cookie: body)
     snapshot = export_grok_quota('fixture-cookie')[0]
-    assert snapshot['product_usage'] == [{'product': 2, 'label': 'Grok Build', 'usage_percent': 12.5}]
+    assert snapshot['product_usage'] == [{'product': product_id, 'label': label, 'usage_percent': 12.5}]
     assert 'tokens' not in snapshot
+
+
+@pytest.mark.parametrize('products', [
+    [],
+    [{'product': 6, 'usage_percent': 1.0}],  # Incomplete shared-pool breakdown.
+    [{'product': 6, 'usage_percent': 6.0}, {'product': 6, 'usage_percent': 6.5}],
+    [{'product': None, 'usage_percent': 12.5}],
+    [{'product': 6, 'usage_percent': float('nan')}],
+    [{'product': 6, 'usage_percent': float('inf')}],
+    [{'product': 6, 'usage_percent': -1.0}],
+])
+def test_voice_mapping_does_not_bypass_product_breakdown_guard(monkeypatch, products):
+    import grok_usage
+    monkeypatch.setattr(grok_usage, 'fetch_grok_credits_config', lambda cookie: b'fixture')
+    monkeypatch.setattr(grok_usage, 'parse_grok_credits_response', lambda body: {
+        'credit_usage_percent': 12.5, 'used_percentage': 12,
+        'period_label': 'Weekly', 'product_usage': products,
+    })
+    snapshot = export_grok_quota('fixture-cookie')[0]
+    assert snapshot['percentage'] == 12
+    assert snapshot['product_usage'] == []
 
 
 def test_parse_grok_credits_response_zero_usage_omits_percent_fields():
