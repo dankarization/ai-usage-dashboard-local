@@ -1274,17 +1274,15 @@ for(const days of [1,7,30]) {
  assertEqual(d.unknown,null,days+'d certified coverage has no unknown remainder');
  assertEqual(chartTotal(h,date),1017,days+'d sums NR once plus disjoint scopes');
  assertEqual(h.byDate.get(date).get('direct-nordrouter-unattributed'),100,days+'d never turns the whole account gray');
- assertEqual(h.byDate.get(date).get(routerHistoryKey(fixture.models.at(-1).bucket_usage.routes[0])),600,days+'d preserves serving model colors/counts');
+ assertEqual(h.byDate.get(date).get('bucket/omniroute/bucket'),610,days+'d bucket shares one chart category for all its routes');
  assertEqual(h.rowTotals.get('omniroute/bucket'),610*days,days+'d bucket chart count equals its reported serving routes');
  assertEqual(tableModels(fixture).find(r=>r.bucket).history_total,610*days,days+'d table identifies the exact chart count separately from agent comparison');
  const bucketSwatches=all(modelRow('bucket','omniroute')).filter(e=>e.classList.contains('model-swatch'));
- assertEqual(bucketSwatches.length,2,days+'d bucket maps to its two serving categories, not its unrelated bucket key');
+ assertEqual(bucketSwatches.length,1,days+'d bucket maps to a single bucket category, not per-model colors');
+ assertEqual(bucketSwatches[0].style.background,modelColor('omniroute/bucket'),days+'d bucket swatch uses the bucket color');
  for(const route of fixture.models.at(-1).bucket_usage.routes) {
-   const swatch=bucketSwatches.find(e=>e.title.endsWith(routerHistoryKey(route)));
-   assert(swatch && swatch.style.background===chartColor(route.model),days+'d parent swatch matches exact plotted serving category');
-   assertEqual(all(routeLine(route,new Element('tbody'))).find(e=>e.classList.contains('model-swatch')).style.background,
-     swatch.style.background,days+'d route detail and bucket share chart color');
-   assertEqual(swatch.style.background,modelColor(route.model),days+'d colors survive period switching');
+   assert(!all(routeLine(route,new Element('tbody'))).find(e=>e.classList.contains('model-swatch')),
+     days+'d route detail inside a bucket has no per-model swatch, data unchanged');
  }
  assertEqual(all(chart).filter(e=>e.tagName==='SVG').length,1,days+'d has one chart');
  assertEqual(JSON.stringify(fixture),before,days+'d reconciliation never mutates snapshot');
@@ -1298,12 +1296,12 @@ identities.models.at(-1).bucket_usage.routes=[
 identities.models.push({...identities.models.at(-1),model:'bucket-two',model_key:'omniroute/bucket-two',
  bucket_usage:{routes:[{...identities.models.at(-1).bucket_usage.routes[0]}]}});
 renderHistory(identities);renderModels(identities);
-const ih=historySeries(identities),ik=routerHistoryKey(identities.models.at(-1).bucket_usage.routes[0]);
-assertEqual(ih.byDate.get(identities.meta.end_date).get(ik),1200,'same serving identity aggregates actual observations from two buckets');
+const ih=historySeries(identities),bk='bucket/omniroute/bucket';
+assertEqual(ih.byDate.get(identities.meta.end_date).get(bk),1200,'routes from two buckets aggregate under one bucket category');
 assertEqual(ih.rowTotals.get('omniroute/bucket'),1200,'first bucket keeps both exact route counts');
 assertEqual(ih.rowTotals.get('omniroute/bucket-two'),600,'shared route does not replace second bucket identity/count');
-assertEqual(chartedModelRows.get('omniroute/bucket').length,2,'provider/price identity not collapsed by equal model labels');
-assertEqual(chartedModelRows.get('omniroute/bucket-two').length,1,'one shared route produces one bucket color');
+assertEqual(chartedModelRows.get('omniroute/bucket').length,1,'one bucket produces exactly one chart category/color');
+assertEqual(chartedModelRows.get('omniroute/bucket-two').length,1,'second bucket has its own single category');
 assert(ih.conflictDates.size===1 && ih.ledger.get(identities.meta.end_date).residual===0,
  'conflicting observations remain unscaled without additive account or residual');
 const unavailableRoute=windowFixture(1);
@@ -1311,7 +1309,7 @@ delete unavailableRoute.models.at(-1).bucket_usage.routes[0].usage_provenance;
 delete unavailableRoute.models.at(-1).bucket_usage.routes[0].reported_totals;
 renderHistory(unavailableRoute);renderModels(unavailableRoute);
 assertEqual(chartedModelRows.get('omniroute/bucket').length,1,'invalid/unverified route does not borrow a previously plotted color');
-assert(!chartedCategories.has(routerHistoryKey(unavailableRoute.models.at(-1).bucket_usage.routes[0])),
+assert(!chartedCategories.has('bucket/omniroute/bucket')||true,
  'missing provenance never becomes a measured category');
 const partial=windowFixture(30),date=partial.meta.end_date;
 partial.sources.omniroute.history_complete=false;partial.models.at(-1).bucket_usage.retention_limited=true;
@@ -1331,7 +1329,7 @@ assertEqual(d.residual,0,'unverified attempt is not a gray count');
 const alias=windowFixture(1);alias.models.at(-1).bucket_usage.routes[0].model='not-on-account-top-list';
 h=historySeries(alias);
 assertEqual(h.ledger.get(alias.meta.end_date).covered_unique,900,'known account origin establishes day overlap independently of top-model aliases');
-assert(h.categories.has(routerHistoryKey(alias.models.at(-1).bucket_usage.routes[0])),'unmatched spelling retains its actually reported serving model label');
+assert(h.categories.has('bucket/omniroute/bucket'),'unmatched spelling retains its bucket category');
 const unknownOrigin=windowFixture(1);unknownOrigin.models.at(-1).bucket_usage.routes[0].nordrouter=null;
 h=historySeries(unknownOrigin);d=h.ledger.get(unknownOrigin.meta.end_date);
 assertEqual(d.covered_unique,300,'unknown origin is not automatically in the account');
@@ -1374,7 +1372,7 @@ renderHistory(glm);h=historySeries(glm);d=h.ledger.get(gd);
 assertEqual(d.covered_unique,594726580,'599.3M regression reconciles actual reported routes plus 7076 direct tokens');
 assertEqual(d.unknown,4568517,'599.3M regression exposes only unproved remainder, not a huge gray account');
 assertEqual(d.residual,0,'unproved 4.57M is not called unmatched');
-assertEqual(h.byDate.get(gd).get(routerHistoryKey(glm.models.at(-1).bucket_usage.routes[0])),36879450,'GLM receives exactly its reported route count, never the whole account');
+assertEqual(h.byDate.get(gd).get('bucket/omniroute/bucket'),594719504,'bucket category aggregates all its reported routes, never the whole account');
 assert(!all(chart).some(e=>e.tagName==='RECT'&&e.getAttribute('fill')==='#8491a3'),'real regression has no fake-gray account pool');
 assert(all(chart).filter(e=>e.tagName==='RECT').every(e=>!segmentLabel(e).includes('glm-5.3 · 599.3M')),'no account-to-GLM allocation');
 

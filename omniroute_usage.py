@@ -144,6 +144,17 @@ def aggregate(body, pricing, start, end, *, status='ok', fetched_at=None, pricin
         nord = body['providers'].get(row['provider'])
         exact = price_id(row['model'], prices) if nord is True else None
         cost = route_cost(tokens, prices.get(exact)) if valid else None
+        if cost is None and valid and exact is None:
+            # No exact NordRouter tariff for this serving model: fall back to
+            # the audited MODEL_PRICING table (bare id) so router-only models
+            # still get an API-estimate price instead of unknown.
+            from pricing_config import api_pricing
+            _k, fallback = api_pricing(row['model'], row['provider'])
+            if fallback:
+                cost = route_cost(tokens, {
+                    'input_usd': fallback.get('input'), 'output_usd': fallback.get('output'),
+                    'cache_read_usd': fallback.get('cached', fallback.get('cache_read')),
+                    'cache_write_usd': fallback.get('cache_write')})
         bucket.append({'date': day,
                        'provider': row['provider'], 'model': row['model'], 'price_id': exact,
                        'route_path': row.get('route_path'), 'usage_provenance': row.get('usage_provenance'),

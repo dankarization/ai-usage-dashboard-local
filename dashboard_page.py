@@ -1042,9 +1042,14 @@ function historySeries(payload) {
     });
   });
   routerRows.forEach(function (row) {
+    // One chart category per bucket: all serving routes inside a bucket share a
+    // single bucket color and the bucket label, never per-model colors.
+    var bucketKey = 'bucket/' + rowKey(row);
+    var bucketCat = null;
     (row.bucket_usage.routes || []).forEach(function (route) {
-      var category = {key: routerHistoryKey(route), label: route.model,
-        kind: route.nordrouter === true ? 'covered' : 'router', color_key: route.model};
+      if (!bucketCat) bucketCat = {key: bucketKey, label: row.model,
+        kind: 'router', color_key: rowKey(row)};
+      var category = bucketCat;
       var dates = new Set(), slices = route.daily || [];
       var reported = reportedRouteTotals(route, route);
       var sum = slices.reduce(function (n, slice) {
@@ -1623,7 +1628,8 @@ function routeLine(route, body) {
     number(route.cost_usd) ? 'router-wide estimated' : 'unknown: ' + route.unknown_reason);
   node('span', route.nordrouter === true ? 'NordRouter' : route.provider, line.source).className = 'src';
   var name = node('span', undefined, line.model); name.className = 'src';
-  modelSwatches([chartedCategories.get(routerHistoryKey(route))].filter(Boolean), name);
+  // Serving routes inside a bucket share the bucket's single chart category,
+  // so they carry no per-model swatch (colors removed, data unchanged).
   node('span', route.model, name);
   var unverified = reported && route.totals ? route.totals.total - reported.total : (route.totals || {}).total;
   if (unverified > 0) node('span', 'unverified ' + tokens(unverified), line.model).className = 'cost-kind';

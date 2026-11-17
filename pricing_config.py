@@ -16,12 +16,22 @@ MODEL_PRICING = {
     "gpt-6.1-sol": {"input": 2.0, "output": 10.0, "cached": 0.1, "cache_write": 2.5},
     "gpt-6-sol": {"input": 2.0, "output": 10.0, "cached": 0.2, "cache_write": 2.5},
     "gpt-6-luna": {"input": 0.1, "output": 0.5, "cached": 0.01, "cache_write": 0.125},
+    # GPT-6.1 Terra (standard, verified 2026-11-18 on developers.openai.com/api/docs/pricing).
+    "gpt-6.1-terra": {"input": 2.0, "output": 10.0, "cached": 0.1, "cache_write": 2.5},
+    # GPT-6.2 Standard rates, verified 2026-11-18 (same official pricing page):
+    # 6.2-sol $2/$10, 6.2-astra $8/$40 (cached $0.10/$0.40, 30m write $2.50/$10, 12h write $5/$20).
+    "gpt-6.2-sol": {"input": 2.0, "output": 10.0, "cached": 0.1, "cache_write": 2.5},
+    "gpt-6.2-astra": {"input": 8.0, "output": 40.0, "cached": 0.4, "cache_write": 10.0},
     # GPT-5.6 promotional pricing (at least through 2026-11-21); long context >272K doubles input.
     "gpt-5.6-sol": {"input": 4.0, "cached": 0.4, "cache_write": 5.0, "output": 20.0},
     "gpt-5.6-terra": {"input": 2.0, "cached": 0.2, "cache_write": 2.5, "output": 12.0},
     "gpt-5.6-luna": {"input": 0.2, "cached": 0.02, "cache_write": 0.25, "output": 1.2},
     # GPT-6 Astra (standard); fast mode = 2x, billed per-token.
     "gpt-6-astra": {"input": 10.0, "cached": 1.0, "cache_write": 12.5, "output": 50.0},
+    # Mistral Large 4, verified 2026-11-18 on docs.mistral.ai/inference/pricing:
+    # Input $0.7, Cached input $0.07, Output $2.1 per 1M tokens.
+    "mistral-large-4": {"input": 0.7, "cached": 0.07, "output": 2.1},
+    "mistral-large-latest": {"input": 0.7, "cached": 0.07, "output": 2.1},
     "gpt-5.5": {"input": 5.0, "cached": 0.5, "output": 30.0},
     "gpt-5.4": {"input": 2.5, "cached": 0.25, "output": 15.0},
     "gpt-5.4-mini": {"input": 0.75, "cached": 0.075, "output": 4.5},
@@ -166,9 +176,8 @@ def get_pricing(model_id: str) -> Pricing | None:
     model_lower = (model_id or "").lower().strip()
     if not model_lower:
         return None
-    # Strip common provider prefixes from OpenRouter / OpenCode-style ids.
-    # ollama-cloud serves third-party models (Z.ai, DeepSeek, ...) at their
-    # official rates, so the bare model id prices correctly.
+    # OpenRouter / OpenCode-style ids; ollama-cloud serves third-party models
+    # (Z.ai, DeepSeek, ...) at their official rates, so the bare id prices right.
     if "/" in model_lower:
         prefix, remainder = model_lower.split("/", 1)
         if prefix in {"xai", "x-ai", "openrouter", "opencode", "ollama-cloud"} and remainder:
@@ -333,7 +342,9 @@ _API_PREFIXES = {'openai', 'anthropic', 'google', 'z-ai', 'zai', 'xai', 'x-ai',
 # Explicit multipliers verified in the same OpenAI pricing table. Do not infer
 # a fast price for an arbitrary model, or apply the old universal 2x rule to 5.5.
 _API_FAST_MULTIPLIERS = {'gpt-6-astra': 2, 'gpt-6.1-sol': 2, 'gpt-6-sol': 2,
-                         'gpt-6-luna': 2, 'gpt-5.6-sol': 2, 'gpt-5.6-terra': 2,
+                         'gpt-6-luna': 2, 'gpt-6.1-terra': 2, 'gpt-6.2-sol': 2,
+                         'gpt-6.2-astra': 2,
+                         'gpt-5.6-sol': 2, 'gpt-5.6-terra': 2,
                          'gpt-5.6-luna': 2, 'gpt-5.5': 2.5, 'gpt-5.4': 2,
                          'gpt-5.4-mini': 2, 'gpt-5.2': 2}
 _API_CATEGORIES = {'input': 'input', 'output': 'output',
@@ -356,6 +367,14 @@ def api_pricing(model: str, provider: str = '') -> tuple[str, Pricing | None]:
         prefix, bare = key.split('/', 1)
         if prefix in _API_PREFIXES:
             key = bare
+    # Router spellings (omniroute/..., nr-*, oai/, ...): price by bare model id,
+    # but only after exact full-key and alias lookup so vendor-prefixed rates
+    # like qwen/qwen3.8-27b keep their own OpenRouter price.
+    exact = MODEL_PRICING.get(key) or (MODEL_ALIASES.get(key) and MODEL_PRICING.get(MODEL_ALIASES[key]))
+    if exact is None and '/' in key:
+        key = key.split('/')[-1]
+    if exact is None and key.startswith('nr-'):
+        key = key[3:]
     # Hermes' -900k is a context capacity, not proof of a long-context request.
     key = re.sub(r'-\d+k$', '', key)
     key = MODEL_ALIASES.get(key, key)
