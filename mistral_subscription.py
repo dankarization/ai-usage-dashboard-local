@@ -109,14 +109,18 @@ def export_mistral_subscription(timeout: float = 30) -> list[dict[str, Any]]:
             "plan_type": plan,
             "status": "ok" if acc.get("me_status") == 200 else "unavailable",
             "fetched_at": fetched_at,
-            "windows": [],
-            "detail": {
-                "email": email, "plan": plan,
-                "payg_enabled": acc.get("payg_enabled"),
-                "vibe_payg_enabled": acc.get("vibe_payg_enabled"),
-                "workspace_id": acc.get("workspace_id"),
-                "organization_id": acc.get("organization_id"),
-            },
+            "windows": [{
+                "label": f"Plan: {plan}",
+                "used_percentage": None,
+                "status": "ok" if acc.get("me_status") == 200 else "unavailable",
+                "detail": {
+                    "email": email, "plan": plan,
+                    "payg_enabled": acc.get("payg_enabled"),
+                    "vibe_payg_enabled": acc.get("vibe_payg_enabled"),
+                    "workspace_id": acc.get("workspace_id"),
+                    "organization_id": acc.get("organization_id"),
+                },
+            }],
         })
     if not rows:
         rows.append({"provider": "mistral_subscription", "label": "Mistral subscription",
