@@ -1311,13 +1311,19 @@ function displayName(name) {
   var tail = cut < 0 ? raw : raw.slice(cut + 1);
   return head + tail.split(':')[0].replace(/-\d+k$/, '');
 }
+function bareModelId(name) {
+  // Router aliases (omniroute/…, nr-…, oai/…, openai/…) are transport-only:
+  // the table and chart label is the bare model id.
+  var s = String(name || '').split('/').pop().split(':')[0].replace(/-\d+k$/, '');
+  return s.replace(/^(?:nr-|oai-|openai-)/, '');
+}
 function preferredName(rows) {
   // The most common spelling labels the row: a vendor prefix shared by most
   // reports reads better than a bare alias that happens to be shorter.
   var counts = new Map();
   rows.forEach(function (row) {
     if (!row.model) return;
-    var name = row.bucket_comparison || row.source === 'omniroute' ? row.model : displayName(row.model);
+    var name = row.bucket_comparison || row.source === 'omniroute' ? bareModelId(row.model) : displayName(row.model);
     counts.set(name, (counts.get(name) || 0) + 1);
   });
   var names = Array.from(counts.keys());
@@ -1530,7 +1536,7 @@ function renderModels(data) {
     var modelCell = node('td', undefined, tr);
     var modelName = node('span', undefined, modelCell); modelName.className = 'model-name';
     modelSwatches(chartedModelRows.get(row.model_key), modelName);
-    node('span', row.model || '—', modelName);
+    node('span', bareModelId(row.model) || '—', modelName);
     if (row.listing === 'residual')
       node('div', 'unresolved window balance', modelCell).className = 'cost-kind';
     else if (row.exclusive_status === 'partial_retention')
@@ -1560,7 +1566,7 @@ function renderModels(data) {
           // already includes every agent, so it carries no countable token number.
           var billed = part.source === 'nordrouter';
           var kind = part.cost_kind || (billed && number(part.cost_usd) ? 'billed' : '');
-          var line = node('div', (SOURCE_LABELS[part.source] || part.source) + ' · ' + (part.model || '—') +
+          var line = node('div', (SOURCE_LABELS[part.source] || part.source) + ' · ' + bareModelId(part.model || '—') +
             ' · ' + (billed ? 'unknown' : tokens(part.tokens) + ' tok') +
             ' · ' + money(part.cost_usd) + (kind ? ' ' + kind : ''), detail);
           line.className = 'src part';
@@ -1604,9 +1610,13 @@ function renderModels(data) {
     costCell.className = 'num';
     if (row.bucket) {
       var usage = row.bucket_usage;
-      node('span', usage ? 'router-wide ' + (row.cost_kind || 'unknown') : 'router usage unavailable', costCell).className = 'cost-kind';
-      if (usage && !number(row.cost_usd) && number(usage.known_cost_usd))
-        node('span', 'known ≥ ' + money(usage.known_cost_usd), costCell).className = 'cost-kind';
+      // The agent-side estimate (overview_cost) and the retained router
+      // observation are two independent measurements of the same calls:
+      // show both, never pick one or fabricate a total.
+      var parts = [];
+      if (number(row.cost_usd)) parts.push('$' + row.cost_usd.toFixed(2) + ' agent est.');
+      if (usage && number(usage.known_cost_usd)) parts.push('known ≥ ' + money(usage.known_cost_usd) + ' router');
+      node('span', parts.length ? parts.join(' · ') : (usage ? 'router-wide ' + (row.cost_kind || 'unknown') : 'router usage unavailable'), costCell).className = 'cost-kind';
       if (usage && usage.retention_limited) node('span', 'retained history only', costCell).className = 'cost-kind';
     } else if (row.cost_kind === 'unpartitioned') {
       var unpartitioned = node('span', 'account billed unpartitioned', costCell);
@@ -1676,7 +1686,10 @@ function renderBucketDetails(row, cell, body) {
   node('div', row.token_scope + ' tokens', cell).className = 'cost-kind';
   var usage = row.bucket_usage;
   if (!usage) {
-    node('div', 'No retained router observation.', cell).className = 'src';
+    // No retained router observation, but the agent-side estimate (if any) is
+    // still real and must stay visible; never imply the usage is free.
+    var est = number(row.cost_usd) ? 'agent estimate ' + money(row.cost_usd) : null;
+    node('div', est ? 'No retained router observation · ' + est : 'No retained router observation.', cell).className = 'src';
     return;
   }
   var detail = node('details', undefined, cell);

@@ -30,7 +30,9 @@ def is_bucket(row):
 
 
 def bucket_key(model):
-    return 'omniroute/' + model.removeprefix('omniroute/')
+    # Display key is the bare model id (router aliases are transport-only).
+    from auto_usage import model_key
+    return model_key(model)
 
 
 def bounds(start, end, tz=TZ):

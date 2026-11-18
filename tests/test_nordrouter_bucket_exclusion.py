@@ -29,7 +29,7 @@ def route(model, tokens, *, nordrouter=True, date='2026-11-01', daily=True):
 
 def bucket(name, routes, *, retention_limited=False, total=None):
     return {'source': 'omniroute', 'provider': 'omniroute', 'model': name,
-            'model_key': 'omniroute/' + name,
+            'model_key': name.removeprefix('nr-'),
             'totals': {'total': total if total is not None else sum(r['totals']['total'] for r in routes)},
             'cost_usd': 7.71, 'cost_kind': 'estimated',
             'bucket_usage': {'retention_limited': retention_limited, 'routes': routes}}

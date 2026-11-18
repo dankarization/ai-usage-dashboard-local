@@ -72,7 +72,7 @@ class Element {
 
 const registry = new Map();
 ['openai-api', 'hero', 'quotas', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
- 'model-stamp', 'models', 'stamp', 'error', 'refresh', 'nr-status',
+ 'model-stamp', 'models', 'stamp', 'error', 'refresh', 'status',
  'period-30', 'period-7', 'period-1', 'overview-note', 'models-note'].forEach((id) => {
   registry.set(id, new Element('div'));
 });
@@ -161,9 +161,9 @@ const MODELS = {
   source_daily: { nordrouter: [{ date: '2026-10-03', tokens: 20, amount_usd: 15.006731 }] },
   models: [
     { source: 'nordrouter', provider: 'nordrouter', model: 'z-ai/glm-5.3', cost_usd: 0.4, totals: { total: 19 }, daily: [] },
-    { source: 'openclaw', provider: 'nordrouter', model: 'nr-route', cost_usd: 0.5, totals: { total: 21 }, daily: [{ date: '2026-10-03', total: 21 }] },
+    { source: 'openclaw', provider: 'nordrouter', model: 'route', cost_usd: 0.5, totals: { total: 21 }, daily: [{ date: '2026-10-03', total: 21 }] },
     { source: 'openclaw', provider: 'xai', model: 'grok-test', cost_usd: 0.2, totals: { total: 10 }, daily: [{ date: '2026-10-03', total: 10 }] },
-    { source: 'hermes', provider: 'nordrouter', model: 'nr-route', cost_usd: null, totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] },
+    { source: 'hermes', provider: 'nordrouter', model: 'route', cost_usd: null, totals: { total: 5 }, daily: [{ date: '2026-10-03', total: 5 }] },
     { source: 'hermes', provider: 'openai', model: 'hermes-model', cost_usd: 0.1, cost_kind: 'estimated', totals: { total: 6 }, daily: [{ date: '2026-10-03', total: 6 }] },
   ],
 };
@@ -521,9 +521,9 @@ assert(registry.get('metrics').textContent.includes('Spend today · current day'
   'today spend keeps the plain label, got: ' + registry.get('metrics').textContent);
 assert(!/provider day window|provider day bucket|independent read|provider analytics totals/.test(registry.get('metrics').textContent),
   'the card must not add basis sub-labels, got: ' + registry.get('metrics').textContent);
-assertEqual(registry.get('nr-status').textContent, '',
+assertEqual(registry.get('status').textContent, '',
   'a complete day window must not raise a partial-day note');
-assert(registry.get('today').textContent.includes('z-ai/glm-5.3'), 'top models today must render');
+assert(registry.get('today').textContent.includes('glm-5.3'), 'top models today must render');
 // Numbers stay reconciled without the removed labels: the day rows sum to the
 // provider day total, which is what the plain cells display.
 const todayRowsSum = QUOTAS.quotas.find((row) => row.provider === 'nordrouter')
@@ -556,7 +556,7 @@ assert(heroText.includes('NordRouter billed cost') && heroText.includes('$0.4000
 assert(heroText.includes('Estimated cost') && heroText.includes('$0.3000'),
   'agent estimates are summed on one line');
 assert(!heroText.includes('comparison'), 'agent NordRouter comparisons are gone from the strip');
-assert(registry.get('models').textContent.includes('z-ai/glm-5.3'), 'direct model appears in unified table');
+assert(registry.get('models').textContent.includes('glm-5.3'), 'direct model appears in unified table with bare id');
 assertEqual(registry.get('models').children.map((row) => routeName(row)).join(','),
   'nordrouter,NordRouter,xai,openai', 'one row per model, labelled by its route');
 const firstModelCell = registry.get('models').children[0].children[1];
@@ -571,7 +571,7 @@ assert(!/NordRouter .* tok ·/.test(lastPart),
   'a NordRouter line never claims a countable token figure');
 assert(registry.get('models-note').textContent.includes('direct agent usage once'),
   'table note explains why the account figure is not summed with the agents');
-assert(registry.get('week').textContent.includes('z-ai/glm-5.3'), 'selected top models use direct model window');
+assert(registry.get('week').textContent.includes('glm-5.3'), 'selected top models use direct model window');
 const chart = registry.get('history');
 let segments = all(chart).filter((e) => e.tagName === 'RECT');
 assertEqual(segments.length, 3, 'conflicting account retains reported observations, not a fabricated split or gray pool');
@@ -732,7 +732,7 @@ renderModels(mergedFixture);
 assertEqual(registry.get('models').children.length, 4, 'matched route becomes one billed row');
 const rowFor = (name) => registry.get('models').children.find((row) =>
   all(row.children[1]).some((e) => e.classList.contains('model-name') && e.textContent === name));
-const matchedRow = rowFor('z-ai/glm-5.3');
+const matchedRow = rowFor('glm-5.3');
 assertEqual(routeName(matchedRow), 'NordRouter', 'direct model source has its original label');
 assertEqual(routeName(rowFor('unmatched-route')), 'nordrouter', 'unmatched route source is unchanged');
 assertEqual(routeName(rowFor('other')), 'xai', 'other provider source is unchanged');
@@ -740,7 +740,7 @@ const struck = all(matchedRow.children[6]).filter((e) => e.tagName === 'S');
 const billedParts = all(matchedRow.children[1]).filter((e) => e.classList.contains('part'));
 assertEqual(billedParts.length, 3, 'every reporting source gets its own line');
 assertEqual(billedParts[billedParts.length - 1].textContent,
-  'NordRouter · z-ai/glm-5.3 · unknown · $2.19 billed',
+  'NordRouter · glm-5.3 · unknown · $2.19 billed',
   'the account figure is listed last and claims no token count: it already includes the agents');
 assertEqual(struck.length, 1, 'one crossed-out figure per model, not one per agent');
 assertEqual(struck[0].textContent, '876.7K', 'the crossed-out figure sums every agent report');
@@ -753,7 +753,7 @@ assertEqual(matchedRow.children[7].textContent, '$2.19billed',
   'billed USD rounds to two decimals and replaces route estimate');
 assertEqual(matchedRow.children[2].textContent, '100',
   'comparison token categories sum both agents and retain provenance');
-const directOnly = rowFor('google/gemini-3.6-flash');
+const directOnly = rowFor('gemini-3.6-flash');
 assertEqual(all(directOnly.children[6]).filter((e) => e.tagName === 'S').length, 0,
   'direct-only model has no invented agent comparison');
 assertEqual(directOnly.children[7].textContent, '$0.00billed',
@@ -785,8 +785,8 @@ renderModels({ models: [
     model_key: 'minimax-m3', totals: { total: 40 }, cost_usd: 0, daily: [] },
 ] });
 assertEqual(registry.get('models').children.length, 3, 'routing and context variants collapse into one row each');
-const flashRow = registry.get('models').children.find((row) => row.children[1].children[0].textContent.startsWith('deepseek/deepseek-v4.1-flash'));
-assertEqual(flashRow.children[1].children[0].textContent, 'deepseek/deepseek-v4.1-flash',
+const flashRow = registry.get('models').children.find((row) => row.children[1].children[0].textContent.startsWith('deepseek-v4.1-flash'));
+assertEqual(flashRow.children[1].children[0].textContent, 'deepseek-v4.1-flash',
   'the most common spelling labels the merged row');
 assertEqual(flashRow.children[6].textContent, '30150', 'both billed spellings are summed before the crossed-out agent total');
 assertEqual(flashRow.children[7].textContent, '$1.50billed', 'billed cost of both spellings is summed');
@@ -794,8 +794,8 @@ const solRow = registry.get('models').children.find((row) => row.children[1].chi
 assertEqual(solRow.children[6].textContent, '10', 'agent rows of one model are summed');
 assertEqual(solRow.children[7].textContent, '$0.10partial',
   'missing Hermes price stays unknown and cannot borrow an effective rate');
-const m3Row = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'minimax/minimax-m3');
-assertEqual(m3Row.children[1].children[0].textContent, 'minimax/minimax-m3',
+const m3Row = registry.get('models').children.find((row) => row.children[1].children[0].textContent === 'minimax-m3');
+assertEqual(m3Row.children[1].children[0].textContent, 'minimax-m3',
   'the most common spelling labels the row even when a bare alias is shorter');
 assertEqual(m3Row.children[6].textContent, '4160',
   'every spelling of one model lands in a single row: crossed-out agent total, then direct');
@@ -808,8 +808,8 @@ renderModels({ models: [
     model_key: 'gpt-6-sol', totals: { total: 5 }, cost_usd: null, daily: [] },
 ]});
 assertEqual(registry.get('models').children.map((row) => row.children[1].children[0].textContent).join(','),
-  'deepseek/deepseek-v4-flash,gpt-6-sol',
-  'routing and context suffixes never leak into the model label');
+  'deepseek-v4-flash,gpt-6-sol',
+  'router aliases and routing/context suffixes never leak into the model label');
 
 /* Source-by-source loading preserves server prices and coverage without repricing. */
 const partialState = {
@@ -913,19 +913,19 @@ assert(!code.includes('document.write'), 'dashboard script must not use document
 
 // Router bucket USD and drilldowns are observations, never account allocations.
 const ROUTER_FIXTURE = {
-  source: 'omniroute', provider: 'omniroute', model: 'nr-bucket', model_key: 'omniroute/nr-bucket',
+  source: 'omniroute', provider: 'omniroute', model: 'bucket', model_key: 'bucket',
   totals: { total: 1000 }, cost_usd: 0.75, cost_kind: 'estimated',
   daily: [{ date: '2026-10-23', total: 600, cost_usd: 0.25 }, { date: '2026-10-22', total: 400, cost_usd: 0.5 }],
   bucket_usage: { known_cost_usd: 0.75, status: 'ok', retention_limited: true, routes: [
-    { provider: 'nr-route', usage_provenance: 'reported', model: 'vendor/a:fjord', route_path: 'parent/ref:child/0', totals: { total: 400 }, cost_usd: 0.125,
+    { provider: 'route', usage_provenance: 'reported', model: 'vendor/a:fjord', route_path: 'parent/ref:child/0', totals: { total: 400 }, cost_usd: 0.125,
       daily: [{ date: '2026-10-23', totals: { total: 400 }, cost_usd: 0.125 }] },
-    { provider: 'nr-route', usage_provenance: 'reported', model: 'vendor/a:fjord', route_path: 'parent/ref:child/0@execution-uuid', totals: { total: 200 }, cost_usd: 0.125,
+    { provider: 'route', usage_provenance: 'reported', model: 'vendor/a:fjord', route_path: 'parent/ref:child/0@execution-uuid', totals: { total: 200 }, cost_usd: 0.125,
       daily: [{ date: '2026-10-23', totals: { total: 200 }, cost_usd: 0.125 }] },
-    { provider: 'nr-route', usage_provenance: 'reported', model: 'vendor/a:saga', totals: { total: 400 }, cost_usd: 0.5,
+    { provider: 'route', usage_provenance: 'reported', model: 'vendor/a:saga', totals: { total: 400 }, cost_usd: 0.5,
       daily: [{ date: '2026-10-22', totals: { total: 400 }, cost_usd: 0.5 }] },
   ] },
 };
-const bucketAgent = { source: 'openclaw', provider: 'omniroute', model: 'nr-bucket', model_key: 'omniroute/nr-bucket',
+const bucketAgent = { source: 'openclaw', provider: 'omniroute', model: 'bucket', model_key: 'bucket',
   bucket_comparison: true, overview_cost_usd: 0, cost_usd: null, totals: { total: 99 },
   daily: [{ date: '2026-10-23', total: 99 }] };
 const mixedBucketRows = [bucketAgent, ROUTER_FIXTURE,
@@ -944,12 +944,13 @@ assertEqual(partialModels({ days: 7, parts: { openclaw: { meta: {}, sources: {
 } }).sources.openclaw.estimated_cost_usd, null, 'server unknown is not replaced with a placeholder zero');
 const nordMetricsBefore = registry.get('metrics').textContent;
 renderModels({ models: mixedBucketRows });
-const bucketRendered = registry.get('models').children.find((row) => row.textContent.includes('nr-bucket'));
-assert(bucketRendered.textContent.includes('$0.75') && bucketRendered.textContent.includes('router-wide estimated'), 'bucket parent USD is rendered with scope');
+const bucketRendered = registry.get('models').children.find((row) => row.textContent.includes('bucket'));
+assert(bucketRendered.textContent.includes('$0.75') && bucketRendered.textContent.includes('agent est.'), 'bucket parent USD is rendered with its basis');
+assert(bucketRendered.textContent.includes('bucket') && !/\bnr-/.test(bucketRendered.textContent), 'bucket row shows the bare model id, not the nr- alias');
 const bucketDisclosure = all(bucketRendered.children[1]).find((item) => item.tagName === 'DETAILS');
 const detailRows = registry.get('models').children.filter((row) => row.classList.contains('bucket-detail-row'));
 assertEqual(bucketDisclosure.children[0].textContent, '2 serving models', 'bucket control contains only the model count');
-assertEqual(bucketDisclosure.children[0].getAttribute('aria-label'), 'nr-bucket: serving models', 'disclosure has a bucket-specific accessible name');
+assertEqual(bucketDisclosure.children[0].getAttribute('aria-label'), 'bucket: serving models', 'disclosure has a bucket-specific accessible name');
 assert(detailRows.every((row) => row.hidden), 'model and day rows start collapsed');
 bucketDisclosure.open = true;
 bucketDisclosure.listeners.toggle[0]();
@@ -998,8 +999,8 @@ const missingBucket = tableModels({ models: [bucketAgentNoEst] })[0];
 assert(missingBucket.cost_usd === null, 'a bucket with no real estimate stays unpriced, not free');
 const pricedAgentBucket = tableModels({ models: [{ ...bucketAgent, overview_cost_usd: 1.25 }] })[0];
 assertEqual(pricedAgentBucket.cost_usd, 1, 'an estimated bucket comparison shows its estimate (agent rows) instead of null');
-renderModels({ models: [bucketAgent] });
-assert(registry.get('models').textContent.includes('router usage unavailable'), 'missing router does not fabricate a bucket price');
+renderModels({ models: [bucketAgentNoEst] });
+assert(registry.get('models').textContent.includes('router usage unavailable'), 'missing router and no estimate does not fabricate a bucket price');
 
 /* NordRouter bucket overlap is removed from the direct family, not from the bucket. */
 historyScale = 'linear';
@@ -1010,9 +1011,9 @@ const reportedDirect = [
     model_key: 'deepseek-v4.1-flash', totals: { total: 45870232 }, cost_usd: 1.327571, daily: [] },
   { source: 'openclaw', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
     model_key: 'deepseek-v4.1-flash', totals: { total: 36500000 }, daily: [{ date: '2026-11-01', total: 36500000 }] },
-  { source: 'openclaw', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+  { source: 'openclaw', provider: 'omniroute', model: 'deepseek-41f', model_key: 'deepseek-41f',
     bucket_comparison: true, totals: { total: 651600000 }, daily: [{ date: '2026-11-01', total: 651600000 }] },
-  { source: 'omniroute', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+  { source: 'omniroute', provider: 'omniroute', model: 'deepseek-41f', model_key: 'deepseek-41f',
     totals: { total: 671329015 }, cost_usd: 7.71, cost_kind: 'estimated',
     daily: [{ date: '2026-11-01', total: 671329015 }],
     bucket_usage: { retention_limited: false, routes: [
@@ -1071,9 +1072,9 @@ const incomplete30 = {
       model_key: 'deepseek-v4.1-flash', totals: { total: 244042474 }, cost_usd: 6.74, daily: [] },
     { source: 'openclaw', provider: 'nordrouter', model: 'deepseek/deepseek-v4.1-flash',
       model_key: 'deepseek-v4.1-flash', totals: { input: 74800000, output: 2700000, cache_read: 359200000, total: 436700000 }, daily: [] },
-    { source: 'openclaw', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+    { source: 'openclaw', provider: 'omniroute', model: 'deepseek-41f', model_key: 'deepseek-41f',
       bucket_comparison: true, totals: { total: 932500000 }, daily: [] },
-    { source: 'omniroute', provider: 'omniroute', model: 'nr-deepseek-41f', model_key: 'omniroute/nr-deepseek-41f',
+    { source: 'omniroute', provider: 'omniroute', model: 'deepseek-41f', model_key: 'deepseek-41f',
       totals: { total: 925451748 }, cost_usd: 9.90, cost_kind: 'estimated',
       bucket_usage: { retention_limited: true, routes: [
         { model: 'deepseek-v4.1-flash:fjord', nordrouter: true, totals: { total: 924060625 },
@@ -1087,9 +1088,9 @@ const incomplete30 = {
       model_key: 'glm-5.3-flash', totals: { total: 239883629 }, cost_usd: 2.43, daily: [] },
     { source: 'openclaw', provider: 'nordrouter', model: 'z-ai/glm-5.3-flash',
       model_key: 'glm-5.3-flash', totals: { total: 15000000 }, daily: [] },
-    { source: 'openclaw', provider: 'omniroute', model: 'nr-glm-53-flash', model_key: 'omniroute/nr-glm-53-flash',
+    { source: 'openclaw', provider: 'omniroute', model: 'glm-53-flash', model_key: 'glm-53-flash',
       bucket_comparison: true, totals: { total: 230500000 }, daily: [] },
-    { source: 'omniroute', provider: 'omniroute', model: 'nr-glm-53-flash', model_key: 'omniroute/nr-glm-53-flash',
+    { source: 'omniroute', provider: 'omniroute', model: 'glm-53-flash', model_key: 'glm-53-flash',
       totals: { total: 230947922 }, cost_usd: 1.40, cost_kind: 'estimated',
       bucket_usage: { retention_limited: true, routes: [
         { model: 'glm-5.3-flash:fjord', nordrouter: true, totals: { total: 230775027 },
@@ -1102,10 +1103,10 @@ const incomplete30 = {
 const incompleteRows = tableModels(incomplete30);
 const deepseek30 = incompleteRows.find((row) => row.model_key === 'deepseek-v4.1-flash');
 const glm30 = incompleteRows.find((row) => row.model_key === 'glm-5.3-flash');
-const deepseekBucket = incompleteRows.find((row) => row.model === 'nr-deepseek-41f');
-const glmBucket = incompleteRows.find((row) => row.model === 'nr-glm-53-flash');
-assert(deepseekBucket && deepseekBucket.bucket, '30d still lists nr-deepseek-41f');
-assert(glmBucket && glmBucket.bucket, '30d still lists nr-glm-53-flash');
+const deepseekBucket = incompleteRows.find((row) => row.model === 'deepseek-41f');
+const glmBucket = incompleteRows.find((row) => row.model === 'glm-53-flash');
+assert(deepseekBucket && deepseekBucket.bucket, '30d still lists deepseek-41f');
+assert(glmBucket && glmBucket.bucket, '30d still lists glm-53-flash');
 assertEqual(deepseekBucket.totals.total, 932500000, '30d DeepSeek bucket keeps its own token figure');
 assertEqual(glmBucket.totals.total, 230500000, '30d GLM bucket keeps its own token figure');
 assertEqual(deepseek30.totals.total, 1241217101, '30d DeepSeek NordRouter cell is the exclusive residual');
@@ -1116,12 +1117,12 @@ assertEqual(glm30.totals.total, 320146369, '30d GLM Flash NordRouter cell is the
 assertEqual(glm30.comparison_total, null, '30d GLM cell has no combined third figure');
 assertEqual(glm30.totals.total + glmBucket.totals.total, 550646369, '30d GLM residual plus bucket is the unique total, not 551M plus 230.5M');
 renderModels(incomplete30);
-const deepseekRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek/deepseek-v4.1-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
-const glmRow = registry.get('models').children.find((row) => row.textContent.includes('z-ai/glm-5.3-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
-const deepseekBucketRow = registry.get('models').children.find((row) => row.textContent.includes('nr-deepseek-41f') && row.classList.contains('bucket-row'));
-const glmBucketRow = registry.get('models').children.find((row) => row.textContent.includes('nr-glm-53-flash') && row.classList.contains('bucket-row'));
-assert(deepseekBucketRow, 'rendered 30d keeps the nr-deepseek-41f name');
-assert(glmBucketRow, 'rendered 30d keeps the nr-glm-53-flash name');
+const deepseekRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek-v4.1-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
+const glmRow = registry.get('models').children.find((row) => row.textContent.includes('glm-5.3-flash') && !row.classList.contains('bucket-row') && !row.classList.contains('bucket-detail-row'));
+const deepseekBucketRow = registry.get('models').children.find((row) => row.textContent.includes('deepseek-41f') && row.classList.contains('bucket-row'));
+const glmBucketRow = registry.get('models').children.find((row) => row.textContent.includes('glm-53-flash') && row.classList.contains('bucket-row'));
+assert(deepseekBucketRow, 'rendered 30d keeps the deepseek-41f name');
+assert(glmBucketRow, 'rendered 30d keeps glm-53-flash name');
 assert(deepseekRow.children[6].textContent.includes('1.24B'), '30d DeepSeek token cell is the residual');
 assert(!deepseekRow.children[6].textContent.includes('2.17B'), '30d DeepSeek token cell is not the full account beside the bucket');
 assert(!deepseekRow.children[6].textContent.includes('436.7M'), '30d DeepSeek token cell does not also show the agent part');
@@ -1137,9 +1138,9 @@ function intersectionPayload(spec) {
         totals: { total: spec.account }, cost_usd: 1, daily: [] },
       { source: 'openclaw', provider: 'nordrouter', model: spec.accountModel, model_key: spec.key,
         totals: { total: spec.agent }, daily: [] },
-      { source: 'openclaw', provider: 'omniroute', model: spec.bucket, model_key: 'omniroute/' + spec.bucket,
+      { source: 'openclaw', provider: 'omniroute', model: spec.bucket, model_key: spec.bucket,
         bucket_comparison: true, totals: { total: spec.bucketTokens }, daily: [] },
-      { source: 'omniroute', provider: 'omniroute', model: spec.bucket, model_key: 'omniroute/' + spec.bucket,
+      { source: 'omniroute', provider: 'omniroute', model: spec.bucket, model_key: spec.bucket,
         totals: { total: spec.bucketTokens }, cost_usd: 0.4,
         bucket_usage: { retention_limited: spec.limited, routes: [
           { model: spec.serving, nordrouter: true, totals: { total: spec.proven },
@@ -1171,15 +1172,15 @@ function assertCoveredIntersection(label, spec) {
   assertEqual(bucket.totals.total, spec.bucketTokens, label + ' covered bucket tokens stay');
 }
 const genericFamily = {
-  key: 'widget', accountModel: 'vendor/widget', serving: 'widget', bucket: 'nr-widget',
+  key: 'widget', accountModel: 'vendor/widget', serving: 'widget', bucket: 'widget',
   account: 1000, proven: 400, agent: 250, bucketTokens: 400,
 };
 const qwenFamily = {
-  key: 'qwen3.8-max', accountModel: 'qwen/qwen3.8-max', serving: 'qwen3.8-max', bucket: 'nr-qwen',
+  key: 'qwen3.8-max', accountModel: 'qwen/qwen3.8-max', serving: 'qwen3.8-max', bucket: 'qwen',
   account: 5000000, proven: 2000000, agent: 800000, bucketTokens: 2000000,
 };
 const mimoFamily = {
-  key: 'mimo-v2.5-pro', accountModel: 'xiaomi/mimo-v2.5-pro', serving: 'mimo-v2.5-pro', bucket: 'nr-mimo',
+  key: 'mimo-v2.5-pro', accountModel: 'xiaomi/mimo-v2.5-pro', serving: 'mimo-v2.5-pro', bucket: 'mimo',
   account: 8000000, proven: 3000000, agent: 900000, bucketTokens: 3000000,
 };
 [genericFamily, qwenFamily, mimoFamily].forEach((spec) => {
@@ -1192,7 +1193,7 @@ const mixedFamilies = {
   models: [].concat(
     intersectionPayload(Object.assign({ limited: true }, qwenFamily)).models,
     intersectionPayload(Object.assign({ limited: true }, mimoFamily)).models,
-    [{ source: 'omniroute', provider: 'omniroute', model: 'nr-unmatched', model_key: 'omniroute/nr-unmatched',
+    [{ source: 'omniroute', provider: 'omniroute', model: 'unmatched', model_key: 'unmatched',
       totals: { total: 77 }, bucket_usage: { retention_limited: true, routes: [
         { model: 'not-on-the-account', nordrouter: false, totals: { total: 77 },
           daily: [{ date: '2026-10-03', totals: { total: 77 } }] },
@@ -1200,24 +1201,24 @@ const mixedFamilies = {
   ),
 };
 const mixedRows = tableModels(mixedFamilies);
-['nr-qwen', 'nr-mimo', 'nr-unmatched'].forEach((name) => {
+['qwen', 'mimo', 'unmatched'].forEach((name) => {
   assert(mixedRows.some((row) => row.model === name && row.bucket), 'every payload bucket stays listed: ' + name);
 });
 renderModels(mixedFamilies);
-const qwenCell = registry.get('models').children.find((row) => row.textContent.includes('qwen/qwen3.8-max') && !row.classList.contains('bucket-row'));
+const qwenCell = registry.get('models').children.find((row) => row.textContent.includes('qwen3.8-max') && !row.classList.contains('bucket-row'));
 assert(qwenCell.children[6].textContent.includes('3.0M'), 'qwen cell is the exclusive residual');
 assert(!qwenCell.children[6].textContent.includes('5.0M'), 'qwen cell is not the full account beside the bucket');
 assert(!qwenCell.children[6].textContent.includes('800.0K'), 'qwen cell does not also show the agent part');
-assert(registry.get('models').textContent.includes('nr-qwen'), 'rendered qwen bucket name stays');
-assert(registry.get('models').textContent.includes('nr-mimo'), 'rendered mimo bucket name stays');
-assert(registry.get('models').textContent.includes('nr-unmatched'), 'rendered unmatched bucket stays');
+assert(registry.get('models').textContent.includes('qwen'), 'rendered qwen bucket name stays');
+assert(registry.get('models').textContent.includes('mimo'), 'rendered mimo bucket name stays');
+assert(registry.get('models').textContent.includes('unmatched'), 'rendered unmatched bucket stays');
 const aliasPayload = {
   meta: { omniroute_status: 'ok' },
   source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 140 }] },
   models: [
     { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a:fjord', model_key: 'a', totals: { total: 100 }, cost_usd: 1.5 },
     { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', model_key: 'a', totals: { total: 40 }, cost_usd: 0.5 },
-    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'omniroute/one', totals: { total: 30 }, cost_usd: 0.2,
+    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'one', totals: { total: 30 }, cost_usd: 0.2,
       bucket_usage: { routes: [{ model: 'a:fjord', nordrouter: true, totals: { total: 30 }, daily: [{ date: '2026-11-01', totals: { total: 30 } }] }] } },
   ],
 };
@@ -1228,9 +1229,9 @@ const multiPayload = {
   source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 100 }] },
   models: [
     { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', model_key: 'a', totals: { total: 100 }, cost_usd: 2 },
-    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'omniroute/one', totals: { total: 60 },
+    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'one', totals: { total: 60 },
       bucket_usage: { routes: [{ model: 'a', nordrouter: true, totals: { total: 60 }, daily: [{ date: '2026-11-01', totals: { total: 60 } }] }] } },
-    { source: 'omniroute', provider: 'omniroute', model: 'two', model_key: 'omniroute/two', totals: { total: 50 },
+    { source: 'omniroute', provider: 'omniroute', model: 'two', model_key: 'two', totals: { total: 50 },
       bucket_usage: { routes: [{ model: 'a', nordrouter: true, totals: { total: 50 }, daily: [{ date: '2026-11-01', totals: { total: 50 } }] }] } },
   ],
 };
@@ -1244,7 +1245,7 @@ const otherWindow = {
   source_daily: { nordrouter: [{ date: '2026-11-01', tokens: 100 }] },
   models: [
     { source: 'nordrouter', provider: 'nordrouter', model: 'vendor/a', model_key: 'a', totals: { total: 100 }, cost_usd: 1 },
-    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'omniroute/one', totals: { total: 40 },
+    { source: 'omniroute', provider: 'omniroute', model: 'one', model_key: 'one', totals: { total: 40 },
       bucket_usage: { routes: [{ model: 'a', nordrouter: true, totals: { total: 40 }, daily: [{ date: '2026-10-01', totals: { total: 40 } }] }] } },
   ],
 };
@@ -1263,9 +1264,9 @@ function windowFixture(days) {
       {source:'openclaw',provider:'nordrouter',model:'vendor/a',totals:{total:300*days},daily:dates.map(date=>({date,total:300}))},
       {source:'openclaw',provider:'xai',model:'independent',totals:{total:5*days},daily:dates.map(date=>({date,total:5}))},
       {source:'hermes',provider:'xai',model:'independent',totals:{total:2*days},daily:dates.map(date=>({date,total:2}))},
-      {source:'openclaw',provider:'omniroute',model:'bucket',model_key:'omniroute/bucket',bucket_comparison:true,
+      {source:'openclaw',provider:'omniroute',model:'bucket',model_key:'bucket',bucket_comparison:true,
         totals:{total:590*days},daily:dates.map(date=>({date,total:590}))},
-      {source:'omniroute',provider:'omniroute',model:'bucket',model_key:'omniroute/bucket',totals:{total:610*days},
+      {source:'omniroute',provider:'omniroute',model:'bucket',model_key:'bucket',totals:{total:610*days},
         bucket_usage:{history_complete:true,retention_limited:false,routes:[route('a',true,600),route('other',false,10)]}},
     ]};
 }
@@ -1279,12 +1280,12 @@ for(const days of [1,7,30]) {
  assertEqual(d.unknown,null,days+'d certified coverage has no unknown remainder');
  assertEqual(chartTotal(h,date),1017,days+'d sums NR once plus disjoint scopes');
  assertEqual(h.byDate.get(date).get('direct-nordrouter-unattributed'),100,days+'d never turns the whole account gray');
- assertEqual(h.byDate.get(date).get('bucket/omniroute/bucket'),610,days+'d bucket shares one chart category for all its routes');
- assertEqual(h.rowTotals.get('omniroute/bucket'),610*days,days+'d bucket chart count equals its reported serving routes');
+ assertEqual(h.byDate.get(date).get('bucket/bucket'),610,days+'d bucket shares one chart category for all its routes');
+ assertEqual(h.rowTotals.get('bucket'),610*days,days+'d bucket chart count equals its reported serving routes');
  assertEqual(tableModels(fixture).find(r=>r.bucket).history_total,610*days,days+'d table identifies the exact chart count separately from agent comparison');
  const bucketSwatches=all(modelRow('bucket','omniroute')).filter(e=>e.classList.contains('model-swatch'));
  assertEqual(bucketSwatches.length,1,days+'d bucket maps to a single bucket category, not per-model colors');
- assertEqual(bucketSwatches[0].style.background,modelColor('omniroute/bucket'),days+'d bucket swatch uses the bucket color');
+ assertEqual(bucketSwatches[0].style.background,modelColor('bucket'),days+'d bucket swatch uses the bucket color');
  for(const route of fixture.models.at(-1).bucket_usage.routes) {
    assert(!all(routeLine(route,new Element('tbody'))).find(e=>e.classList.contains('model-swatch')),
      days+'d route detail inside a bucket has no per-model swatch, data unchanged');
@@ -1298,23 +1299,23 @@ identities.models.at(-1).bucket_usage.routes=[
  {...originalRoute,model:'a:variant',price_id:'price-one'},
  {...originalRoute,model:'a:variant',provider:'other-provider',price_id:'price-two'}
 ];
-identities.models.push({...identities.models.at(-1),model:'bucket-two',model_key:'omniroute/bucket-two',
+identities.models.push({...identities.models.at(-1),model:'bucket-two',model_key:'bucket-two',
  bucket_usage:{routes:[{...identities.models.at(-1).bucket_usage.routes[0]}]}});
 renderHistory(identities);renderModels(identities);
-const ih=historySeries(identities),bk='bucket/omniroute/bucket';
+const ih=historySeries(identities),bk='bucket/bucket';
 assertEqual(ih.byDate.get(identities.meta.end_date).get(bk),1200,'routes from two buckets aggregate under one bucket category');
-assertEqual(ih.rowTotals.get('omniroute/bucket'),1200,'first bucket keeps both exact route counts');
-assertEqual(ih.rowTotals.get('omniroute/bucket-two'),600,'shared route does not replace second bucket identity/count');
-assertEqual(chartedModelRows.get('omniroute/bucket').length,1,'one bucket produces exactly one chart category/color');
-assertEqual(chartedModelRows.get('omniroute/bucket-two').length,1,'second bucket has its own single category');
+assertEqual(ih.rowTotals.get('bucket'),1200,'first bucket keeps both exact route counts');
+assertEqual(ih.rowTotals.get('bucket-two'),600,'shared route does not replace second bucket identity/count');
+assertEqual(chartedModelRows.get('bucket').length,1,'one bucket produces exactly one chart category/color');
+assertEqual(chartedModelRows.get('bucket-two').length,1,'second bucket has its own single category');
 assert(ih.conflictDates.size===1 && ih.ledger.get(identities.meta.end_date).residual===0,
  'conflicting observations remain unscaled without additive account or residual');
 const unavailableRoute=windowFixture(1);
 delete unavailableRoute.models.at(-1).bucket_usage.routes[0].usage_provenance;
 delete unavailableRoute.models.at(-1).bucket_usage.routes[0].reported_totals;
 renderHistory(unavailableRoute);renderModels(unavailableRoute);
-assertEqual(chartedModelRows.get('omniroute/bucket').length,1,'invalid/unverified route does not borrow a previously plotted color');
-assert(!chartedCategories.has('bucket/omniroute/bucket')||true,
+assertEqual(chartedModelRows.get('bucket').length,1,'invalid/unverified route does not borrow a previously plotted color');
+assert(!chartedCategories.has('bucket/bucket')||true,
  'missing provenance never becomes a measured category');
 const partial=windowFixture(30),date=partial.meta.end_date;
 partial.sources.omniroute.history_complete=false;partial.models.at(-1).bucket_usage.retention_limited=true;
@@ -1334,7 +1335,7 @@ assertEqual(d.residual,0,'unverified attempt is not a gray count');
 const alias=windowFixture(1);alias.models.at(-1).bucket_usage.routes[0].model='not-on-account-top-list';
 h=historySeries(alias);
 assertEqual(h.ledger.get(alias.meta.end_date).covered_unique,900,'known account origin establishes day overlap independently of top-model aliases');
-assert(h.categories.has('bucket/omniroute/bucket'),'unmatched spelling retains its bucket category');
+assert(h.categories.has('bucket/bucket'),'unmatched spelling retains its bucket category');
 const unknownOrigin=windowFixture(1);unknownOrigin.models.at(-1).bucket_usage.routes[0].nordrouter=null;
 h=historySeries(unknownOrigin);d=h.ledger.get(unknownOrigin.meta.end_date);
 assertEqual(d.covered_unique,300,'unknown origin is not automatically in the account');
@@ -1377,7 +1378,7 @@ renderHistory(glm);h=historySeries(glm);d=h.ledger.get(gd);
 assertEqual(d.covered_unique,594726580,'599.3M regression reconciles actual reported routes plus 7076 direct tokens');
 assertEqual(d.unknown,4568517,'599.3M regression exposes only unproved remainder, not a huge gray account');
 assertEqual(d.residual,0,'unproved 4.57M is not called unmatched');
-assertEqual(h.byDate.get(gd).get('bucket/omniroute/bucket'),594719504,'bucket category aggregates all its reported routes, never the whole account');
+assertEqual(h.byDate.get(gd).get('bucket/bucket'),594719504,'bucket category aggregates all its reported routes, never the whole account');
 assert(!all(chart).some(e=>e.tagName==='RECT'&&e.getAttribute('fill')==='#8491a3'),'real regression has no fake-gray account pool');
 assert(all(chart).filter(e=>e.tagName==='RECT').every(e=>!segmentLabel(e).includes('glm-5.3 · 599.3M')),'no account-to-GLM allocation');
 

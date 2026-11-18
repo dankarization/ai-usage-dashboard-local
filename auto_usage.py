@@ -2849,8 +2849,11 @@ def model_key(model: str) -> str:
     the provider (``z-ai/``), and context-window variants carry a ``-900k``
     suffix. Those are the same underlying model, so the dashboard shows one row
     with the summed tokens instead of one row per spelling.
+    Router aliases (``omniroute/``, ``nr-``, ``oai/``, ``openai/`` ...) are pure
+    transport prefixes: the display name is the bare model id.
     """
     base = (model or '').split(':', 1)[0].split('/')[-1].strip().lower()
+    base = re.sub(r'^(?:nr-|oai-|openai-)', '', base)
     return MODEL_KEY_SUFFIX.sub('', base)
 
 
