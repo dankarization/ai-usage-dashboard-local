@@ -998,7 +998,7 @@ const bucketAgentNoEst = { ...bucketAgent, overview_cost_usd: null };
 const missingBucket = tableModels({ models: [bucketAgentNoEst] })[0];
 assert(missingBucket.cost_usd === null, 'a bucket with no real estimate stays unpriced, not free');
 const pricedAgentBucket = tableModels({ models: [{ ...bucketAgent, overview_cost_usd: 1.25 }] })[0];
-assertEqual(pricedAgentBucket.cost_usd, 1, 'an estimated bucket comparison shows its estimate (agent rows) instead of null');
+assertEqual(pricedAgentBucket.cost_usd, 1.25, 'an estimated bucket comparison shows its single estimate instead of null or a doubled sum');
 renderModels({ models: [bucketAgentNoEst] });
 assert(!/\$\d/.test(registry.get('models').textContent), 'missing router and no estimate does not fabricate a bucket price');
 

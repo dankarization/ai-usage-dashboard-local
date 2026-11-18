@@ -1431,7 +1431,10 @@ function tableModels(data) {
         cost = observation.cost_usd;
         costKind = observation.cost_kind || 'estimated';
       } else {
-        cost = agents.reduce(function (sum, r) { return sum + (number(r.overview_cost_usd) || 0); }, 0) || null;
+        // Price = agent tokens x tariff (the single estimate), never a sum of
+        // duplicate rows that share one model_key.
+        var estRow = agents.find(function (r) { return number(r.overview_cost_usd); }) || agents[0];
+        cost = estRow ? (number(estRow.overview_cost_usd) ? estRow.overview_cost_usd : estRow.cost_usd) : null;
         costKind = number(cost) ? 'estimated' : 'unknown';
       }
     }
@@ -1493,13 +1496,16 @@ function syncModelSortHeaders() {
   });
 }
 function modelSwatches(categories, parent) {
+  var made = 0;
   (categories || []).forEach(function (category) {
     var swatch = node('span', undefined, parent); swatch.className = 'model-swatch';
     swatch.style.background = category.color;
     // A bucket can contain several exact serving routes, not one bucket model.
     swatch.title = category.label + ' · ' + category.key;
     swatch.setAttribute('aria-hidden', 'true');
+    made++;
   });
+  return made;
 }
 function renderModels(data) {
   lastModelsData = data;
@@ -1534,7 +1540,11 @@ function renderModels(data) {
     node('span', row.source === 'nordrouter' ? 'NordRouter' : row.provider || 'unknown', srcCell).className = 'src';
     var modelCell = node('td', undefined, tr);
     var modelName = node('span', undefined, modelCell); modelName.className = 'model-name';
-    modelSwatches(chartedModelRows.get(row.model_key), modelName);
+    if (modelSwatches(chartedModelRows.get(row.model_key), modelName) === 0) {
+      // Every row gets a stable color even if it is not on the chart: same
+      // modelColor() fallback as the chart, never a missing swatch.
+      modelSwatches([{ color: modelColor(row.model_key || row.model || 'unknown'), label: row.model, key: row.model_key }], modelName);
+    }
     node('span', bareModelId(row.model) || '—', modelName);
     if (row.listing === 'residual')
       node('div', 'unresolved window balance', modelCell).className = 'cost-kind';
