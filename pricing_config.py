@@ -16,8 +16,9 @@ MODEL_PRICING = {
     "gpt-6.1-sol": {"input": 2.0, "output": 10.0, "cached": 0.1, "cache_write": 2.5},
     "gpt-6-sol": {"input": 2.0, "output": 10.0, "cached": 0.2, "cache_write": 2.5},
     "gpt-6-luna": {"input": 0.1, "output": 0.5, "cached": 0.01, "cache_write": 0.125},
-    # GPT-6.1 Terra (standard, verified 2026-11-18 on developers.openai.com/api/docs/pricing).
-    "gpt-6.1-terra": {"input": 2.0, "output": 10.0, "cached": 0.1, "cache_write": 2.5},
+    # GPT-6.1 Terra (verified 2026-11-18 on openai.com marketing pricing page:
+    # Input $1.00, Cached $0.05, Cache writes $1.25, Output $5.00 per 1M tokens).
+    "gpt-6.1-terra": {"input": 1.0, "output": 5.0, "cached": 0.05, "cache_write": 1.25},
     # GPT-6.2 Standard rates, verified 2026-11-18 (same official pricing page):
     # 6.2-sol $2/$10, 6.2-astra $8/$40 (cached $0.10/$0.40, 30m write $2.50/$10, 12h write $5/$20).
     "gpt-6.2-sol": {"input": 2.0, "output": 10.0, "cached": 0.1, "cache_write": 2.5},
