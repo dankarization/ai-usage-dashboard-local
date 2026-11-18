@@ -1266,6 +1266,8 @@ function windowFixture(days) {
       {source:'hermes',provider:'xai',model:'independent',totals:{total:2*days},daily:dates.map(date=>({date,total:2}))},
       {source:'openclaw',provider:'omniroute',model:'bucket',model_key:'bucket',bucket_comparison:true,
         totals:{total:590*days},daily:dates.map(date=>({date,total:590}))},
+      {source:'openclaw',provider:'omniroute',model:'mistral-large-4',model_key:'mistral-large-4',bucket_comparison:true,
+        totals:{total:700*days},daily:dates.map(date=>({date,total:700}))},
       {source:'omniroute',provider:'omniroute',model:'bucket',model_key:'bucket',totals:{total:610*days},
         bucket_usage:{history_complete:true,retention_limited:false,routes:[route('a',true,600),route('other',false,10)]}},
     ]};
@@ -1278,7 +1280,9 @@ for(const days of [1,7,30]) {
  assertEqual(d.covered_unique,900,days+'d router plus direct agents cover only measured tokens');
  assertEqual(d.residual,100,days+'d gray is only certified unmatched difference');
  assertEqual(d.unknown,null,days+'d certified coverage has no unknown remainder');
- assertEqual(chartTotal(h,date),1017,days+'d sums NR once plus disjoint scopes');
+ assertEqual(chartTotal(h,date),1717,days+'d sums NR once plus disjoint scopes (incl. bucket-less agent model)');
+ assertEqual(h.byDate.get(date).get('mistral-large-4'),700,days+'d bucket-less omniroute agent model stays on the chart in account mode');
+ assertEqual(chartedModelRows.get('mistral-large-4').length,1,days+'d mistral-large-4 gets its own chart category');
  assertEqual(h.byDate.get(date).get('direct-nordrouter-unattributed'),100,days+'d never turns the whole account gray');
  assertEqual(h.byDate.get(date).get('bucket/bucket'),610,days+'d bucket shares one chart category for all its routes');
  assertEqual(h.rowTotals.get('bucket'),610*days,days+'d bucket chart count equals its reported serving routes');
@@ -1322,7 +1326,7 @@ partial.sources.omniroute.history_complete=false;partial.models.at(-1).bucket_us
 let h=historySeries(partial),d=h.ledger.get(date);
 assertEqual(d.residual,0,'partial retained history cannot establish unmatched traffic');
 assertEqual(d.unknown,100,'partial retention leaves numeric remainder unresolved');
-assertEqual(chartTotal(h,date),917,'partial history retains all actually measured colors without inventing residual');
+assertEqual(chartTotal(h,date),1617,'partial history retains all actually measured colors without inventing residual');
 assertEqual(h.byDate.get(date).get('direct-nordrouter-unattributed'),undefined,'no gray for unknown coverage');
 const estimated=windowFixture(1),rt=estimated.models.at(-1).bucket_usage.routes[0];
 rt.usage_provenance='mixed';rt.totals.total=900;rt.reported_totals.total=600;
@@ -1345,7 +1349,7 @@ const conflict=windowFixture(1);conflict.source_daily.nordrouter[0].tokens=100;
 h=historySeries(conflict);d=h.ledger.get(conflict.meta.end_date);
 assertEqual(d.covered_unique,0,'conflict cannot be resolved by arbitrary caps or proportional shares');
 assertEqual(d.unknown,100,'contradictory account remains unresolved');
-assertEqual(chartTotal(h,conflict.meta.end_date),917,'conflict retains exact serving/direct observations without account addition');
+assertEqual(chartTotal(h,conflict.meta.end_date),1617,'conflict retains exact serving/direct observations without account addition');
 renderHistory(conflict);renderModels(conflict);renderHero(conflict);
 assert(registry.get('history').textContent.includes('Measured values shown unchanged; account not added.'),
   'account conflict is explained beside the chart');
@@ -1356,7 +1360,7 @@ assert(registry.get('hero').textContent.includes('observed subtotal · account c
   'hero does not promote conflicting observations to canonical total');
 const missing=windowFixture(1);missing.source_daily.nordrouter=[];
 h=historySeries(missing);assertEqual(h.ledger.get(missing.meta.end_date).account,null,'missing account never becomes zero');
-assertEqual(chartTotal(h,missing.meta.end_date),917,'account outage retains reported measurements without adding agent bucket comparisons');
+assertEqual(chartTotal(h,missing.meta.end_date),1617,'account outage retains reported measurements without adding agent bucket comparisons');
 const duplicate=windowFixture(1);duplicate.source_daily.nordrouter.push({...duplicate.source_daily.nordrouter[0]});
 h=historySeries(duplicate);assertEqual(h.ledger.get(duplicate.meta.end_date).account,null,'duplicate account day is unavailable, never double');
 assertEqual(h.ledger.get(duplicate.meta.end_date).residual,0,'duplicate account day cannot establish unmatched residual');

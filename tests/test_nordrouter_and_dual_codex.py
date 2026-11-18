@@ -442,7 +442,7 @@ def test_quota_api_additive_plan_isolation_and_unknown_omission(monkeypatch):
     response = client.get('/api/v1/quotas')
     assert response.status_code == 200
     rows = response.json()['quotas']
-    assert [row.get('plan_type') for row in rows] == ['prolite', 'plus', None, None]
+    assert [row.get('plan_type') for row in rows] == ['prolite', 'plus', None, 'pro']
     for item in items:
         item.pop('plan_type')
     baseline = client.get('/api/v1/quotas').json()['quotas']

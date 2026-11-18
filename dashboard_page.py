@@ -1057,8 +1057,12 @@ function historySeries(payload) {
     var key = rowKey(row), nord = String(row.provider).toLowerCase() === 'nordrouter';
     var bucket = row.bucket_comparison || String(row.provider).toLowerCase() === 'omniroute';
     // A router-wide serving record already contains OpenClaw/Hermes samples.
-    // With an account present, an unobserved bucket has unknown origin/retention.
-    if (bucket && (knownBuckets.has(key) || accountMode)) return;
+    // Skip only when this model actually has an observed router bucket; with an
+    // account present, an unobserved bucket has unknown origin/retention, but a
+    // bucket-less model (e.g. mistral-large-4 via omniroute) is an independent
+    // agent observation and must stay on the chart.
+    if (bucket && knownBuckets.has(key)) return;
+    if (bucket && accountMode && !row.bucket_comparison) return;
     if (!nord && accountFamilies.has(key)) key = 'agent/' + key;
     var category = {key: key, label: displayName(row.model), kind: nord ? 'covered' : 'agent', color_key: row.model};
     var dates = new Set(), repeated = new Set();
