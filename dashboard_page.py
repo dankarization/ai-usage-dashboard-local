@@ -1334,7 +1334,9 @@ function money(value) {
 function effectiveCost(row) {
   // Costs are priced on the server from disjoint token categories. A partial
   // native rate must never price another source or a missing category.
-  if (row.bucket_comparison) return null;
+  // bucket_comparison rows carry their estimate in overview_cost_usd (the
+  // comparison is non-additive, but the estimate itself is real and shown).
+  if (row.bucket_comparison) return number(row.overview_cost_usd) && row.overview_cost_usd > 0 ? row.overview_cost_usd : null;
   return number(row.cost_usd) ? row.cost_usd : null;
 }
 function tableModels(data) {
@@ -1417,8 +1419,16 @@ function tableModels(data) {
       exclusiveStatus = 'unavailable';
     }
     if (bucket) {
-      cost = observation ? observation.cost_usd : null;
-      costKind = observation ? observation.cost_kind : 'unknown';
+      // Agent bucket rows are non-additive comparisons: their estimate lives in
+      // overview_cost_usd, but when no router observation exists it is the only
+      // real price, so show it instead of null.
+      if (!observation && agents.some(function (r) { return number(r.overview_cost_usd); })) {
+        cost = agents.reduce(function (sum, r) { return sum + (number(r.overview_cost_usd) || 0); }, 0) || null;
+        costKind = 'estimated';
+      } else {
+        cost = observation ? observation.cost_usd : null;
+        costKind = observation ? observation.cost_kind : 'unknown';
+      }
     }
     return {
       model: preferredName(rows), model_key: entry[0],
@@ -1440,7 +1450,7 @@ function tableModels(data) {
         var value = effectiveCost(row);
         return { source: row.source, provider: row.provider, model: row.model,
                  tokens: (row.totals && row.totals.total) || 0, cost_usd: value,
-                 cost_kind: number(row.cost_usd) ? row.cost_kind : (number(value) ? 'derived' : null) };
+                 cost_kind: number(row.overview_cost_usd) ? row.overview_cost_kind : (number(row.cost_usd) ? row.cost_kind : (number(value) ? 'derived' : null)) };
       }).sort(function (a, b) {
         // NordRouter bills every agent, so its token count already contains these
         // lines: it can never be added to them. Keep it last, agents first.

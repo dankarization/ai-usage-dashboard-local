@@ -936,7 +936,9 @@ assertEqual(parentBucket.totals.total, 99, 'router counts do not replace agent b
 assertEqual(parentBucket.cost_usd, 0.75, 'parent USD equals its serving route USD, not whole account USD');
 assertEqual(parentBucket.token_scope, 'agent-reported', 'agent token provenance is explicit');
 assertEqual(bucketTable.find((row) => row.source === 'nordrouter').totals.total, 5000, 'mixed direct NR account row stays separate');
-assertEqual(effectiveCost(bucketAgent), null, 'comparison bucket never adds router-wide dollars');
+assertEqual(effectiveCost(bucketAgent), null, 'comparison bucket without a real estimate yields no dollar (never router-wide dollars)');
+const pricedBucketAgent = { ...bucketAgent, overview_cost_usd: 1.25 };
+assertEqual(effectiveCost(pricedBucketAgent), 1.25, 'priced bucket comparison exposes its estimate via overview_cost_usd');
 assertEqual(partialModels({ days: 7, parts: { openclaw: { meta: {}, sources: {
   openclaw: { estimated_cost_usd: null, unpriced_models: 1 } }, models: [bucketAgent] }
 } }).sources.openclaw.estimated_cost_usd, null, 'server unknown is not replaced with a placeholder zero');
@@ -991,8 +993,11 @@ assert(partialBucket.children[7].textContent.includes('known ≥ $0.75'), 'known
 renderModels({ models: [{ ...ROUTER_FIXTURE, cost_usd: 0 }] });
 const zeroBucket = registry.get('models').children.find((row) => row.classList.contains('bucket-row'));
 assert(zeroBucket.children[7].textContent.startsWith('$0.00'), 'a real zero price remains visible on the right');
-const missingBucket = tableModels({ models: [bucketAgent] })[0];
-assert(missingBucket.cost_usd === null, 'Gateway zero cost table is not free bucket usage');
+const bucketAgentNoEst = { ...bucketAgent, overview_cost_usd: null };
+const missingBucket = tableModels({ models: [bucketAgentNoEst] })[0];
+assert(missingBucket.cost_usd === null, 'a bucket with no real estimate stays unpriced, not free');
+const pricedAgentBucket = tableModels({ models: [{ ...bucketAgent, overview_cost_usd: 1.25 }] })[0];
+assertEqual(pricedAgentBucket.cost_usd, 1, 'an estimated bucket comparison shows its estimate (agent rows) instead of null');
 renderModels({ models: [bucketAgent] });
 assert(registry.get('models').textContent.includes('router usage unavailable'), 'missing router does not fabricate a bucket price');
 
