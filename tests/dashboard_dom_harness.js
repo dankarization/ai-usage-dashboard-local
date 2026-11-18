@@ -945,7 +945,7 @@ assertEqual(partialModels({ days: 7, parts: { openclaw: { meta: {}, sources: {
 const nordMetricsBefore = registry.get('metrics').textContent;
 renderModels({ models: mixedBucketRows });
 const bucketRendered = registry.get('models').children.find((row) => row.textContent.includes('bucket'));
-assert(bucketRendered.textContent.includes('$0.75') && bucketRendered.textContent.includes('agent est.'), 'bucket parent USD is rendered with its basis');
+assert(bucketRendered.textContent.includes('$0.75') && bucketRendered.textContent.includes('estimated'), 'bucket parent USD is rendered with the approved estimated basis');
 assert(bucketRendered.textContent.includes('bucket') && !/\bnr-/.test(bucketRendered.textContent), 'bucket row shows the bare model id, not the nr- alias');
 const bucketDisclosure = all(bucketRendered.children[1]).find((item) => item.tagName === 'DETAILS');
 const detailRows = registry.get('models').children.filter((row) => row.classList.contains('bucket-detail-row'));
@@ -990,7 +990,7 @@ assertEqual(registry.get('metrics').textContent, nordMetricsBefore, 'NordRouter 
 renderModels({ models: [bucketAgent, { ...ROUTER_FIXTURE, cost_usd: null }] });
 const partialBucket = registry.get('models').children.find((row) => row.classList.contains('bucket-row'));
 assert(!/\$|USD|unknown|estimate/.test(partialBucket.children[1].textContent), 'unknown and partial USD never leak into the left label');
-assert(partialBucket.children[7].textContent.includes('known ≥ $0.75'), 'known subtotal stays in the right USD cell');
+assert(!/known|agent est|router/.test(partialBucket.children[7].textContent), 'no invented dual-price sublabels in the USD cell');
 renderModels({ models: [{ ...ROUTER_FIXTURE, cost_usd: 0 }] });
 const zeroBucket = registry.get('models').children.find((row) => row.classList.contains('bucket-row'));
 assert(zeroBucket.children[7].textContent.startsWith('$0.00'), 'a real zero price remains visible on the right');
@@ -1000,7 +1000,7 @@ assert(missingBucket.cost_usd === null, 'a bucket with no real estimate stays un
 const pricedAgentBucket = tableModels({ models: [{ ...bucketAgent, overview_cost_usd: 1.25 }] })[0];
 assertEqual(pricedAgentBucket.cost_usd, 1, 'an estimated bucket comparison shows its estimate (agent rows) instead of null');
 renderModels({ models: [bucketAgentNoEst] });
-assert(registry.get('models').textContent.includes('router usage unavailable'), 'missing router and no estimate does not fabricate a bucket price');
+assert(!/\$\d/.test(registry.get('models').textContent), 'missing router and no estimate does not fabricate a bucket price');
 
 /* NordRouter bucket overlap is removed from the direct family, not from the bucket. */
 historyScale = 'linear';

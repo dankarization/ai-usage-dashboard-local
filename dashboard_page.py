@@ -1425,15 +1425,14 @@ function tableModels(data) {
       exclusiveStatus = 'unavailable';
     }
     if (bucket) {
-      // Agent bucket rows are non-additive comparisons: their estimate lives in
-      // overview_cost_usd, but when no router observation exists it is the only
-      // real price, so show it instead of null.
-      if (!observation && agents.some(function (r) { return number(r.overview_cost_usd); })) {
-        cost = agents.reduce(function (sum, r) { return sum + (number(r.overview_cost_usd) || 0); }, 0) || null;
-        costKind = 'estimated';
+      // One number, one approved label: price = tokens × tariff, shown as
+      // "estimated". Router observation cost is the same estimate when present.
+      if (observation && number(observation.cost_usd)) {
+        cost = observation.cost_usd;
+        costKind = observation.cost_kind || 'estimated';
       } else {
-        cost = observation ? observation.cost_usd : null;
-        costKind = observation ? observation.cost_kind : 'unknown';
+        cost = agents.reduce(function (sum, r) { return sum + (number(r.overview_cost_usd) || 0); }, 0) || null;
+        costKind = number(cost) ? 'estimated' : 'unknown';
       }
     }
     return {
@@ -1597,11 +1596,6 @@ function renderModels(data) {
     } else {
       node('span', tokens(total), tokCell);
     }
-    if ((row.bucket || row.source === 'nordrouter') && number(row.history_total)) {
-      var historyCount = node('span', 'history ' + tokens(row.history_total), tokCell);
-      historyCount.className = 'cost-kind';
-      historyCount.title = 'Exact reported model-day tokens in the chart; account-window balances and agent/router comparisons are not extra consumption';
-    }
     if (total && top > 0) {
       var mini = node('div', undefined, tokCell); mini.className = 'bar-mini';
       node('i', undefined, mini).style.width = Math.max(2, Math.round((total / top) * 100)) + '%';
@@ -1609,15 +1603,9 @@ function renderModels(data) {
     var costCell = node('td', number(row.cost_usd) ? '$' + row.cost_usd.toFixed(2) : '—', tr);
     costCell.className = 'num';
     if (row.bucket) {
-      var usage = row.bucket_usage;
-      // The agent-side estimate (overview_cost) and the retained router
-      // observation are two independent measurements of the same calls:
-      // show both, never pick one or fabricate a total.
-      var parts = [];
-      if (number(row.cost_usd)) parts.push('$' + row.cost_usd.toFixed(2) + ' agent est.');
-      if (usage && number(usage.known_cost_usd)) parts.push('known ≥ ' + money(usage.known_cost_usd) + ' router');
-      node('span', parts.length ? parts.join(' · ') : (usage ? 'router-wide ' + (row.cost_kind || 'unknown') : 'router usage unavailable'), costCell).className = 'cost-kind';
-      if (usage && usage.retention_limited) node('span', 'retained history only', costCell).className = 'cost-kind';
+      // Approved single label for a computed price.
+      if (number(row.cost_usd)) node('span', 'estimated', costCell).className = 'cost-kind';
+      if (row.bucket_usage && row.bucket_usage.retention_limited) node('span', 'retained history only', costCell).className = 'cost-kind';
     } else if (row.cost_kind === 'unpartitioned') {
       var unpartitioned = node('span', 'account billed unpartitioned', costCell);
       unpartitioned.className = 'cost-kind';
@@ -1686,10 +1674,7 @@ function renderBucketDetails(row, cell, body) {
   node('div', row.token_scope + ' tokens', cell).className = 'cost-kind';
   var usage = row.bucket_usage;
   if (!usage) {
-    // No retained router observation, but the agent-side estimate (if any) is
-    // still real and must stay visible; never imply the usage is free.
-    var est = number(row.cost_usd) ? 'agent estimate ' + money(row.cost_usd) : null;
-    node('div', est ? 'No retained router observation · ' + est : 'No retained router observation.', cell).className = 'src';
+    node('div', 'No retained router observation.', cell).className = 'src';
     return;
   }
   var detail = node('details', undefined, cell);
