@@ -1605,26 +1605,25 @@ function renderModels(data) {
       node('div', 'bucket overlap unavailable', modelCell).className = 'cost-kind';
     var daily = row.daily || [];
     var parts = row.contributors || [];
-    if (!row.bucket && (daily.length || parts.length > 1)) {
+    var routeLines = routeBreakdown(parts);
+    if (!row.bucket && (daily.length || routeLines.length > 1)) {
       var detail = node('details', undefined, modelCell);
-      node('summary', daily.length ? daily.length + ' daily rows' : parts.length + ' sources', detail);
+      node('summary', daily.length ? daily.length + ' daily rows' : routeLines.length + ' sources', detail);
       daily.forEach(function (day) {
         node('div', dateOnly(day.date) + ' · ' + tokens(day.total) + ' tokens', detail).className = 'src';
       });
-      if (parts.length > 1) {
-        parts.forEach(function (part) {
-          // Who reported this model, with their own tokens and USD, so the summed
-          // figure on the right can be checked line by line. The NordRouter figure
-          // already includes every agent, so it carries no countable token number.
-          var billed = part.source === 'nordrouter';
-          var kind = part.cost_kind || (billed && number(part.cost_usd) ? 'billed' : '');
-          var line = node('div', (SOURCE_LABELS[part.source] || part.source) + ' · ' + bareModelId(part.model || '—') +
-            ' · ' + (billed ? 'unknown' : tokens(part.tokens) + ' tok') +
-            ' · ' + money(part.cost_usd) + (kind ? ' ' + kind : ''), detail);
-          line.className = 'src part';
-          if (billed) line.title = 'NordRouter bills every agent, so this figure already includes the agent lines';
-        });
-      }
+      // Who reported this model, per distinct route (provider), with its own
+      // tokens and USD, so the summed figure on the right stays checkable.
+      routeLines.forEach(function (agg) {
+        var part = agg.part;
+        var billed = part.source === 'nordrouter';
+        var kind = part.cost_kind || (billed && number(agg.cost) ? 'billed' : '');
+        var line = node('div', partLabel(part) +
+          ' · ' + (billed ? 'unknown' : tokens(agg.tokens) + ' tok') +
+          ' · ' + money(number(agg.cost) ? agg.cost : part.cost_usd) + (kind ? ' ' + kind : ''), detail);
+        line.className = 'src part';
+        if (billed) line.title = 'NordRouter bills every agent, so this figure already includes the agent lines';
+      });
     }
     var comparedTotals = row.comparison_categories || row.totals || {};
     ['input', 'output', 'cache_read', 'cache_write'].forEach(function (field) {
@@ -1723,10 +1722,41 @@ function servingModels(routes, date) {
   });
   return Array.from(grouped.values());
 }
+function routeBreakdown(parts) {
+  // Aggregate contributor rows by distinct route (source + provider) so one
+  // provider reporting the same model twice never double-counts in the split.
+  var byRoute = new Map();
+  (parts || []).forEach(function (part) {
+    var rk = (part.source || '') + '|' + (part.provider || '');
+    if (!byRoute.has(rk)) byRoute.set(rk, { part: part, tokens: 0, cost: 0 });
+    var agg = byRoute.get(rk);
+    agg.tokens += number(part.tokens) ? part.tokens : 0;
+    if (number(part.cost_usd)) agg.cost += part.cost_usd;
+  });
+  return Array.from(byRoute.values());
+}
+function partLabel(part) {
+  return (SOURCE_LABELS[part.source] || part.source) +
+    (part.provider && part.provider.toLowerCase() !== String(part.source).toLowerCase() && part.source !== 'nordrouter' ? ' · ' + part.provider : '') +
+    ' · ' + bareModelId(part.model || '—');
+}
 function renderBucketDetails(row, cell, body) {
   node('div', row.token_scope + ' tokens', cell).className = 'cost-kind';
   var usage = row.bucket_usage;
   if (!usage) {
+    // A bucket_comparison without router observation still has agent rows from
+    // different routes (e.g. codex direct vs omniroute API): split them per
+    // provider so the summed total stays checkable.
+    var routeLines = routeBreakdown(row.contributors || []);
+    if (routeLines.length > 1) {
+      var detail = node('details', undefined, cell);
+      node('summary', routeLines.length + ' sources', detail);
+      routeLines.forEach(function (agg) {
+        var part = agg.part;
+        node('div', partLabel(part) + ' · ' + tokens(agg.tokens) + ' tok · ' +
+          money(number(agg.cost) ? agg.cost : part.cost_usd), detail).className = 'src part';
+      });
+    }
     node('div', 'No retained router observation.', cell).className = 'src';
     return;
   }

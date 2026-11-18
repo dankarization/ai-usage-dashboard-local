@@ -720,6 +720,10 @@ const mergedFixture = { ...MODELS, models: [
     totals: { total: 765432, input: 70 }, cost_usd: 9, daily: [] },
   { source: 'hermes', provider: 'nordrouter', model: 'z-ai/glm-5.3',
     totals: { total: 111222, input: 30 }, cost_usd: null, daily: [] },
+  { source: 'openclaw', provider: 'openai', model: 'gpt-6.1-terra', model_key: 'gpt-6.1-terra',
+    totals: { total: 433127250 }, cost_usd: 40.94, daily: [] },
+  { source: 'openclaw', provider: 'omniroute', model: 'oai/gpt-6.1-terra', model_key: 'gpt-6.1-terra',
+    bucket_comparison: true, totals: { total: 304960077 }, cost_usd: null, overview_cost_usd: 27.56, daily: [] },
   { source: 'nordrouter', provider: 'nordrouter', model: 'google/gemini-3.6-flash',
     totals: { total: 42 }, cost_usd: 0.000012, daily: [] },
   { source: 'openclaw', provider: 'nordrouter', model: 'unmatched-route',
@@ -729,7 +733,7 @@ const mergedFixture = { ...MODELS, models: [
 ] };
 const originalRows = JSON.stringify(mergedFixture.models);
 renderModels(mergedFixture);
-assertEqual(registry.get('models').children.length, 4, 'matched route becomes one billed row');
+assertEqual(registry.get('models').children.length, 5, 'matched route becomes one billed row (terra merges into one)');
 const rowFor = (name) => registry.get('models').children.find((row) =>
   all(row.children[1]).some((e) => e.classList.contains('model-name') && e.textContent === name));
 const matchedRow = rowFor('glm-5.3');
@@ -742,6 +746,17 @@ assertEqual(billedParts.length, 3, 'every reporting source gets its own line');
 assertEqual(billedParts[billedParts.length - 1].textContent,
   'NordRouter · glm-5.3 · unknown · $2.19 billed',
   'the account figure is listed last and claims no token count: it already includes the agents');
+const terraRow = registry.get('models').children.find((row) => row.textContent.includes('gpt-6.1-terra'));
+assert(terraRow, 'terra row exists in the table');
+const terraDetail = all(terraRow.children[1]).find((e) => e.tagName === 'DETAILS');
+assert(terraDetail, 'terra bucket-comparison row has a per-route drilldown');
+if (terraDetail.listeners.toggle && terraDetail.listeners.toggle[0]) terraDetail.listeners.toggle[0]();
+const terraParts = all(terraRow.children[1]).filter((e) => e.classList.contains('part'));
+assertEqual(terraParts.length, 2, 'terra drilldown splits direct codex and omniroute API routes');
+assert(terraParts.some((e) => e.textContent.includes('openai') && e.textContent.includes('433.1M')),
+  'direct codex route line carries its own tokens');
+assert(terraParts.some((e) => e.textContent.includes('omniroute') && e.textContent.includes('305.0M')),
+  'omniroute API route line carries its own tokens');
 assertEqual(struck.length, 1, 'one crossed-out figure per model, not one per agent');
 assertEqual(struck[0].textContent, '876.7K', 'the crossed-out figure sums every agent report');
 assert(matchedRow.children[6].textContent.endsWith('1.2M'), 'direct tokens use compact formatting');
