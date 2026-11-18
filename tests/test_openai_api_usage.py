@@ -1,6 +1,7 @@
 """OpenAI billing stays separate from gross token usage and subscription quotas."""
 import io
 import json
+from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -117,16 +118,64 @@ def test_session_request_keeps_secret_out_of_output(monkeypatch):
     monkeypatch.setattr(provider, '_billing_session', lambda: {
         'session_key': 'private-session-test', 'organization_id': 'org-example',
         'organization_name': 'Example'})
+    monkeypatch.setattr(provider, '_effective_session_key', lambda s: s)
     def respond(request, **kwargs):
         assert request.get_header('Authorization') == 'Bearer private-session-test'
-        assert request.get_header('Openai-organization') == 'org-example'
+        # Org header must NOT be sent: the dashboard endpoint rejects the
+        # session key when an explicit OpenAI-Organization header is present.
+        assert request.get_header('Openai-organization') is None
         return io.StringIO(json.dumps({'total_granted': 1, 'total_used': 0, 'total_available': 1,
                                       'total_paid_available': 0}))
     monkeypatch.setattr(provider, 'urlopen', respond)
     row = provider.export_openai_api_quota()[0]
     assert row['billing']['purchased_balance_usd'] == 0
     assert row['billing']['organization_name'] == 'Example'
+    assert row['billing']['organization_id'] == 'org-example'
     assert 'private-session-test' not in json.dumps(row)
+
+
+def test_effective_session_key_skips_refresh_when_fresh(monkeypatch):
+    fresh = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    session = {'session_key': 'k', 'session_key_refreshed_at': fresh}
+    monkeypatch.setattr(provider, '_refresh_oauth_token', lambda *a: (_ for _ in ()).throw(AssertionError('must not refresh')))
+    assert provider._effective_session_key(session) == session
+
+
+def test_effective_session_key_refreshes_oauth_then_session(monkeypatch, tmp_path):
+    path = tmp_path / 's.json'
+    path.write_text(json.dumps({'session_key': 'old', 'oauth_refresh_token': 'rt',
+                                'session_key_refreshed_at': '2020-01-01T00:00:00+00:00'}))
+    path.chmod(0o600)
+    monkeypatch.setenv('OPENAI_BILLING_SESSION_FILE', str(path))
+    monkeypatch.delenv('OPENAI_BILLING_SESSION_KEY', raising=False)
+    calls = []
+    monkeypatch.setattr(provider, '_refresh_oauth_token', lambda s, now: calls.append('oauth') or {
+        'oauth_access_token': 'new-access', 'oauth_refresh_token': 'new-rt', 'oauth_expires_at': '2030-01-01T00:00:00+00:00'})
+    monkeypatch.setattr(provider, '_exchange_for_session_key', lambda at: calls.append('mint') or {
+        'session_key': 'new-key', 'session_key_refreshed_at': '2026-11-18T00:00:00+00:00', 'organization_id': 'org-x'})
+    out = provider._effective_session_key(provider._billing_session())
+    assert calls == ['oauth', 'mint']
+    assert out['session_key'] == 'new-key'
+    saved = json.loads(path.read_text())
+    assert saved['session_key'] == 'new-key'
+    assert saved['oauth_refresh_token'] == 'new-rt'
+    assert (path.stat().st_mode & 0o077) == 0
+
+
+def test_refresh_oauth_token_uses_form_without_auth0_client_header(monkeypatch):
+    session = {'oauth_refresh_token': 'rt-test', 'oauth_expires_at': '2020-01-01T00:00:00+00:00'}
+    seen = {}
+    def respond(request, **kwargs):
+        seen['ctype'] = request.get_header('Content-type')
+        seen['auth0'] = request.get_header('Auth0-client')
+        seen['body'] = request.data.decode()
+        return io.StringIO(json.dumps({'access_token': 'a', 'refresh_token': 'r2', 'expires_in': 864000}))
+    monkeypatch.setattr(provider, 'urlopen', respond)
+    out = provider._refresh_oauth_token(session, datetime.now(timezone.utc))
+    assert out and out['oauth_access_token'] == 'a'
+    assert seen['ctype'] == 'application/x-www-form-urlencoded'
+    assert seen['auth0'] is None
+    assert 'grant_type=refresh_token' in seen['body']
 
 
 def test_grant_dates_are_not_subscription_reset_or_funding_identity(monkeypatch, credential):
