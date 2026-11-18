@@ -89,7 +89,7 @@ class AccountMetrics(BaseModel):
     billing: Optional[dict] = Field(default=None, description="OpenAI API billing evidence; null funding/cycle fields mean unknown, never zero. Aggregate credits are not a subsidy allocation.")
     account: Optional[str] = Field(default=None, description='Stable Codex profile identity: codex_1 or codex_2.')
     account_label: Optional[str] = Field(default=None, description='Display name of the local Codex profile, when available.')
-    plan_type: Optional[Literal['prolite', 'pro', 'pro500', 'plus']] = Field(default=None, description='Explicit Codex plan_type from the existing ChatGPT wham/usage response; unknown or historical fallback plans are omitted. Generic pro does not imply pro500.')
+    plan_type: Optional[str] = Field(default=None, description='Plan label: Codex values (prolite/pro/pro500/plus) or provider plan names like Mistral INDIVIDUAL/FREE.')
     status: Optional[str] = Field(default=None, description='ok, stale, unavailable, or not_configured.')
     balance_usd: Optional[float] = Field(default=None, description='NordRouter prepaid balance in USD.')
     spend_today_usd: Optional[float] = Field(default=None, description='Today spend on the provider day-window basis; see today_basis and today_complete.')
@@ -129,6 +129,8 @@ class AutomationQuotaSnapshot(AccountMetrics):
     usage: Optional[int] = Field(default=None, description='Absolute count already used when the upstream provider exposes it.')
     remaining: Optional[int] = Field(default=None, description='Absolute count remaining when the upstream provider exposes it.')
     product_usage: Optional[list[dict]] = Field(default=None, description='Grok provider-defined product enum and usage_percent pairs; not token counts or separate limits.')
+    windows: Optional[list[dict]] = Field(default=None, description='Provider-specific extra windows/details (e.g. Mistral subscription per-account plan, payg flags, org id).')
+    detail: Optional[dict] = Field(default=None, description='Provider-specific extra fields (e.g. Mistral subscription account details).')
 
 
 class QuotasResponse(BaseModel):

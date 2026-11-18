@@ -711,9 +711,11 @@ function renderMistral(rows) {
     if (plan) node('span', plan, head).className = 'plan-label';
     var chip = node('span', statusText(effectiveStatus(group)), head);
     chip.className = 'chip ' + statusClass(effectiveStatus(group));
-    var d = (group.windows[0] && group.windows[0].detail) || {};
+    var d = (group.windows[0] && (group.windows[0].detail || group.detail)) || {};
+    if (group.plan_type) node('span', group.plan_type.charAt(0) + group.plan_type.slice(1).toLowerCase(), head).className = 'plan-label';
     if (d.payg_enabled) node('p', 'Pay-as-you-go enabled', card).className = 'note';
     if (d.vibe_payg_enabled) node('p', 'Vibe pay-as-you-go enabled', card).className = 'note';
+    if (d.email) node('p', d.email, card).className = 'note';
     if (d.organization_id) node('p', 'Org ' + d.organization_id, card).className = 'note';
   });
 }
