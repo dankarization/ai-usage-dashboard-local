@@ -108,6 +108,7 @@ h3{font-size:12px;margin:0 0 var(--s2);font-weight:600;color:var(--muted)}
 .quota-title{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--text)}
 .brandmark{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;flex:none;color:var(--text)}
 .brandmark.codex{color:#10a37f}
+.brandmark.mistral{color:#ff7000}
 .brandmark svg{display:block;width:24px;height:24px;fill:currentColor}
 .plan-label{font-size:11px;font-weight:400;color:var(--muted);margin-left:auto}
 .plan-label + .chip{margin-left:0}
@@ -264,6 +265,11 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     <div class="panel flat"><div id="openai-api"></div></div>
   </section>
 
+  <section aria-labelledby="h-mistral">
+    <div class="sec-head"><h2 id="h-mistral" class="quota-title"><span id="mistral-brand"></span>Mistral (subscription)</h2></div>
+    <div class="panel flat"><div id="mistral-sub"></div></div>
+  </section>
+
   <section aria-labelledby="h-nord">
     <div class="sec-head"><h2 id="h-nord">NordRouter</h2></div>
     <div class="panel">
@@ -390,7 +396,7 @@ function snapshotLabel(utc, fallback) {
 }
 function providerName(provider) {
   var key = String(provider || 'unknown');
-  var known = { codex: 'Codex', grok: 'Grok', grok_bot: 'Grok Bot', glm: 'GLM', ollama: 'Ollama', claude: 'Claude',
+  var known = { codex: 'Codex', grok: 'Grok', grok_bot: 'Grok Bot', glm: 'GLM', ollama: 'Ollama', claude: 'Claude', mistral: 'Mistral', mistral_subscription: 'Mistral', openai_api: 'OpenAI API',
                 antigravity: 'Antigravity', cursor: 'Cursor', nordrouter: 'NordRouter' };
   if (known[key]) return known[key];
   return key.charAt(0).toUpperCase() + key.slice(1);
@@ -444,7 +450,7 @@ function brandMark(provider, parent) {
     tile.append(svg);
     return tile;
   }
-  var marks = { nordrouter: 'NR', glm: 'Z', ollama: 'OL',
+  var marks = { nordrouter: 'NR', glm: 'Z', ollama: 'OL', mistral: 'MI',
                 claude: 'CC', antigravity: 'AG', cursor: 'CU' };
   tile.textContent = marks[key] || key.slice(0, 2).toUpperCase();
   return tile;
@@ -628,7 +634,7 @@ function groupQuotas(rows) {
 /* Quota section order the user asked for: Codex accounts first (account 1,
    then account 2, each showing configured or unconfigured state), then Grok,
    then any remaining providers. NordRouter renders in its own section. */
-var QUOTA_ORDER = ['codex', 'grok', 'openai_api'];
+var QUOTA_ORDER = ['codex', 'grok', 'openai_api', 'mistral_subscription'];
 function orderGroups(groups) {
   return groups.slice().sort(function (a, b) {
     var ia = QUOTA_ORDER.indexOf(a.provider);
@@ -683,6 +689,35 @@ function renderOpenaiApi(rows) {
   });
 }
 
+function renderMistral(rows) {
+  var root = $('mistral-sub');
+  if (!root) return;
+  root.replaceChildren();
+  var mark = $('mistral-brand');
+  if (mark) { mark.replaceChildren(); brandMark('mistral', mark); }
+  if (!rows.length) {
+    node('p', 'No Mistral accounts configured (OmniRoute container with Mistral API keys required).', root).className = 'empty';
+    return;
+  }
+  orderGroups(groupQuotas(rows)).forEach(function (group) {
+    var card = node('div', undefined, root);
+    card.className = 'limit-group';
+    card.setAttribute('data-provider', 'mistral_subscription');
+    var head = node('div', undefined, card); head.className = 'limit-head';
+    brandMark('mistral', head);
+    node('span', 'Mistral', head).className = 'pname';
+    if (group.account_label) node('span', group.account_label, head).className = 'acct';
+    var plan = group.plan_type ? group.plan_type.charAt(0) + group.plan_type.slice(1).toLowerCase() : null;
+    if (plan) node('span', plan, head).className = 'plan-label';
+    var chip = node('span', statusText(effectiveStatus(group)), head);
+    chip.className = 'chip ' + statusClass(effectiveStatus(group));
+    var d = (group.windows[0] && group.windows[0].detail) || {};
+    if (d.payg_enabled) node('p', 'Pay-as-you-go enabled', card).className = 'note';
+    if (d.vibe_payg_enabled) node('p', 'Vibe pay-as-you-go enabled', card).className = 'note';
+    if (d.organization_id) node('p', 'Org ' + d.organization_id, card).className = 'note';
+  });
+}
+
 function renderQuotas(data, models, pending) {
   [['codex', 'codex-brand'], ['grok', 'grok-brand']].forEach(function (pair) {
     var holder = $(pair[1]);
@@ -704,7 +739,9 @@ function renderQuotas(data, models, pending) {
 
   renderOpenaiApi(rows.filter(function (row) { return row.provider === 'openai_api'; }));
 
-  var others = rows.filter(function (row) { return row.provider !== 'nordrouter' && row.provider !== 'codex' && row.provider !== 'openai_api'; });
+  renderMistral(rows.filter(function (row) { return row.provider === 'mistral_subscription'; }));
+
+  var others = rows.filter(function (row) { return row.provider !== 'nordrouter' && row.provider !== 'codex' && row.provider !== 'openai_api' && row.provider !== 'mistral_subscription'; });
   if (!others.length) {
     node('p', pending && (pending.grok || pending.grok_bot) ? 'Loading provider quotas…' :
       'No Grok or other quota snapshots available.', root).className = 'empty';

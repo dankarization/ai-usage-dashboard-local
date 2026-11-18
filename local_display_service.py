@@ -14,6 +14,7 @@ from dashboard_page import DASHBOARD_HTML
 
 from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_all_codex_quotas, load_env
 import openai_api_usage
+import mistral_subscription
 import grok_usage
 import auto_usage
 from source_cache import SourceCache
@@ -127,7 +128,7 @@ def token_usage_json() -> dict[str, Any]:
     summary="Return current provider quota windows",
     description="Without source, returns the cached automation view without refreshing. source=codex, grok, grok_bot, or openai_api reads only that provider independently, with bounded 30-second single-flight caching and original snapshot times.",
 )
-def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = 'all', response: Response = None) -> dict[str, Any]:
+def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api', 'mistral_subscription'] = 'all', response: Response = None) -> dict[str, Any]:
     global _cached_payload
     if source == 'all':
         payload = _cached_payload
@@ -142,6 +143,8 @@ def quotas(source: Literal['all', 'codex', 'grok', 'grok_bot', 'openai_api'] = '
         def collect():
             if source == 'openai_api':
                 snapshots = openai_api_usage.export_openai_api_quota()
+            elif source == 'mistral_subscription':
+                snapshots = mistral_subscription.export_mistral_subscription()
             elif source == 'codex':
                 snapshots = load_all_codex_quotas()
             else:

@@ -35,6 +35,7 @@ import grok_usage as _grok_usage
 import hermes_usage as _hermes_usage
 import nordrouter_usage as _nordrouter_usage
 import omniroute_usage as _omniroute_usage
+import mistral_subscription as _mistral_subscription
 from pricing_config import get_pricing, calc_cost, estimate_api_tokens, API_PRICE_BASIS
 
 plt.rcParams['axes.unicode_minus'] = False
@@ -2518,7 +2519,8 @@ def build_latest_dashboard_payload(days: int = 30, *, no_cost: bool = False, ski
             grok_bot_quota = cast(list[QuotaSnapshot], _grok_usage.export_grok_bot_quota(grok_cookie))
         except Exception as e:
             print(f"Failed to fetch Grok Bot quota: {type(e).__name__}")
-    quotas = cast(list[QuotaSnapshot], _openai_api_usage.export_openai_api_quota()) + glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + grok_bot_quota + cursor_quota
+    mistral_quota: list[QuotaSnapshot] = cast(list[QuotaSnapshot], _mistral_subscription.export_mistral_subscription())
+    quotas = cast(list[QuotaSnapshot], _openai_api_usage.export_openai_api_quota()) + glm_quota_to_unified(glm_quota) + ollama_quota + codex_quota + claude_quota + antigravity_quota + grok_quota + grok_bot_quota + cursor_quota + mistral_quota
     if nordrouter:
         quotas.append(_nordrouter_usage.quota(nordrouter))
 
