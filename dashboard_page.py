@@ -266,7 +266,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   </section>
 
   <section aria-labelledby="h-mistral">
-    <div class="sec-head"><h2 id="h-mistral" class="quota-title"><span id="mistral-brand"></span>Mistral (subscription)</h2></div>
+    <div class="sec-head"><h2 id="h-mistral" class="quota-title"><span id="mistral-brand"></span>Mistral</h2></div>
     <div class="panel flat"><div id="mistral-sub"></div></div>
   </section>
 
@@ -424,6 +424,16 @@ var BRAND_MARKS = {
       },
       {
         "d": "M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341",
+        "fill": "currentColor"
+      }
+    ]
+  },
+  "mistral": {
+    "label": "Mistral",
+    "viewBox": "0 0 80 57",
+    "paths": [
+      {
+        "d": "M45.7148 45.1582H57.1436V33.8691H45.7139L45.7148 45.1582H34.2852V33.8691H22.8574V45.1582H34.2852V56.4482H0V45.1582H11.4287V0H22.8574V11.29H34.2861V22.5791H45.7148V11.29H57.1436V0H68.5723V45.1582H80V56.4482H45.7148V45.1582Z",
         "fill": "currentColor"
       }
     ]
@@ -696,7 +706,7 @@ function renderMistral(rows) {
   var mark = $('mistral-brand');
   if (mark) { mark.replaceChildren(); brandMark('mistral', mark); }
   if (!rows.length) {
-    node('p', 'No Mistral accounts configured (OmniRoute container with Mistral API keys required).', root).className = 'empty';
+    node('p', 'No Mistral accounts configured.', root).className = 'empty';
     return;
   }
   orderGroups(groupQuotas(rows)).forEach(function (group) {
@@ -704,19 +714,49 @@ function renderMistral(rows) {
     card.className = 'limit-group';
     card.setAttribute('data-provider', 'mistral_subscription');
     var head = node('div', undefined, card); head.className = 'limit-head';
-    brandMark('mistral', head);
-    node('span', 'Mistral', head).className = 'pname';
-    if (group.account_label) node('span', group.account_label, head).className = 'acct';
-    var plan = group.plan_type ? group.plan_type.charAt(0) + group.plan_type.slice(1).toLowerCase() : null;
+    var d = (group.windows[0] && (group.windows[0].detail || group.detail)) || {};
+    
+    // Email on the left
+    if (d.email) node('span', d.email, head).className = 'acct';
+    
+    // Plan and status on the right
+    var plan = d.plan || group.plan_type;
     if (plan) node('span', plan, head).className = 'plan-label';
     var chip = node('span', statusText(effectiveStatus(group)), head);
     chip.className = 'chip ' + statusClass(effectiveStatus(group));
-    var d = (group.windows[0] && (group.windows[0].detail || group.detail)) || {};
-    if (group.plan_type) node('span', group.plan_type.charAt(0) + group.plan_type.slice(1).toLowerCase(), head).className = 'plan-label';
+    
+    // Add subscription details as quota windows
+    if (d.api_allowance !== undefined && d.api_used !== undefined) {
+      var apiPct = d.api_usage_percent !== undefined ? d.api_usage_percent : 
+        (d.api_allowance > 0 ? Math.round(d.api_used / d.api_allowance * 100) : null);
+      if (apiPct !== null && !isNaN(apiPct)) {
+        windowRow(card, {
+          label: 'API',
+          used_percentage: apiPct,
+          status: apiPct >= 100 ? 'full' : (apiPct >= 80 ? 'danger' : (apiPct >= 50 ? 'warn' : 'ok')),
+          next_reset_time_ms: d.reset_time_ms,
+          next_reset_iso: d.reset_iso,
+        });
+      }
+    }
+    if (d.vibe_allowance !== undefined && d.vibe_used !== undefined) {
+      var vibePct = d.vibe_usage_percent !== undefined ? d.vibe_usage_percent : 
+        (d.vibe_allowance > 0 ? Math.round(d.vibe_used / d.vibe_allowance * 100) : null);
+      if (vibePct !== null && !isNaN(vibePct)) {
+        windowRow(card, {
+          label: 'Vibe',
+          used_percentage: vibePct,
+          status: vibePct >= 100 ? 'full' : (vibePct >= 80 ? 'danger' : (vibePct >= 50 ? 'warn' : 'ok')),
+          next_reset_time_ms: d.reset_time_ms,
+          next_reset_iso: d.reset_iso,
+        });
+      }
+    }
+    
     if (d.payg_enabled) node('p', 'Pay-as-you-go enabled', card).className = 'note';
     if (d.vibe_payg_enabled) node('p', 'Vibe pay-as-you-go enabled', card).className = 'note';
-    if (d.email) node('p', d.email, card).className = 'note';
     if (d.organization_id) node('p', 'Org ' + d.organization_id, card).className = 'note';
+    if (d.workspace_id) node('p', 'Workspace ' + d.workspace_id, card).className = 'note';
   });
 }
 

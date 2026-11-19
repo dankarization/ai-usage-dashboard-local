@@ -8,7 +8,8 @@ import mistral_subscription as provider
 def test_not_configured_without_container(monkeypatch):
     monkeypatch.delenv("OMNIROUTE_USAGE_CONTAINER", raising=False)
     monkeypatch.setattr(provider, "_container_exists", lambda: False)
-    rows = provider.export_mistral_subscription()
+    # Disable Chrome method and saved cookies for tests
+    rows = provider.export_mistral_subscription(use_chrome=False, use_saved_cookies=False)
     assert rows[0]["provider"] == "mistral_subscription"
     assert rows[0]["status"] == "not_configured"
 
@@ -24,7 +25,8 @@ def test_parses_accounts_from_container_output(monkeypatch):
     ]
     completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps(payload) + "\n", stderr="")
     monkeypatch.setattr(provider.subprocess, "run", lambda *a, **k: completed)
-    rows = provider.export_mistral_subscription()
+    # Disable Chrome method and saved cookies for tests
+    rows = provider.export_mistral_subscription(use_chrome=False, use_saved_cookies=False)
     assert len(rows) == 2
     assert rows[0]["account_label"] == "a@b.c"
     assert rows[0]["plan_type"] == "INDIVIDUAL"
@@ -39,5 +41,6 @@ def test_container_failure_is_unavailable(monkeypatch):
     monkeypatch.setenv("OMNIROUTE_USAGE_CONTAINER", "omniroute")
     completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom")
     monkeypatch.setattr(provider.subprocess, "run", lambda *a, **k: completed)
-    rows = provider.export_mistral_subscription()
+    # Disable Chrome method and saved cookies for tests
+    rows = provider.export_mistral_subscription(use_chrome=False, use_saved_cookies=False)
     assert rows[0]["status"] == "unavailable"
