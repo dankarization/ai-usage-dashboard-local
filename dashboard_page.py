@@ -281,6 +281,20 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
     </div>
   </section>
 
+  <section aria-labelledby="h-refuseless">
+    <div class="sec-head"><h2 id="h-refuseless">Refuseless</h2></div>
+    <div class="panel">
+      <div id="refuseless-metrics" class="nr-grid"></div>
+      <div class="two-col">
+        <div><h3>Top-5 models today · estimated</h3><div id="refuseless-today"></div></div>
+        <div><h3>Top-5 models · available period · estimated</h3><div id="refuseless-period"></div></div>
+      </div>
+      <h3>Usage History · UTC · available period</h3>
+      <div id="refuseless-history" class="scroll"></div>
+      <p id="refuseless-note" class="note">Loading Refuseless telemetry…</p>
+    </div>
+  </section>
+
   <section aria-labelledby="h-history">
     <div class="sec-head history-head"><h2 id="h-history">Usage history</h2><button id="history-scale" class="btn history-scale" type="button" aria-pressed="false">Scale: linear</button></div>
     <div class="panel">
@@ -830,6 +844,40 @@ function topModels(id, rows) {
       var name = node('span', row.id || 'Unknown', item); name.className = 'id'; name.title = row.id || 'Unknown';
       node('span', usd(row.amount_usd) + ' · ' + tokens(row.tokens) + ' tok', item).className = 'amt';
     });
+}
+
+function renderRefuseless(data) {
+  var root = $('refuseless-metrics'); root.replaceChildren();
+  [['Spend today · estimated', data.today && data.today.amount_usd],
+   ['Available period · estimated', data.period && data.period.amount_usd]]
+    .forEach(function (pair) {
+      var box = node('div', undefined, root); box.className = 'nr-cell';
+      node('div', pair[0], box).className = 'k';
+      node('div', usd(pair[1]), box).className = 'v';
+    });
+  // No account balance/billed cards: retained logs cannot establish either.
+  topModels('refuseless-today', data.today && data.today.models);
+  topModels('refuseless-period', data.period && data.period.models);
+  var history = $('refuseless-history'); history.replaceChildren();
+  if (!(data.daily || []).length) node('p', 'No retained history available.', history).className = 'empty';
+  else {
+    var table = node('table', undefined, history);
+    var head = node('tr', undefined, node('thead', undefined, table));
+    ['Date (UTC)', 'Tokens', 'USD · estimated'].forEach(function (label) { node('th', label, head); });
+    var body = node('tbody', undefined, table);
+    data.daily.forEach(function (day) {
+      var tr = node('tr', undefined, body);
+      node('td', dateOnly(day.date), tr); node('td', tokens(day.tokens), tr); node('td', usd(day.amount_usd), tr);
+    });
+  }
+  $('refuseless-note').textContent = 'Source: OmniRoute · ' + data.status +
+    (data.start_date ? ' · ' + dateOnly(data.start_date) + ' – ' + dateOnly(data.end_date) : '') +
+    ' · fetched ' + time(data.fetched_at) + ' · ' + (data.limitations || 'Telemetry unavailable.');
+}
+function loadRefuseless() {
+  json('/api/v1/refuseless').then(renderRefuseless).catch(function () {
+    renderRefuseless({status: 'unavailable'});
+  });
 }
 
 /* ---------- summary ---------- */
@@ -2069,7 +2117,7 @@ function reload(force, nextDays) {
   });
 }
 
-$('refresh').addEventListener('click', function () { reload(true); });
+$('refresh').addEventListener('click', function () { loadRefuseless(); reload(true); });
 $('history-scale').addEventListener('click', function () {
   historyScale = historyScale === 'balanced' ? 'linear' : 'balanced';
   $('history-scale').textContent = 'Scale: ' + historyScale;
@@ -2093,8 +2141,9 @@ window.addEventListener('resize', function () {
   if (lastHistoryData) renderHistory(lastHistoryData);
 });
 setPeriodButtons();
+loadRefuseless();
 reload(false);
-setInterval(function () { reload(false); }, 5 * 60000);
+setInterval(function () { loadRefuseless(); reload(false); }, 5 * 60000);
 </script>
 </body>
 </html>'''

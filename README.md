@@ -144,3 +144,18 @@ the card labels them as saved snapshots, not fresh grant allocation. Entitlement
 is not treated as the prorated initial grant. Grant expiry is
 not treated as a recurring reset. Organization billing is deliberately not added
 to token history or overview totals, which already include local agent sessions.
+
+### Refuseless retained telemetry
+
+The separate Refuseless panel below NordRouter uses `/api/v1/refuseless`.
+It reuses `OMNIROUTE_USAGE_CONTAINER` and read-only aggregate queries. Only
+connections whose configured HTTPS endpoint is exactly `api.refuseless.com/v1`
+are admitted, joined by `connection_id`; model names never establish identity.
+It includes direct calls as well as combo serving attempts, over all retained
+history (independent of the main dashboard's 1/7/30-day selector). Deleted
+connections/history and historical endpoint changes cannot be reconstructed.
+Daily buckets and today are UTC. Costs are API-equivalent **estimated** amounts
+from the existing pricing table, not Refuseless tariffs or invoices. Missing
+prices or unreported tokens remain unknown; balance and billed spend are not
+available. This panel is non-additive to NordRouter and overview totals. The
+read-only aggregate cache is isolated and refreshed at most every five minutes.

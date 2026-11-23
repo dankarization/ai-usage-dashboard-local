@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse
 from dashboard_page import DASHBOARD_HTML
 
 from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_all_codex_quotas, load_env
+import refuseless_usage
 import openai_api_usage
 import mistral_subscription
 import grok_usage
@@ -270,3 +271,9 @@ def antigravity_ingest(request: AntigravityIngestRequest) -> dict[str, Any]:
     if request.source:
         print(f"Antigravity ingest from {request.source}: received={result['received']} new={result['new']} dup={result['duplicate']} total={result['total_cache']}")
     return result
+
+
+@app.get("/api/v1/refuseless")
+def refuseless_summary() -> dict[str, Any]:
+    """Non-additive Refuseless-only retained telemetry, not billed costs."""
+    return refuseless_usage.collect()

@@ -71,7 +71,7 @@ class Element {
 }
 
 const registry = new Map();
-['openai-api', 'hero', 'quotas', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
+['refuseless-metrics', 'refuseless-today', 'refuseless-period', 'refuseless-history', 'refuseless-note', 'openai-api', 'hero', 'quotas', 'history', 'history-scale', 'codex', 'codex-brand', 'grok-brand', 'metrics', 'today', 'week', 'selected-top-label',
  'model-stamp', 'models', 'stamp', 'error', 'refresh', 'status',
  'period-30', 'period-7', 'period-1', 'overview-note', 'models-note'].forEach((id) => {
   registry.set(id, new Element('div'));
@@ -98,7 +98,7 @@ global.window = { innerWidth: 390, innerHeight: 844,
 let autoRefreshTick;
 global.setInterval = (fn) => { autoRefreshTick = fn; return 0; };
 const pendingFetches = [];
-global.fetch = (url, options) => new Promise((resolve, reject) => {
+global.fetch = (url, options) => url === '/api/v1/refuseless' ? Promise.resolve({ok:true,json:()=>Promise.resolve({status:'unavailable'})}) : new Promise((resolve, reject) => {
   pendingFetches.push({ url, options, resolve, reject });
 });
 
@@ -1765,3 +1765,12 @@ async function waitForReload() {
   await flush();
   console.log('OK: independent sources render progressively and preserve period/scale state');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
+
+renderRefuseless({status:'unavailable'});
+assert(registry.get('refuseless-metrics').textContent.includes('—'));
+assert(!registry.get('refuseless-metrics').textContent.includes('$0'));
+assert(!registry.get('refuseless-metrics').textContent.includes('Billed'));
+renderRefuseless({status:'ok', today:{amount_usd:0.5,models:[{id:'model-a',tokens:100,amount_usd:0.5}]},period:{amount_usd:1,models:[]},daily:[{date:'2026-11-23',tokens:100,amount_usd:null}]});
+assert(registry.get('refuseless-today').textContent.includes('model-a'));
+assert(registry.get('refuseless-history').textContent.includes('100'));
+assert(registry.get('refuseless-history').textContent.includes('—'));
