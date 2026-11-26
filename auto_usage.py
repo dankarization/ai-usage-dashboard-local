@@ -241,15 +241,10 @@ def classify_dsh_bucket(model_id: str) -> str:
     return classify_model_bucket(provider, model, include_glm=False)
 
 def load_env():
-    env_path = os.path.join(SCRIPT_DIR, '.env')
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    if key not in os.environ:
-                        os.environ[key] = value
+    # One loader shared with independent source collectors; preserve SCRIPT_DIR
+    # overrides and the existing environment-over-file precedence.
+    from project_config import load_env as load_project_env
+    load_project_env(Path(SCRIPT_DIR) / '.env')
 
 
 def configure_opencode_skill_path():

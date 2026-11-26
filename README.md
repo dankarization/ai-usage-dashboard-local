@@ -71,6 +71,7 @@ Enable only the sources you use:
 
 - **OpenClaw:** compatible committed agent usage caches and the [hourly collector](docs/openclaw-collection.md). No CLI/SDK is invoked by Dashboard.
 - **Hermes:** existing native profile databases; `HERMES_HOME` can override discovery.
+- **OpenCodex:** optional independent [local usage source](docs/opencodex-source.md), configured with other settings in `.env`; disabled by default, with a Mac-local CLI/file fallback. Never added to canonical overview without proven deduplication.
 - **Provider accounts:** optional keys/cookies and Codex profile settings listed in `.env.example`.
 - **OmniRoute:** optional `OMNIROUTE_USAGE_CONTAINER` plus `NORDROUTER_API_KEY`.
   Reuses an existing container with read-only aggregate queries; the dashboard

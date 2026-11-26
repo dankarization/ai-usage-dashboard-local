@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "upstream_sha": "667662903a6c139524506667d12656d9ad50fad0",
+  "source_id": "fixture-mac",
+  "start_date": "2026-11-23",
+  "end_date": "2026-11-23",
+  "windows": [
+    {
+      "date": "2026-11-23",
+      "response": {
+        "range": "all",
+        "surface": "all",
+        "since": 1795392000000,
+        "until": 1795478399999,
+        "customWindow": true,
+        "generatedAt": 1795478399999,
+        "summary": {
+          "requests": 3,
+          "attemptCount": 3,
+          "measuredRequests": 3,
+          "reportedRequests": 3,
+          "unreportedRequests": 0,
+          "unsupportedRequests": 0,
+          "estimatedRequests": 0,
+          "totalTokens": 300,
+          "inputTokens": 240,
+          "outputTokens": 60,
+          "cachedInputTokens": 30,
+          "cacheReadInputTokens": 30,
+          "cacheCreationInputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "coverageRatio": 1,
+          "estimatedCostUsd": 0.001,
+          "pricedRequests": 3,
+          "unpricedRequests": 0,
+          "unmeteredRequests": 0,
+          "unresolvedSends": 0
+        },
+        "models": [
+          {
+            "provider": "openai",
+            "model": "gpt-5",
+            "requests": 1,
+            "attemptCount": 1,
+            "measuredRequests": 1,
+            "reportedRequests": 1,
+            "estimatedRequests": 0,
+            "totalTokens": 150,
+            "inputTokens": 130,
+            "outputTokens": 20,
+            "cachedInputTokens": 10,
+            "cacheReadInputTokens": 10,
+            "cacheCreationInputTokens": 0,
+            "shareRatio": 0.5
+          },
+          {
+            "provider": "private-route",
+            "model": "gpt-5",
+            "requests": 1,
+            "attemptCount": 1,
+            "measuredRequests": 1,
+            "reportedRequests": 1,
+            "estimatedRequests": 0,
+            "totalTokens": 90,
+            "inputTokens": 70,
+            "outputTokens": 20,
+            "cachedInputTokens": 10,
+            "cacheReadInputTokens": 10,
+            "cacheCreationInputTokens": 0,
+            "shareRatio": 0.3
+          },
+          {
+            "provider": "private-route",
+            "model": "alias/gpt-5",
+            "requests": 1,
+            "attemptCount": 1,
+            "measuredRequests": 1,
+            "reportedRequests": 1,
+            "estimatedRequests": 0,
+            "totalTokens": 60,
+            "inputTokens": 40,
+            "outputTokens": 20,
+            "cachedInputTokens": 10,
+            "cacheReadInputTokens": 10,
+            "cacheCreationInputTokens": 0,
+            "shareRatio": 0.2,
+            "hasUnresolvedRequestedModel": true
+          }
+        ],
+        "providers": [],
+        "apps": [],
+        "days": [],
+        "accounts": [
+          {
+            "accountLogLabel": "pool-demo",
+            "ambiguous": false,
+            "requests": 2,
+            "attemptCount": 2,
+            "measuredAttempts": 2,
+            "reportedAttempts": 2,
+            "estimatedAttempts": 0,
+            "unmeteredAttempts": 0,
+            "inputTokens": 200,
+            "outputTokens": 40,
+            "cacheReadInputTokens": 20,
+            "cacheCreationInputTokens": 0,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 240,
+            "usageCoverageRatio": 1,
+            "pricedAttempts": 2,
+            "unpricedAttempts": 0,
+            "priceCoverageRatio": 1
+          }
+        ],
+        "historyTruncated": false,
+        "truncatedPrefixBytes": 0,
+        "entriesTruncated": false,
+        "entriesDropped": 0,
+        "snapshotWindowStart": 1795392000000,
+        "snapshotWindowEnd": 1795478399999,
+        "filter": {
+          "provider": null,
+          "model": null,
+          "apiKeyId": null,
+          "matched": true,
+          "comboOverlap": false
+        }
+      }
+    }
+  ]
+}

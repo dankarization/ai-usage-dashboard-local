@@ -11,6 +11,7 @@ from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 
 from dashboard_page import DASHBOARD_HTML
+import opencodex_panel
 
 from auto_usage import build_latest_dashboard_payload, build_model_breakdown, ingest_antigravity_entries, load_all_codex_quotas, load_env
 import refuseless_usage
@@ -35,6 +36,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Read-only optional source. GETs never contact the Mac or run collection.
+opencodex_panel.install(app)
+
 _cached_payload: dict[str, Any] | None = None
 _payload_path = Path(__file__).resolve().parent / "token_usage_eink.json"
 _refresh_lock = threading.Lock()
@@ -46,7 +50,7 @@ _source_cache = SourceCache()
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/dashboard", response_class=HTMLResponse, summary="Local HTML dashboard")
 def dashboard() -> str:
-    return DASHBOARD_HTML
+    return opencodex_panel.extend(DASHBOARD_HTML)
 
 
 def _read_payload_from_disk() -> dict[str, Any] | None:
